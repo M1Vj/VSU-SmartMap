@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ph.edu.vsu.smartmap",
+      "sha256_cert_fingerprints": [
+        "1D:5F:1E:B9:91:3F:9F:62:30:37:CA:60:53:41:22:24:8F:33:3E:AF:BB:E1:03:AE:CF:1B:E4:31:D2:25:01:68",
+        "00:B2:D1:E3:B2:FE:68:34:99:87:0D:81:41:30:3B:EB:F7:19:9D:C9:3C:FE:6C:D6:1A:97:4A:28:7E:EA:26:59"
+      ]
+    }
+  }
+]

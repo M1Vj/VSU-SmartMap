@@ -1,0 +1,497 @@
+{
+  "source": "Organizer-provided schedule normalized for Campus SmartMap",
+  "generatedAt": "2026-02-09T04:54:40.813371",
+  "timezoneOffset": "+08:00",
+  "events": [
+    {
+      "title": "SOLIDARITY MEETING",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-08T14:00:00+08:00",
+      "endTime": "2026-02-08T16:00:00+08:00"
+    },
+    {
+      "title": "FUN RUN (faculty and staff)",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-09T05:00:00+08:00",
+      "endTime": "2026-02-09T05:30:00+08:00"
+    },
+    {
+      "title": "Advance Games: Ultimate Frisbee Baseball Softball",
+      "category": "sports",
+      "locationText": "Upper Oval Upper Court",
+      "startTime": "2026-02-09T05:30:00+08:00",
+      "endTime": "2026-02-09T14:00:00+08:00"
+    },
+    {
+      "title": "Parade and Opening Ceremony",
+      "category": "sports",
+      "locationText": "Lower Oval",
+      "startTime": "2026-02-09T14:00:00+08:00",
+      "endTime": "2026-02-09T16:00:00+08:00"
+    },
+    {
+      "title": "ATHLETICS",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "BASEBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-MEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C1",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-WOMEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C2",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "BEACH VOLLEYBALL",
+      "category": "sports",
+      "locationText": "VSU LIBRARY",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "CHESS",
+      "category": "sports",
+      "locationText": null,
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "DARTS",
+      "category": "sports",
+      "locationText": "RDE HALL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "FOOTBALL",
+      "category": "sports",
+      "locationText": "LOWER OVAL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "FRISBEE",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "FUTSAL",
+      "category": "sports",
+      "locationText": null,
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "M/W",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "SEPAK TAKRAW (M/W) VOLLEYBALL - MEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 1",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "SOFTBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "SWIMMING",
+      "category": "sports",
+      "locationText": "MOLAVE HILL",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "TABLE TENNIS (M/W) ARNIS",
+      "category": "sports",
+      "locationText": "VSU GYM CONVENTION",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "TAEKWONDO",
+      "category": "sports",
+      "locationText": null,
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "TENNIS (M/W)",
+      "category": "sports",
+      "locationText": "LOWER CAMPUS",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "VOLLEYBALL - WOMEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 2 Court near Apartelle",
+      "startTime": "2026-02-10T06:00:00+08:00",
+      "endTime": "2026-02-10T16:00:00+08:00"
+    },
+    {
+      "title": "LARO NG LAHI (student's category)",
+      "category": "sports",
+      "locationText": "LOWER OVAL",
+      "startTime": "2026-02-10T16:00:00+08:00",
+      "endTime": "2026-02-10T18:00:00+08:00"
+    },
+    {
+      "title": "G. MALAKAS at BB",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-10T18:00:00+08:00",
+      "endTime": "2026-02-10T20:00:00+08:00"
+    },
+    {
+      "title": "MAGANDA",
+      "category": "sports",
+      "locationText": null,
+      "startTime": "2026-02-10T18:00:00+08:00",
+      "endTime": "2026-02-10T20:00:00+08:00"
+    },
+    {
+      "title": "ARNIS",
+      "category": "sports",
+      "locationText": "CONVENTION",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "ATHLETICS",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "BADMINTON M/W",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "BASEBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-MEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C1",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-WOMEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C2",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "BEACH VOLLEYBALL",
+      "category": "sports",
+      "locationText": "Court near Apartelle",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "CHESS",
+      "category": "sports",
+      "locationText": "VSU LIBRARY",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "DARTS",
+      "category": "sports",
+      "locationText": "IHK 101",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "FOOTBALL",
+      "category": "sports",
+      "locationText": "LOWER OVAL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "FRISBEE",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "FUTSAL",
+      "category": "sports",
+      "locationText": "LOWER CAMPUS",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "SEPAK TAKRAW (M/W)",
+      "category": "sports",
+      "locationText": "UPPER COURT",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "SOFTBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "SWIMMING",
+      "category": "sports",
+      "locationText": "MOLAVE HILL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "TABLE TENNIS (M/W)",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "TAEKWONDO",
+      "category": "sports",
+      "locationText": "RDE HALL",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "TENNIS (M/W)",
+      "category": "sports",
+      "locationText": "LOWER CAMPUS",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "VOLLEYBALL - MEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 1",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "VOLLEYBALL - WOMEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 2",
+      "startTime": "2026-02-11T06:00:00+08:00",
+      "endTime": "2026-02-11T16:00:00+08:00"
+    },
+    {
+      "title": "Fun Games (faculty and staff)",
+      "category": "sports",
+      "locationText": "LOWER OVAL",
+      "startTime": "2026-02-11T16:00:00+08:00",
+      "endTime": "2026-02-11T18:00:00+08:00"
+    },
+    {
+      "title": "Song Festival and Dance Competition Part 1",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-11T18:00:00+08:00",
+      "endTime": "2026-02-11T20:00:00+08:00"
+    },
+    {
+      "title": "WALKATHON",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-12T05:00:00+08:00",
+      "endTime": "2026-02-12T06:00:00+08:00"
+    },
+    {
+      "title": "ARNIS",
+      "category": "sports",
+      "locationText": "CONVENTION",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "ATHLETICS",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "BADMINTON M/W",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "BASEBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-MEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C1",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "BASKETBALL-WOMEN",
+      "category": "sports",
+      "locationText": "UPPER CAMPUS C2",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "BEACH VOLLEYBALL",
+      "category": "sports",
+      "locationText": "Court near Apartelle",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "CHESS",
+      "category": "sports",
+      "locationText": "VSU LIBRARY",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "DAMA",
+      "category": "sports",
+      "locationText": "EB-SLH",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "DARTS",
+      "category": "sports",
+      "locationText": "IHK 101",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "FOOTBALL",
+      "category": "sports",
+      "locationText": "LOWER OVAL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "FRISBEE",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "FUTSAL",
+      "category": "sports",
+      "locationText": "LOWER CAMPUS",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "SEPAK TAKRAW (M/W)",
+      "category": "sports",
+      "locationText": "UPPER COURT",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "SOFTBALL",
+      "category": "sports",
+      "locationText": "UPPER OVAL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "SWIMMING",
+      "category": "sports",
+      "locationText": "MOLAVE HILL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "TABLE TENNIS (M/W)",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "TAEKWONDO",
+      "category": "sports",
+      "locationText": "RDE HALL",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "TENNIS (M/W)",
+      "category": "sports",
+      "locationText": "LOWER CAMPUS",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "VOLLEYBALL - MEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 1",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "VOLLEYBALL - WOMEN",
+      "category": "sports",
+      "locationText": "UPPER COURT 2",
+      "startTime": "2026-02-12T06:00:00+08:00",
+      "endTime": "2026-02-12T13:00:00+08:00"
+    },
+    {
+      "title": "AWARDING AND CLOSING CEREMONY",
+      "category": "sports",
+      "locationText": "VSU GYM",
+      "startTime": "2026-02-12T13:00:00+08:00",
+      "endTime": "2026-02-12T16:00:00+08:00"
+    }
+  ]
+}

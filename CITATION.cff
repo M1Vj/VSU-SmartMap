@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use Campus SmartMap in research or teaching, please cite this software."
+title: "Campus SmartMap for VSU"
+type: software
+authors:
+  - family-names: "Mabansag"
+    given-names: "Vj F."
+repository-code: "https://github.com/M1Vj/VSU-SmartMap"
+url: "https://vsumap.vercel.app"
+license: MIT
+version: 1.5.0
+date-released: 2026-07-16

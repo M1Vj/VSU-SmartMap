@@ -1,0 +1,470 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.map-popup-card .leaflet-popup-content-wrapper {
+  @apply p-0 overflow-hidden rounded-lg bg-popover text-popover-foreground border border-border/50;
+}
+
+.map-popup-card .leaflet-popup-tip {
+  @apply bg-popover border-l border-b border-border/50;
+}
+
+.map-popup-card .leaflet-popup-content {
+  @apply m-0 w-auto !important;
+}
+
+/* Leaflet injects `.leaflet-popup-content p { margin: 18px 0 }`, which bloats
+   our popup cards. Let component spacing (gap/mt) own the layout instead. */
+.map-popup-card .leaflet-popup-content p {
+  @apply m-0;
+}
+
+.map-popup-card a.leaflet-popup-close-button {
+  @apply hidden;
+  /* Hide default close button if we want to rely on map click or clean UI */
+}
+
+@layer base {
+  :root {
+    /* VSU Light Theme - Converted from hex codes in tailwind.config.ts */
+    --background: 84 20% 96%;
+    /* #F5F7F2 */
+    --foreground: 129 30% 8%;
+    /* #0F1C11 */
+    --card: 0 0% 100%;
+    /* #FFFFFF */
+    --card-foreground: 129 30% 8%;
+    /* #0F1C11 */
+    --popover: 0 0% 100%;
+    /* #FFFFFF */
+    --popover-foreground: 129 15% 26%;
+    /* #384C3B */
+    --primary: 144 38% 48%;
+    /* #4CA771 */
+    --primary-foreground: 0 0% 100%;
+    /* #FFFFFF */
+    --secondary: 100 20% 90%;
+    /* #E1E8DD */
+    --secondary-foreground: 129 30% 8%;
+    /* #0F1C11 */
+    --muted: 100 15% 86%;
+    /* #D8E0D4 */
+    --muted-foreground: 127 8% 45%;
+    /* #6B7C6D */
+    --accent: 44 90% 67%;
+    /* #F7D060 */
+    --accent-foreground: 129 30% 8%;
+    /* #0F1C11 */
+    --destructive: 3 72% 67%;
+    /* #E8726C */
+    --destructive-foreground: 0 0% 100%;
+    /* #FFFFFF */
+    --border: 100 15% 86%;
+    /* #D8E0D4 */
+    --input: 100 15% 86%;
+    /* #D8E0D4 */
+    --ring: 144 38% 48%;
+    /* #4CA771 */
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  .dark {
+    --background: 0 0% 13%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 16%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 13%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 70%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+@layer utilities {
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Hide scrollbar while keeping content scrollable */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    /* IE and Edge */
+    scrollbar-width: none;
+    /* Firefox */
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+    /* Chrome, Safari, Opera */
+  }
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+[data-radix-focus-guard]+* [data-state] {
+  outline: none;
+}
+
+/* Dialog Performance Optimizations */
+[data-radix-dialog-content] {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+[data-radix-dialog-overlay] {
+  will-change: opacity;
+}
+
+/* Leaflet map z-index override to prevent overlapping with modals and menus.
+   Scoped to containers with the map-wrapper class for targeted control. */
+.map-wrapper .leaflet-container,
+.coordinate-picker .leaflet-container,
+.location-picker .leaflet-container {
+  z-index: 0;
+}
+
+/* Map performance optimizations */
+.map-wrapper .leaflet-container {
+  will-change: transform;
+}
+
+.vsu-pin svg,
+.vsu-pin-dot svg {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Integrated Side Labels */
+.vsu-pin-with-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  pointer-events: none !important;
+  width: max-content;
+}
+
+.vsu-pin-label {
+  @apply font-bold text-[10px] leading-tight transition-opacity duration-200;
+  max-width: 120px;
+  white-space: normal;
+  text-align: left;
+  margin-left: -6px;
+  color: #000000;
+  /* Pure black for maximum contrast */
+  text-shadow:
+    -0.5px -0.5px 0 #fff,
+    0.5px -0.5px 0 #fff,
+    -0.5px 0.5px 0 #fff,
+    0.5px 0.5px 0 #fff;
+}
+
+.dark .vsu-pin-label {
+  color: #ffffff;
+  text-shadow:
+    -0.5px -0.5px 0 #000,
+    0.5px -0.5px 0 #000,
+    -0.5px 0.5px 0 #000,
+    0.5px 0.5px 0 #000;
+}
+
+.vsu-pin-container.pin-selected .vsu-pin-label {
+  @apply text-accent-foreground;
+  color: hsl(var(--accent-foreground));
+}
+
+.leaflet-zoom-anim .leaflet-zoom-animated {
+  transition: transform 0.03s ease-out !important;
+}
+
+.leaflet-marker-icon {
+  contain: layout style paint;
+  will-change: transform;
+}
+
+.leaflet-marker-pane {
+  contain: layout style;
+}
+
+/* User Location Marker Styles */
+.user-location-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.user-location-container {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-location-cone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
+  pointer-events: none;
+}
+
+.user-location-dot {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  background: #4285F4;
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow:
+    0 2px 6px rgba(66, 133, 244, 0.5),
+    0 0 0 rgba(66, 133, 244, 0.3);
+  z-index: 10;
+  animation: user-location-pulse 2s ease-out infinite;
+}
+
+.user-location-dot-inner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+
+@keyframes user-location-pulse {
+  0% {
+    box-shadow:
+      0 2px 6px rgba(66, 133, 244, 0.5),
+      0 0 0 0 rgba(66, 133, 244, 0.4);
+  }
+
+  70% {
+    box-shadow:
+      0 2px 6px rgba(66, 133, 244, 0.5),
+      0 0 0 12px rgba(66, 133, 244, 0);
+  }
+
+  100% {
+    box-shadow:
+      0 2px 6px rgba(66, 133, 244, 0.5),
+      0 0 0 0 rgba(66, 133, 244, 0);
+  }
+}
+
+.user-location-accuracy {
+  pointer-events: none;
+}
+
+/* Rounded scrollbars across pages and dialogs */
+body,
+[data-radix-scroll-area-viewport],
+.scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: hsla(var(--foreground), 0.3) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: hsla(var(--foreground), 0.28);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.dark *::-webkit-scrollbar-thumb {
+  background: hsla(var(--foreground), 0.35);
+}
+
+/* React Big Calendar Overrides for VSU Theme */
+.dark .rbc-calendar {
+  color: hsl(var(--foreground));
+}
+.dark .rbc-off-range-bg {
+  background: hsl(var(--muted) / 0.3);
+}
+.dark .rbc-header {
+  border-bottom-color: hsl(var(--border));
+}
+.dark .rbc-month-view, 
+.dark .rbc-time-view, 
+.dark .rbc-agenda-view {
+  border-color: hsl(var(--border));
+}
+.dark .rbc-day-bg + .rbc-day-bg {
+  border-left-color: hsl(var(--border));
+}
+.dark .rbc-month-row + .rbc-month-row {
+  border-top-color: hsl(var(--border));
+}
+.dark .rbc-today {
+  background-color: hsl(var(--accent) / 0.1);
+}
+.dark .rbc-event {
+  border: none;
+}
+.dark .rbc-toolbar button {
+  color: hsl(var(--foreground));
+}
+.dark .rbc-toolbar button:active, 
+.dark .rbc-toolbar button.rbc-active {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.dark .rbc-show-more {
+  color: hsl(var(--primary));
+}
+
+/* React Big Calendar: keep week/time events readable even when very narrow */
+.rbc-day-slot .rbc-event-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-wrap: normal;
+  overflow-wrap: normal;
+}
+
+.rbc-day-slot .rbc-event-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rbc-agenda-table tbody tr td {
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.rbc-agenda-date-cell {
+  vertical-align: top;
+  font-weight: 600;
+}
+
+.dark .rbc-agenda-date-cell {
+  background: hsl(var(--muted) / 0.25);
+  border-right: 1px solid hsl(var(--border));
+}
+
+/* Interactive tour (driver.js) — themed to match the app design tokens */
+.driver-popover.vsu-tour {
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 30px -10px hsl(var(--foreground) / 0.35);
+  max-width: 320px;
+}
+
+.driver-popover.vsu-tour .driver-popover-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.driver-popover.vsu-tour .driver-popover-description {
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.driver-popover.vsu-tour .driver-popover-progress-text {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+}
+
+.driver-popover.vsu-tour .driver-popover-footer button {
+  text-shadow: none;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.35rem 0.85rem;
+}
+
+.driver-popover.vsu-tour .driver-popover-next-btn {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border: 1px solid hsl(var(--primary));
+}
+
+.driver-popover.vsu-tour .driver-popover-next-btn:hover {
+  background-color: hsl(var(--primary) / 0.9);
+}
+
+.driver-popover.vsu-tour .driver-popover-prev-btn {
+  background-color: transparent;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+}
+
+.driver-popover.vsu-tour .driver-popover-close-btn {
+  color: hsl(var(--muted-foreground));
+}
+
+.driver-popover.vsu-tour .driver-popover-close-btn:hover {
+  color: hsl(var(--foreground));
+}
+
+.driver-popover.vsu-tour .driver-popover-arrow {
+  border-color: hsl(var(--card));
+}
