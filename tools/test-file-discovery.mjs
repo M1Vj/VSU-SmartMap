@@ -9,6 +9,11 @@ export function escapeNodeGlobPath(filePath) {
   return filePath.replaceAll("[", "[[]");
 }
 
+export function toNodeTestArgument(filePath, nodeMajorVersion) {
+  // Node 22+ expands --test arguments as globs. Node 20 expects literal paths.
+  return nodeMajorVersion >= 22 ? escapeNodeGlobPath(filePath) : filePath;
+}
+
 export async function collectTestFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(

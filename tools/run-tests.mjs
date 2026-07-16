@@ -2,10 +2,11 @@ import { spawn } from "node:child_process";
 
 import {
   collectTestFiles,
-  escapeNodeGlobPath,
+  toNodeTestArgument,
 } from "./test-file-discovery.mjs";
 
 const TEST_ROOTS = ["app", "components", "lib", "tools"];
+const nodeMajorVersion = Number.parseInt(process.versions.node, 10);
 
 const testFiles = (await Promise.all(TEST_ROOTS.map(collectTestFiles)))
   .flat()
@@ -23,7 +24,9 @@ const child = spawn(
     "--import",
     "tsx",
     "--test",
-    ...testFiles.map(escapeNodeGlobPath),
+    ...testFiles.map((filePath) =>
+      toNodeTestArgument(filePath, nodeMajorVersion),
+    ),
     ...process.argv.slice(2),
   ],
   { stdio: "inherit" },

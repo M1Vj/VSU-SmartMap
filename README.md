@@ -37,7 +37,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Genkit + Google Gemini for chat
 
 ## Requirements
-- Node.js 20+
+- Node.js 22+
 - npm 10+
 - Docker Desktop, Colima, or another Docker-compatible runtime
 - Supabase CLI (the project scripts run the pinned CLI with `npx`)
