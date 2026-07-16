@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "test": "node --experimental-test-module-mocks --import tsx --test \"app/**/*.test.ts\" \"components/**/*.test.ts\" \"components/**/*.test.tsx\" \"lib/**/*.test.ts\" \"lib/**/*.test.tsx\" \"tools/**/*.test.ts\"",
+    "test": "node tools/run-tests.mjs",
     "preview:offline": "NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next build && NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next start",
     "start": "next start",
     "db:start": "npx --yes supabase@2.107.0 start",
