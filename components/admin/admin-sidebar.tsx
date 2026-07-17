@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Building, Lightbulb, Bug, Info, Map, Globe, Route, Calendar, Brain, Home, Bell, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ThemeSwitcher } from '@/components/theme-switcher';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useMapStyle } from '@/lib/context/map-style-context';
@@ -36,16 +36,17 @@ function SidebarContent({ pathname, onClose }: { pathname: string; onClose: () =
     <div className="flex h-full flex-col bg-card text-card-foreground">
       {/* Brand Section */}
       <div className="flex items-center px-6 py-6">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Image
             src="/icons/icon-192x192.png?v=20260709"
-            alt="Campus SmartMap for VSU"
+            alt=""
             width={40}
             height={40}
-            className="rounded-lg"
+            className="h-10 w-10 shrink-0 rounded-lg"
+            unoptimized
             priority
           />
-          <div className="space-y-0.5">
+          <div className="min-w-0 space-y-0.5">
             <h1 className="text-lg font-bold tracking-tight">SmartMap</h1>
             <p className="text-xs font-medium text-muted-foreground">Admin Workspace</p>
           </div>
@@ -131,6 +132,7 @@ export function AdminSidebar({ open, onClose }: AdminSidebarProps) {
         <SheetTitle className="px-6 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Admin Navigation
         </SheetTitle>
+        <SheetDescription className="sr-only">Navigate the SmartMap admin workspace.</SheetDescription>
         <SidebarContent pathname={pathname} onClose={onClose} />
       </SheetContent>
     </Sheet>
