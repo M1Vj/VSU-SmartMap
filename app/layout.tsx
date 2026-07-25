@@ -11,7 +11,6 @@ import Script from "next/script";
 import { Analytics } from "@vercel/analytics/react";
 import { SyncProvider } from "@/components/providers/sync-provider";
 import { AppLoggingProvider } from "@/components/observability/app-logging-provider";
-import { ProjectDisclaimerDialog } from "@/components/project-disclaimer-dialog";
 import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo";
 import "./globals.css";
 
@@ -112,7 +111,6 @@ export default function RootLayout({
               <ServiceWorkerRegistration />
               <AppLoggingProvider />
               <SkipLink />
-              <ProjectDisclaimerDialog />
               {children}
             </SyncProvider>
             {shouldEnableVercelAnalytics && <Analytics />}
