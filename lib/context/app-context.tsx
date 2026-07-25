@@ -82,8 +82,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (urlCategory) {
       return urlCategory.split(",").filter(isValidCategory);
     }
-    // Default to academic and administrative if no URL param
-    return ["academic", "administrative"];
+    // Default to every category so a first-time visitor sees the whole campus
+    return [...VALID_CATEGORIES];
   });
 
   // Track if initial hydration from localStorage is complete
