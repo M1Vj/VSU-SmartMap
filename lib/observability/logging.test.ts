@@ -131,6 +131,29 @@ test("classifyLogEvent separates important events into actionable incidents", ()
   );
 });
 
+test("classifyLogEvent does not open incidents for environment conditions", () => {
+  // A phone losing signal on campus is not a defect. These used to match the
+  // warn + /offline/ rule and opened a MEDIUM incident every time.
+  for (const eventName of ["browser.offline", "browser.online", "pwa.service_worker_unavailable"]) {
+    assert.deepEqual(
+      classifyLogEvent({ source: "client", level: "warn", eventName, route: "/" }),
+      { shouldCreateIncident: false, severity: "LOW" },
+      `${eventName} should not open an incident`,
+    );
+  }
+
+  // The rule it is exempted from still applies to genuine failures.
+  assert.deepEqual(
+    classifyLogEvent({
+      source: "client",
+      level: "warn",
+      eventName: "upload.request_timeout",
+      route: "/",
+    }),
+    { shouldCreateIncident: true, severity: "MEDIUM" },
+  );
+});
+
 test("createIncidentFingerprint is stable while ignoring volatile context", () => {
   const first = createIncidentFingerprint({
     source: "client",
