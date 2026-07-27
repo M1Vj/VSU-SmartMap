@@ -115,6 +115,14 @@ function MapTab() {
   const [isBoardingLoading, setIsBoardingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Bumping this re-runs the initial load. Without it the only way out of the
+  // "Unable to load map data" overlay was for the student to reload the page.
+  const [reloadKey, setReloadKey] = useState(0);
+  const handleRetryLoad = useCallback(() => {
+    setError(null);
+    setIsLoading(true);
+    setReloadKey((value) => value + 1);
+  }, []);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [graphData, setGraphData] = useState<{ nodes: MapNode[]; edges: MapEdge[] }>({ nodes: [], edges: [] });
   const loadFiltersRef = useRef({ debouncedQuery, selectedCategories });
@@ -237,12 +245,23 @@ function MapTab() {
                getMapEdges()
              ]);
              
+             // These resolve to { data, error } rather than throwing, so a
+             // failed query used to fall straight through this branch: the
+             // catch never ran, the graph stayed empty, and directions were
+             // silently unavailable with no message and no retry.
+             if (nodesRes.error || edgesRes.error) {
+               throw nodesRes.error ?? edgesRes.error;
+             }
+
              if (nodesRes.data && edgesRes.data) {
                setGraphData(filterGraphToRoutingBoundary(nodesRes.data, edgesRes.data));
                await setCachedNavigationGraph(nodesRes.data, edgesRes.data);
              }
            } catch (e) {
              console.warn("Failed to sync navigation graph", e);
+             if (!cachedNav) {
+               toast.error("Directions are unavailable right now. The map still works.");
+             }
            }
         };
 
@@ -287,7 +306,7 @@ function MapTab() {
     };
 
     void load();
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     if (!items.length || !pendingFacilityId) return;
@@ -353,6 +372,7 @@ function MapTab() {
           }
           isLoading={isLoading}
           error={error}
+          onRetry={handleRetryLoad}
           selectedId={selectedBoardingHouse?.id ?? selectedFacility?.id ?? null}
           selectedFacility={selectedFacility} // Pass selectedFacility
           selectedBoardingHouse={selectedBoardingHouse}
@@ -406,6 +426,7 @@ function MapView({
   filtered,
   isLoading,
   error,
+  onRetry,
   selectedId,
   selectedFacility, // Receive selectedFacility prop
   selectedBoardingHouse,
@@ -418,6 +439,7 @@ function MapView({
   filtered: readonly MapItem[];
   isLoading: boolean;
   error: string | null;
+  onRetry: () => void;
   selectedId: string | null;
   selectedFacility: Facility | null; 
   selectedBoardingHouse: BoardingHouseMapItem | null;
@@ -797,10 +819,13 @@ function MapView({
       )}
 
       {error && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/60 backdrop-blur-sm">
-          <p className="text-sm text-destructive font-medium bg-destructive/10 px-4 py-2 rounded-md" role="alert">
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-background/60 px-4 backdrop-blur-sm">
+          <p className="max-w-sm rounded-md bg-destructive/10 px-4 py-2 text-center text-sm font-medium text-destructive" role="alert">
             {error}
           </p>
+          <Button type="button" variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
         </div>
       )}
     </div>
