@@ -202,9 +202,24 @@ export function sanitizeLogEventInput(input: LogEventInput): SanitizedLogEvent {
   };
 }
 
+// Conditions that describe the user's environment rather than a defect in the
+// app. They are still worth logging - connectivity gaps explain later failures -
+// but each one used to open a MEDIUM incident, so a student walking into a dead
+// spot filed a bug report. These names are exempt from incident creation at any
+// level.
+const ENVIRONMENT_EVENT_NAMES = new Set([
+  "browser.offline",
+  "browser.online",
+  "pwa.service_worker_unavailable",
+]);
+
 export function classifyLogEvent(
   event: Pick<LogEventInput, "source" | "level" | "eventName" | "statusCode" | "route">,
 ): { shouldCreateIncident: boolean; severity: IncidentSeverity } {
+  if (ENVIRONMENT_EVENT_NAMES.has(event.eventName)) {
+    return { shouldCreateIncident: false, severity: "LOW" };
+  }
+
   if (event.level === "fatal") {
     return { shouldCreateIncident: true, severity: "CRITICAL" };
   }
