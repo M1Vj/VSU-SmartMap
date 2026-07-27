@@ -152,6 +152,18 @@ test("classifyLogEvent does not open incidents for environment conditions", () =
     }),
     { shouldCreateIncident: true, severity: "MEDIUM" },
   );
+
+  // A service worker the browser refused is exempt, but a worker script we
+  // failed to ship is a broken deploy affecting everyone and must stay loud.
+  assert.deepEqual(
+    classifyLogEvent({
+      source: "client",
+      level: "error",
+      eventName: "pwa.service_worker_registration_failed",
+      route: "/",
+    }),
+    { shouldCreateIncident: true, severity: "HIGH" },
+  );
 });
 
 test("createIncidentFingerprint is stable while ignoring volatile context", () => {

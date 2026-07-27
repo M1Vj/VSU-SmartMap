@@ -85,6 +85,17 @@ export function ChatView() {
     }
   };
 
+  // Retries run through the same accounting, otherwise fail-then-retry would be
+  // an unmetered path around the daily limit.
+  const handleRetry = async () => {
+    if (isLimitReached || isAppOffline) return;
+
+    const answered = await retryLastMessage();
+    if (answered) {
+      increment();
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <ChatHeader onClear={clearMessages} hasMessages={hasMessages} />
@@ -123,7 +134,7 @@ export function ChatView() {
                     message={message}
                     onRetry={
                       message.isError && isLastAssistant
-                        ? retryLastMessage
+                        ? handleRetry
                         : undefined
                     }
                     onFollowUp={

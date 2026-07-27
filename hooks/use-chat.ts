@@ -352,12 +352,15 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
     });
   }, []);
 
-  const retryLastMessage = useCallback(() => {
+  // Also resolves true only on a delivered answer, so a retry is charged
+  // against the daily allowance exactly like a first attempt. Discarding this
+  // result would make fail-then-retry an unlimited free path.
+  const retryLastMessage = useCallback(async (): Promise<boolean> => {
     const lastUserMessage = [...state.messages]
       .reverse()
       .find((message) => message.role === "user");
 
-    if (!lastUserMessage) return;
+    if (!lastUserMessage) return false;
 
     const cleanedMessages = state.messages.filter(
       (msg) =>
@@ -375,7 +378,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
       timestamp: new Date(),
     };
 
-    void executeRequest(lastUserMessage.content, cleanedMessages, userMessage);
+    return executeRequest(lastUserMessage.content, cleanedMessages, userMessage);
   }, [state.messages, executeRequest]);
 
   return {
