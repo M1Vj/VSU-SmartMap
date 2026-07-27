@@ -30,6 +30,13 @@ type ClientLogInput = Omit<LogEventInput, "source" | "sessionId" | "breadcrumbs"
 
 let externalCapture: ((event: ClientLogInput) => void) | null = null;
 
+// Events raised before the provider's effect runs used to be dropped on the
+// floor. ServiceWorkerRegistration mounts above AppLoggingProvider in the
+// layout, so anything it reports during the first tick would never be seen.
+// Hold a small buffer instead and drain it once the provider is live.
+const PENDING_CAPTURE_LIMIT = 20;
+let pendingCaptures: ClientLogInput[] = [];
+
 function getOrCreateSessionId(): string {
   try {
     const existing = window.localStorage.getItem(SESSION_KEY);
@@ -76,15 +83,30 @@ function privacySafeInput(input: ClientLogInput): ClientLogInput {
   const errorType = typeof suppliedType === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(suppliedType)
     ? suppliedType
     : "Error";
+
+  // The error *message* stays out - it can carry anything the page put in it.
+  // The script location cannot: it is our own bundle URL plus two integers, and
+  // it is the difference between "Error captured" and a fixable stack frame.
+  // An empty source is itself the signal that the error was cross-origin, which
+  // is what every opaque "Script error." really means.
+  const source = typeof input.metadata?.source === "string" ? input.metadata.source : undefined;
+  const line = typeof input.metadata?.line === "number" ? input.metadata.line : undefined;
+  const column = typeof input.metadata?.column === "number" ? input.metadata.column : undefined;
+
   return {
     ...input,
     message: `${errorType} captured`,
-    metadata: { errorType },
+    metadata: { errorType, source, line, column },
   };
 }
 
 export function captureClientLogEvent(event: ClientLogInput): void {
-  externalCapture?.(event);
+  if (externalCapture) {
+    externalCapture(event);
+    return;
+  }
+
+  pendingCaptures = [...pendingCaptures, event].slice(-PENDING_CAPTURE_LIMIT);
 }
 
 export function AppLoggingProvider() {
@@ -99,6 +121,7 @@ export function AppLoggingProvider() {
   useEffect(() => {
     if (isLocalHostname(window.location.hostname)) {
       externalCapture = null;
+      pendingCaptures = [];
       return;
     }
 
@@ -182,6 +205,12 @@ export function AppLoggingProvider() {
 
     externalCapture = capture;
 
+    if (pendingCaptures.length > 0) {
+      const buffered = pendingCaptures;
+      pendingCaptures = [];
+      buffered.forEach(capture);
+    }
+
     const onClick = (event: MouseEvent) => {
       const { tag, action } = getElementContext(event.target);
       addBreadcrumb({
@@ -209,6 +238,9 @@ export function AppLoggingProvider() {
         message: "Browser error captured",
         metadata: {
           errorType: normalizeErrorReason(event.error).metadata.errorType ?? "ErrorEvent",
+          source: event.filename || undefined,
+          line: Number.isFinite(event.lineno) && event.lineno > 0 ? event.lineno : undefined,
+          column: Number.isFinite(event.colno) && event.colno > 0 ? event.colno : undefined,
         },
       });
     };
