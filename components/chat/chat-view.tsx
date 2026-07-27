@@ -77,8 +77,12 @@ export function ChatView() {
   const handleSendMessage = async (message: string) => {
     if (isLimitReached || isAppOffline) return;
 
-    increment();
-    await sendMessage(message);
+    // Charge the allowance only once an answer has arrived. Incrementing first
+    // meant six failed requests locked a student out having answered nothing.
+    const answered = await sendMessage(message);
+    if (answered) {
+      increment();
+    }
   };
 
   return (

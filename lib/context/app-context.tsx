@@ -55,6 +55,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 const DEBOUNCE_MS = 300;
 const CLOSE_GUARD_MS = 100;
 const VALID_CATEGORIES = Object.keys(FACILITY_CATEGORY_META) as FacilityCategory[];
+const CATEGORY_FILTER_STORAGE_KEY = "map-filters-v2";
 
 function isValidCategory(value: string | null): value is FacilityCategory {
   return value !== null && VALID_CATEGORIES.includes(value as FacilityCategory);
@@ -104,7 +105,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Only hydrate from localStorage if there's no URL category param on initial load
     const urlCategory = new URLSearchParams(window.location.search).get("category");
     if (!urlCategory) {
-      const stored = localStorage.getItem("map-filters");
+      // Versioned deliberately. Everyone who used the old build has the former
+      // academic+administrative default persisted, and a stored value wins over
+      // the default below - so without a new key the "show every category" fix
+      // would never reach a single returning student.
+      localStorage.removeItem("map-filters");
+      const stored = localStorage.getItem(CATEGORY_FILTER_STORAGE_KEY);
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
@@ -133,7 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Persist to local storage (only after hydration to avoid overwriting)
   useEffect(() => {
     if (isHydrated) {
-      localStorage.setItem("map-filters", JSON.stringify(selectedCategories));
+      localStorage.setItem(CATEGORY_FILTER_STORAGE_KEY, JSON.stringify(selectedCategories));
     }
   }, [selectedCategories, isHydrated]);
 
