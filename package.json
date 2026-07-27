@@ -97,7 +97,7 @@
     "@opentelemetry/sdk-node": "0.219.0",
     "@opentelemetry/sdk-trace-base": "2.8.0",
     "@opentelemetry/sdk-trace-node": "2.8.0",
-    "postcss": "8.5.15",
+    "postcss": "8.5.23",
     "qs": "6.15.2",
     "underscore": "1.13.8",
     "uuid": "11.1.1",
@@ -140,19 +140,19 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@next/bundle-analyzer": "16.2.9",
-    "@types/node": "^20",
+    "@next/bundle-analyzer": "16.2.12",
+    "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.9",
-    "genkit-cli": "^1.29.0",
-    "postcss": "8.5.15",
-    "tailwindcss": "^3.4.1",
+    "autoprefixer": "^10.5.4",
+    "eslint": "^10",
+    "eslint-config-next": "16.2.12",
+    "genkit-cli": "^1.40.1",
+    "postcss": "8.5.23",
+    "tailwindcss": "^4.3.3",
     "tailwindcss-animate": "^1.0.7",
-    "tsx": "^4.22.4",
-    "typescript": "^5"
+    "tsx": "^4.23.1",
+    "typescript": "^7"
   }
 }
