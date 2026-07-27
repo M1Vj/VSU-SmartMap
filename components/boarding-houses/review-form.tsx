@@ -69,6 +69,7 @@ function AuthenticatedReviewForm({
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [turnstileResetKey, setTurnstileResetKey] = useState(0);
+  const [captchaError, setCaptchaError] = useState<string | null>(null);
   const turnstileTokenRef = useRef<TurnstileToken | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -96,10 +97,20 @@ function AuthenticatedReviewForm({
 
   const handleTurnstileVerify = useCallback((payload: TurnstileToken) => {
     turnstileTokenRef.current = payload;
+    setCaptchaError(null);
   }, []);
 
   const handleTurnstileExpire = useCallback(() => {
     turnstileTokenRef.current = null;
+  }, []);
+
+  // Without this the widget failed silently and the only symptom was a submit
+  // button that never worked.
+  const handleTurnstileError = useCallback(() => {
+    turnstileTokenRef.current = null;
+    setCaptchaError(
+      "The verification check could not be completed. Reload the page and try again.",
+    );
   }, []);
 
   useEffect(() => {
@@ -183,9 +194,15 @@ function AuthenticatedReviewForm({
 
       <TurnstileWidget
         onVerify={handleTurnstileVerify}
+        onError={handleTurnstileError}
         onExpire={handleTurnstileExpire}
         resetSignal={turnstileResetKey}
       />
+      {captchaError && (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          {captchaError}
+        </p>
+      )}
 
       {state.error && (
         <p role="alert" className="text-sm font-medium text-destructive">
@@ -208,6 +225,7 @@ function AuthenticatedReviewForm({
 
 export function ReportForm({ listingId }: { listingId: string }) {
   const [turnstileResetKey, setTurnstileResetKey] = useState(0);
+  const [captchaError, setCaptchaError] = useState<string | null>(null);
   const turnstileTokenRef = useRef<TurnstileToken | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -230,10 +248,20 @@ export function ReportForm({ listingId }: { listingId: string }) {
 
   const handleTurnstileVerify = useCallback((payload: TurnstileToken) => {
     turnstileTokenRef.current = payload;
+    setCaptchaError(null);
   }, []);
 
   const handleTurnstileExpire = useCallback(() => {
     turnstileTokenRef.current = null;
+  }, []);
+
+  // Without this the widget failed silently and the only symptom was a submit
+  // button that never worked.
+  const handleTurnstileError = useCallback(() => {
+    turnstileTokenRef.current = null;
+    setCaptchaError(
+      "The verification check could not be completed. Reload the page and try again.",
+    );
   }, []);
 
   useEffect(() => {
@@ -273,9 +301,15 @@ export function ReportForm({ listingId }: { listingId: string }) {
 
       <TurnstileWidget
         onVerify={handleTurnstileVerify}
+        onError={handleTurnstileError}
         onExpire={handleTurnstileExpire}
         resetSignal={turnstileResetKey}
       />
+      {captchaError && (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          {captchaError}
+        </p>
+      )}
 
       {state.error && (
         <p role="alert" className="text-sm font-medium text-destructive">
