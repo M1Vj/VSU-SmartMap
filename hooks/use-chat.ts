@@ -258,7 +258,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                 : message
             ),
           }));
-          return;
+          return true;
         }
 
         const data = (await res.json()) as {
@@ -290,10 +290,11 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           messages: applyTruncation([...prev.messages, assistantMessage]),
           isLoading: false,
         }));
+        return true;
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
           setState((prev) => ({ ...prev, isLoading: false }));
-          return;
+          return false;
         }
 
         const errorMessage =
@@ -313,15 +314,18 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           isLoading: false,
           error: errorMessage,
         }));
+        return false;
       }
     },
     [streaming]
   );
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    // Resolves true only when an answer actually arrived. The daily allowance
+    // is charged against this, so a failed or aborted request must not count.
+    async (content: string): Promise<boolean> => {
       const trimmed = content.trim();
-      if (!trimmed) return;
+      if (!trimmed) return false;
 
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
@@ -333,7 +337,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
         timestamp: new Date(),
       };
 
-      await executeRequest(trimmed, state.messages, userMessage);
+      return executeRequest(trimmed, state.messages, userMessage);
     },
     [state.messages, executeRequest]
   );
