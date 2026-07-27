@@ -181,6 +181,26 @@ select:focus-visible,
 }
 
 /* Integrated Side Labels */
+
+/* A labelled pin's icon box is 300px wide to leave room for wrapped text (see
+   getPinAssetForCategory in lib/map/pins.ts), against 42px for an unlabelled
+   one. Leaflet puts .vsu-pin-container on the marker element itself, so that
+   whole box stayed interactive: it swallowed clicks, hovers and map drags
+   across a wide strip of empty map beside every label, and neighbouring pins
+   fought over each other's targets. Turn the box off and hand interactivity
+   back to just the pin and the text a user can actually see. */
+.vsu-pin-container {
+  pointer-events: none !important;
+  background: transparent;
+  border: 0;
+}
+
+.vsu-pin-with-label > svg,
+.vsu-pin-container .vsu-pin-label {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
 .vsu-pin-with-label {
   display: flex !important;
   align-items: center !important;
