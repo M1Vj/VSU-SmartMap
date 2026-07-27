@@ -47,30 +47,33 @@ export function MapSearchPanel({
     const doRoomSearch = async () => {
       // Try cache first for immediate (and offline) results
       const cachedRooms = await getCachedRooms();
-      if (cachedRooms && cachedRooms.length > 0) {
-        const ids = getRoomMatchedFacilityIds(cachedRooms, searchLower);
-        if (ids.size > 0) {
-          setRoomMatchFacilityIds(ids);
-          // If we found results in cache and we're offline, we're done
-          if (!navigator.onLine) return;
-        }
+      if (cancelled) return;
+
+      const cachedIds = cachedRooms && cachedRooms.length > 0
+        ? getRoomMatchedFacilityIds(cachedRooms, searchLower)
+        : new Set<string>();
+
+      if (cachedIds.size > 0) {
+        setRoomMatchFacilityIds(cachedIds);
+        // If we found results in cache and we're offline, we're done
+        if (!navigator.onLine) return;
       }
 
       const { data } = await searchRooms({ term: searchLower, includeFacility: true });
       if (cancelled) return;
 
-      if (data && data.length > 0) {
-        const ids = new Set<string>();
-        for (const room of data) {
-          const roomWithFacility = room as { facility_id?: string; facility?: { id?: string } };
-          const fid = roomWithFacility.facility?.id ?? roomWithFacility.facility_id;
-          if (fid) ids.add(fid);
-        }
-        setRoomMatchFacilityIds(ids);
-      } else if (!cachedRooms || cachedRooms.length === 0) {
-        // Only clear if we didn't have cache results either
-        setRoomMatchFacilityIds(new Set());
+      const remoteIds = new Set<string>();
+      for (const room of data ?? []) {
+        const roomWithFacility = room as { facility_id?: string; facility?: { id?: string } };
+        const fid = roomWithFacility.facility?.id ?? roomWithFacility.facility_id;
+        if (fid) remoteIds.add(fid);
       }
+
+      // Commit exactly one outcome for this query, the empty set included. The
+      // previous branch only cleared when the cache was empty too, so a warm
+      // cache that matched nothing for the current term left the previous
+      // query's building on the map as though it had matched.
+      setRoomMatchFacilityIds(remoteIds.size > 0 ? remoteIds : cachedIds);
     };
 
     const timer = setTimeout(() => void doRoomSearch(), 150);
