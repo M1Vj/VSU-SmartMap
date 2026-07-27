@@ -27,12 +27,28 @@ GRANT EXECUTE ON FUNCTION public.moderate_boarding_house_listing(UUID, TEXT, UUI
 
 -- CAPTCHA/rate-limited public writes are server-only. RLS alone cannot prove
 -- that a caller passed the application-layer abuse controls.
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.boarding_house_reports FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.boarding_house_reviews FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.suggestions FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.bug_reports FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.event_suggestions FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.submissions FROM anon, authenticated;
+DO $$
+DECLARE
+  relation_name TEXT;
+BEGIN
+  FOREACH relation_name IN ARRAY ARRAY[
+    'boarding_house_reports',
+    'boarding_house_reviews',
+    'suggestions',
+    'bug_reports',
+    'event_suggestions',
+    'submissions'
+  ]
+  LOOP
+    IF to_regclass(format('public.%I', relation_name)) IS NOT NULL THEN
+      EXECUTE format(
+        'REVOKE INSERT, UPDATE, DELETE ON TABLE public.%I FROM anon, authenticated',
+        relation_name
+      );
+    END IF;
+  END LOOP;
+END
+$$;
 
 -- Future migrations must grant API access only after enabling RLS and defining
 -- policies for the new object. Project migrations run as postgres; platform-
