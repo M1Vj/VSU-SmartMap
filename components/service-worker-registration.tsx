@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { getServiceWorkerMode, getServiceWorkerUrl } from "@/lib/pwa/service-worker";
+import { captureClientLogEvent } from "@/components/observability/app-logging-provider";
 
 export function ServiceWorkerRegistration() {
   useEffect(() => {
@@ -40,8 +41,21 @@ export function ServiceWorkerRegistration() {
 
     navigator.serviceWorker
       .register(serviceWorkerUrl)
-      .catch((error) => {
-        console.error("SW registration failed:", error);
+      .catch((error: unknown) => {
+        // Browsers reject this for reasons we do not control and cannot fix:
+        // private windows, blocked site data, iOS Lockdown Mode, shield
+        // extensions. The app degrades to online-only and still works, so this
+        // is an environment note, not a defect. Reporting it through
+        // console.error made it a HIGH incident 26 times over ten days,
+        // because console.error is patched into the incident pipeline below.
+        captureClientLogEvent({
+          level: "warn",
+          eventName: "pwa.service_worker_unavailable",
+          message: "Service worker registration was rejected by the browser",
+          metadata: {
+            errorType: error instanceof Error ? error.name || "Error" : typeof error,
+          },
+        });
       });
   }, []);
 
