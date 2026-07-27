@@ -42,20 +42,42 @@ export function ServiceWorkerRegistration() {
     navigator.serviceWorker
       .register(serviceWorkerUrl)
       .catch((error: unknown) => {
-        // Browsers reject this for reasons we do not control and cannot fix:
-        // private windows, blocked site data, iOS Lockdown Mode, shield
-        // extensions. The app degrades to online-only and still works, so this
-        // is an environment note, not a defect. Reporting it through
-        // console.error made it a HIGH incident 26 times over ten days,
-        // because console.error is patched into the incident pipeline below.
-        captureClientLogEvent({
-          level: "warn",
-          eventName: "pwa.service_worker_unavailable",
-          message: "Service worker registration was rejected by the browser",
-          metadata: {
-            errorType: error instanceof Error ? error.name || "Error" : typeof error,
-          },
-        });
+        const errorType = error instanceof Error ? error.name || "Error" : typeof error;
+
+        // Two very different failures arrive here and must not be merged.
+        //
+        // SecurityError and friends mean the browser refused for reasons we do
+        // not control and cannot fix: private windows, blocked site data, iOS
+        // Lockdown Mode, shield extensions. The app degrades to online-only and
+        // still works, so it is an environment note. Reporting those through
+        // console.error made them a HIGH incident 26 times over ten days.
+        //
+        // A TypeError means the script itself could not be fetched or parsed -
+        // a missing sw.js, the wrong MIME type, a bad scope. That is our
+        // deployment being broken for every user at once, and it has to stay
+        // loud. Exempting it would turn the most serious version of this
+        // failure into the quietest.
+        const isBrowserPolicy =
+          errorType === "SecurityError" ||
+          errorType === "NotSupportedError" ||
+          errorType === "InvalidStateError" ||
+          errorType === "AbortError";
+
+        captureClientLogEvent(
+          isBrowserPolicy
+            ? {
+              level: "warn",
+              eventName: "pwa.service_worker_unavailable",
+              message: "Service worker registration was refused by the browser",
+              metadata: { errorType },
+            }
+            : {
+              level: "error",
+              eventName: "pwa.service_worker_registration_failed",
+              message: "Service worker script could not be registered",
+              metadata: { errorType },
+            },
+        );
       });
   }, []);
 

@@ -56,6 +56,36 @@ const DEBOUNCE_MS = 300;
 const CLOSE_GUARD_MS = 100;
 const VALID_CATEGORIES = Object.keys(FACILITY_CATEGORY_META) as FacilityCategory[];
 const CATEGORY_FILTER_STORAGE_KEY = "map-filters-v2";
+const LEGACY_CATEGORY_FILTER_STORAGE_KEY = "map-filters";
+const LEGACY_DEFAULT_CATEGORIES = ["academic", "administrative"];
+
+function isLegacyDefaultSelection(categories: readonly string[]): boolean {
+  return (
+    categories.length === LEGACY_DEFAULT_CATEGORIES.length &&
+    LEGACY_DEFAULT_CATEGORIES.every((category) => categories.includes(category))
+  );
+}
+
+// Carry a user's own selection over to the versioned key, and drop only the
+// value that is indistinguishable from the old build's default. A user who
+// deliberately picked exactly those two categories is reset, which is the one
+// case the stored data genuinely cannot tell apart.
+function migrateLegacyCategoryFilters(): void {
+  const legacy = localStorage.getItem(LEGACY_CATEGORY_FILTER_STORAGE_KEY);
+  if (!legacy) return;
+
+  localStorage.removeItem(LEGACY_CATEGORY_FILTER_STORAGE_KEY);
+  if (localStorage.getItem(CATEGORY_FILTER_STORAGE_KEY)) return;
+
+  try {
+    const parsed: unknown = JSON.parse(legacy);
+    if (!Array.isArray(parsed) || !parsed.every(isValidCategory)) return;
+    if (parsed.length === 0 || isLegacyDefaultSelection(parsed)) return;
+    localStorage.setItem(CATEGORY_FILTER_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // Unparseable legacy value; the new default applies.
+  }
+}
 
 function isValidCategory(value: string | null): value is FacilityCategory {
   return value !== null && VALID_CATEGORIES.includes(value as FacilityCategory);
@@ -109,7 +139,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // academic+administrative default persisted, and a stored value wins over
       // the default below - so without a new key the "show every category" fix
       // would never reach a single returning student.
-      localStorage.removeItem("map-filters");
+      //
+      // The old key holds two indistinguishable things though: that stale
+      // default, and selections a user actually made. Only the former is worth
+      // discarding, so migrate anything else across rather than deleting it.
+      migrateLegacyCategoryFilters();
       const stored = localStorage.getItem(CATEGORY_FILTER_STORAGE_KEY);
       if (stored) {
         try {
