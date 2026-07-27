@@ -11,21 +11,13 @@ import Script from "next/script";
 import { Analytics } from "@vercel/analytics/react";
 import { SyncProvider } from "@/components/providers/sync-provider";
 import { AppLoggingProvider } from "@/components/observability/app-logging-provider";
-import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo";
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 // metadataBase decides where crawlers fetch og:image from, so a host that does
-// not resolve turns every shared link into a blank preview card. Prefer the
-// explicit site URL: VERCEL_PROJECT_PRODUCTION_URL reports whichever domain is
-// attached to the project, which silently pointed at a subdomain whose DNS
-// records had been deleted. The literal is the real vercel.app host - the
-// previous value, vsu-smartmap.vercel.app, was never a domain of this project.
-const appUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  process.env.VERCEL_PROJECT_PRODUCTION_URL ??
-  "https://vsumap.vercel.app";
-
-const defaultUrl = appUrl.startsWith("http") ? appUrl : `https://${appUrl}`;
+// not resolve turns every shared link into a blank preview card. Resolved in
+// lib/seo so robots.txt and the sitemap cannot claim a different origin.
+const defaultUrl = SITE_URL;
 const shouldEnableVercelAnalytics = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 
 export const viewport: Viewport = {
