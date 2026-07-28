@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DialogScaffoldBody, DialogScaffoldContent, DialogScaffoldFooter, DialogScaffoldHeader } from "@/components/ui/dialog-scaffold";
@@ -38,6 +38,14 @@ export function ScheduleTransferDialog({
   const [termStart, setTermStart] = useState(today);
   const [termEnd, setTermEnd] = useState(today);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    const currentManilaDate = formatManilaCivilDate(new Date());
+    setTermStart(currentManilaDate);
+    setTermEnd(currentManilaDate);
+    setError("");
+  }, [open]);
 
   const selectFile = async (file?: File) => {
     if (!file) return;
