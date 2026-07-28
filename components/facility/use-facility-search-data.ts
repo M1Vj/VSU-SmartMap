@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities-cache";
 import { getCachedRooms } from "@/lib/cache/rooms-cache";
 import {
@@ -25,22 +25,49 @@ type FacilitySearchData = {
   loading: boolean;
   source: SearchDataSource;
   error: string | null;
+  ensureFacilitiesLoaded: () => Promise<Facility[]>;
 };
 
 const SAFE_LOAD_ERROR = "Search suggestions could not be refreshed.";
+
+function loadFacilities(
+  publish: (facilities: Facility[], source: SearchDataSource) => void,
+  onRemoteError?: () => void,
+) {
+  return loadFacilitySearchFacilities<Facility>({
+    readCache: getCachedFacilities,
+    writeCache: setCachedFacilities,
+    fetchRemote: async () => {
+      const result = await getFacilitiesLite();
+      if (result.error) onRemoteError?.();
+      return {
+        data: result.data as Facility[] | null,
+        error: result.error,
+      };
+    },
+    publish,
+  });
+}
 
 export function useFacilitySearchData({
   enabled,
   query,
   initialFacilities = [],
 }: UseFacilitySearchDataOptions): FacilitySearchData {
-  const [state, setState] = useState<FacilitySearchData>({
+  const [state, setState] = useState<Omit<FacilitySearchData, "ensureFacilitiesLoaded">>({
     facilities: [...initialFacilities],
     rooms: [],
     loading: false,
     source: initialFacilities.length > 0 ? "cache" : "empty",
     error: null,
   });
+  const ensureFacilitiesLoaded = useCallback(async () => {
+    try {
+      return await loadFacilities(() => {});
+    } catch {
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
@@ -65,23 +92,14 @@ export function useFacilitySearchData({
       }
     };
 
-    const facilitiesPromise = loadFacilitySearchFacilities<Facility>({
-      readCache: getCachedFacilities,
-      writeCache: setCachedFacilities,
-      fetchRemote: async () => {
-        const result = await getFacilitiesLite();
-        if (result.error) recordError();
-        return {
-          data: result.data as Facility[] | null,
-          error: result.error,
-        };
-      },
-      publish: (facilities, source) => {
+    const facilitiesPromise = loadFacilities(
+      (facilities, source) => {
         if (!cancelled) {
           setState((current) => ({ ...current, facilities, source }));
         }
       },
-    }).catch(() => {
+      recordError,
+    ).catch(() => {
       recordError();
       return [] as Facility[];
     });
@@ -125,5 +143,5 @@ export function useFacilitySearchData({
     };
   }, [enabled, query]);
 
-  return state;
+  return { ...state, ensureFacilitiesLoaded };
 }

@@ -68,3 +68,21 @@ test("rooms trim queries and publish empty without remote fetch below two charac
   assert.equal(remoteCalls, 0);
   assert.deepEqual(publications, [{ data: [], source: "empty" }]);
 });
+
+test("facilities return cached data when the remote refresh fails", async () => {
+  const publications: Array<{ data: readonly Facility[]; source: SearchDataSource }> = [];
+
+  const result = await loadFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {
+      throw new Error("failed refresh must not write cache");
+    },
+    fetchRemote: async () => ({ data: null, error: new Error("offline") }),
+    publish: (data, source) => {
+      publications.push({ data, source });
+    },
+  });
+
+  assert.deepEqual(result, [cachedFacility]);
+  assert.deepEqual(publications, [{ data: [cachedFacility], source: "cache" }]);
+});

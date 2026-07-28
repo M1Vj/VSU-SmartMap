@@ -88,6 +88,7 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
   const {
     facilities: facilityOptions,
     rooms: roomOptions,
+    ensureFacilitiesLoaded,
   } = useFacilitySearchData({
     enabled:
       isFacilitySearchPage &&
@@ -203,12 +204,19 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
     searchInputRef.current?.blur();
   }, [pushRecentSearch, selectFacility, selectedCategories, setCategories, setSearchQuery]);
 
-  const chooseRecentSearch = useCallback((recent: RecentSearch) => {
+  const chooseRecentSearch = useCallback(async (recent: RecentSearch) => {
     const existingFacility = facilityOptions.find((facility) => facility.id === recent.id);
     if (existingFacility) {
       chooseFacility(existingFacility);
+      return;
     }
-  }, [chooseFacility, facilityOptions]);
+
+    const facilities = await ensureFacilitiesLoaded();
+    const loadedFacility = facilities.find((facility) => facility.id === recent.id);
+    if (loadedFacility) {
+      chooseFacility(loadedFacility);
+    }
+  }, [chooseFacility, ensureFacilitiesLoaded, facilityOptions]);
 
   const handleFacilitySearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isFacilitySearchPage) return;
