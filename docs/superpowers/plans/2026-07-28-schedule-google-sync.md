@@ -122,6 +122,7 @@ rtk git commit -m "fix(auth): fail closed before student OAuth"
 - Modify: `lib/auth/oauth.ts`
 - Modify: `app/auth/callback/route.ts`
 - Create: `app/auth/callback/route.test.ts`
+- Modify: `components/boarding-houses/review-form.tsx` (compatibility caller)
 
 - [ ] **Step 1: Write failing redirect-policy tests**
 
@@ -153,6 +154,13 @@ test("returns failures to the initiating product surface", () => {
   assert.equal(oauthFailurePath("/owner"), "/owner/login?error=oauth");
 });
 ```
+
+Compatibility amendment: preserve the existing review sign-in continuation
+only for `/boarding-houses/<canonical-slug>`. Construct that path through a
+typed helper; accept 1–90 lowercase alphanumeric characters arranged as
+single-hyphen-separated segments, and reject encoding, traversal, extra
+segments, query, and fragment variants. Review failures return to the validated
+listing path with `auth_error=oauth`.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -213,9 +221,15 @@ export async function signInWithGoogle(next: "/schedule" | "/owner"): Promise<vo
 - [ ] **Step 4: Update and test the callback**
 
 Use `safeOauthNext` before exchange. On success redirect to `next`; on missing
-code or exchange error redirect to `oauthFailurePath(next)`. Add mocked route
-tests proving schedule success/failure, owner compatibility, cookie propagation,
-and rejection of external `next`.
+code, initialization, cookie handling, thrown exchange, or returned exchange
+error redirect to `oauthFailurePath(next)` without logging sensitive details.
+Collect Supabase cookie writes and apply them to the actual returned
+`NextResponse`, including legitimate verifier cleanup cookies on failed
+exchanges. Emit only relative allowlisted `Location` values so request-host
+input cannot control the destination. Add mocked route tests proving schedule
+success/failure, owner and review compatibility, response cookie propagation,
+generic exception handling, hostile-host isolation, and rejection of external
+`next`.
 
 - [ ] **Step 5: Run callback and auth tests**
 

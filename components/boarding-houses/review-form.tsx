@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import { signInWithGoogle } from "@/lib/auth/oauth";
+import { boardingHouseOAuthNext } from "@/lib/auth/oauth-return";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import {
   submitBoardingHouseReport,
@@ -42,7 +43,7 @@ export function ReviewForm({ listingId, slug, isAuthenticated }: ReviewFormProps
           variant="outline"
           className="w-full rounded-full"
           onClick={() => {
-            void signInWithGoogle("/owner");
+            void signInWithGoogle(boardingHouseOAuthNext(slug));
           }}
         >
           <LogIn className="mr-2 h-4 w-4" aria-hidden="true" />

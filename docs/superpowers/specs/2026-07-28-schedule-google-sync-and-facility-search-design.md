@@ -88,8 +88,14 @@ deploy before production schema enablement without exposing a broken sync path.
 - OAuth failures return to `/schedule` with a user-safe error. They never send a
   student to the owner login page.
 - Callback destinations use an exact same-origin allowlist for `/schedule` and
-  `/owner`. Raw or encoded slashes, backslashes, control characters, fragments,
-  and unapproved query parameters are rejected before URL construction.
+  `/owner`, plus the compatibility continuation
+  `/boarding-houses/<canonical-slug>` used by review sign-in. Boarding-house
+  slugs are constructed through a typed helper and must be 1–90 lowercase
+  alphanumeric characters or single hyphen-separated segments. Raw or encoded
+  separators, traversal, control characters, fragments, encodings, and query
+  parameters are rejected before redirect construction.
+- Callback `Location` values are relative approved paths, so the request host
+  cannot influence the redirect origin.
 - The schedule route remains public and does not require a student role.
 
 ### First sign-in reconciliation

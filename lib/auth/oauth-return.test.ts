@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { oauthFailurePath, safeOauthNext } from "./oauth-return.ts";
+import {
+  boardingHouseOAuthNext,
+  oauthFailurePath,
+  safeOauthNext,
+} from "./oauth-return.ts";
 
 test("safeOauthNext accepts only the exact approved OAuth return paths", () => {
   assert.equal(safeOauthNext("/schedule"), "/schedule");
   assert.equal(safeOauthNext("/owner"), "/owner");
+  assert.equal(
+    safeOauthNext("/boarding-houses/green-gate-abc123"),
+    "/boarding-houses/green-gate-abc123",
+  );
 });
 
 test("safeOauthNext rejects missing and dangerous OAuth return values", () => {
@@ -27,6 +35,17 @@ test("safeOauthNext rejects missing and dangerous OAuth return values", () => {
     "/%2e/schedule",
     "/schedule/",
     "/other",
+    "/boarding-houses/",
+    "/boarding-houses/two/segments",
+    "/boarding-houses/-leading",
+    "/boarding-houses/trailing-",
+    "/boarding-houses/UPPERCASE",
+    "/boarding-houses/under_score",
+    `/boarding-houses/${"a".repeat(91)}`,
+    "/boarding-houses/%2e%2e",
+    "/boarding-houses/%67reen-gate",
+    "/boarding-houses/green-gate?next=/owner",
+    "/boarding-houses/green-gate#fragment",
   ];
 
   for (const value of rejected) {
@@ -37,5 +56,29 @@ test("safeOauthNext rejects missing and dangerous OAuth return values", () => {
 test("oauthFailurePath returns failures to the safe initiating surface", () => {
   assert.equal(oauthFailurePath("/schedule"), "/schedule?auth_error=oauth");
   assert.equal(oauthFailurePath("/owner"), "/owner/login?error=oauth");
+  assert.equal(
+    oauthFailurePath(boardingHouseOAuthNext("green-gate-abc123")),
+    "/boarding-houses/green-gate-abc123?auth_error=oauth",
+  );
   assert.equal(oauthFailurePath("/"), "/owner/login?error=oauth");
+});
+
+test("boardingHouseOAuthNext constructs only canonical bounded listing paths", () => {
+  assert.equal(
+    boardingHouseOAuthNext("green-gate-abc123"),
+    "/boarding-houses/green-gate-abc123",
+  );
+  for (const slug of [
+    "",
+    "-green-gate",
+    "green-gate-",
+    "Green-Gate",
+    "green_gate",
+    "../owner",
+    "green/gate",
+    "%67reen-gate",
+    "a".repeat(91),
+  ]) {
+    assert.throws(() => boardingHouseOAuthNext(slug), /Invalid boarding-house slug/);
+  }
 });
