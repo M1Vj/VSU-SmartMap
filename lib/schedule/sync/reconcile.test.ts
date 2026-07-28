@@ -127,6 +127,44 @@ test("divergent same-ID versions retain every source in stable provenance order"
   ]);
 });
 
+test("cloud tombstones prevent automatic resurrection and retain provenance in conflicts", () => {
+  const result = reconcileScheduleSources({
+    guest: [course(IDS.local, "Guest")],
+    accountLocal: [{ course: course(IDS.local, "Local"), serverRevision: 4 }],
+    cloud: [cloudRow(null, 5)],
+  });
+  assert.equal(result.kind, "conflict");
+  assert.deepEqual(result.conflicts[0]?.versions, [
+    {
+      kind: "active",
+      source: "guest",
+      course: course(IDS.local, "Guest"),
+    },
+    {
+      kind: "active",
+      source: "account-local",
+      course: course(IDS.local, "Local"),
+      revision: 4,
+    },
+    {
+      kind: "tombstone",
+      source: "cloud",
+      courseId: IDS.local,
+      revision: 5,
+      deletedAt: "2026-01-03T00:00:00.000Z",
+    },
+  ]);
+});
+
+test("a cloud tombstone alone produces no active course or conflict", () => {
+  const result = reconcileScheduleSources({
+    guest: [],
+    accountLocal: [],
+    cloud: [cloudRow(null, 5)],
+  });
+  assert.deepEqual(result, { kind: "merge-ready", courses: [] });
+});
+
 test("duplicate source IDs and corrupt or mismatched cloud payloads are surfaced", () => {
   assert.equal(
     reconcileScheduleSources({
@@ -181,7 +219,7 @@ test("remote tombstone matrix follows expectedRevision without clock winners", (
       cloud: tombstone,
       pendingMutation: mutation("upsert", 3),
     }).kind,
-    "keep-local",
+    "conflict",
   );
   assert.equal(
     resolvePulledRow({
@@ -266,6 +304,14 @@ test("active remote matrix replaces, keeps, or conflicts by expected revision", 
       cloud: remote,
       pendingMutation: mutation("delete", 3),
     }).kind,
-    "keep-local",
+    "conflict",
+  );
+  assert.equal(
+    resolvePulledRow({
+      accountLocal: local,
+      cloud: remote,
+      pendingMutation: mutation("upsert", 3),
+    }).kind,
+    "conflict",
   );
 });

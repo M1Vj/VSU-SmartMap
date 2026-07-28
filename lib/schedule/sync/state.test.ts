@@ -118,6 +118,25 @@ test("account switch and sign-out reset account state without leaking counts", (
   assert.deepEqual(scheduleSyncStatus(state), { kind: "guest" });
 });
 
+test("switching from saved account A to never-synced account B clears lastSyncedAt", () => {
+  let state = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId: accountA,
+    pending: 0,
+    conflicts: 0,
+    lastSyncedAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(scheduleSyncStatus(state).kind, "saved");
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_CHANGED",
+    accountId: accountB,
+    pending: 0,
+    conflicts: 0,
+  });
+  assert.equal(Object.hasOwn(state, "lastSyncedAt"), false);
+  assert.deepEqual(scheduleSyncStatus(state), { kind: "pending", pending: 0 });
+});
+
 test("negative or non-integer counts are rejected", () => {
   assert.throws(
     () =>

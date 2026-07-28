@@ -5,6 +5,7 @@ import type {
   AccountLocalScheduleVersion,
   CloudScheduleRow,
   PullRowResolution,
+  ReconciliationCandidate,
   ReconciliationIssue,
   ReconciliationSource,
   ReconciliationVersion,
@@ -93,6 +94,10 @@ export function reconcileScheduleSources(input: {
   );
 
   const cloudVersions: ReconciliationVersion[] = [];
+  const cloudTombstones = new Map<
+    string,
+    Extract<ReconciliationCandidate, { kind: "tombstone" }>
+  >();
   const seenCloud = new Set<string>();
   for (const row of input.cloud) {
     if (seenCloud.has(row.id)) {
@@ -101,7 +106,15 @@ export function reconcileScheduleSources(input: {
     }
     seenCloud.add(row.id);
     let parsed: ScheduleCourse | undefined;
-    if (row.payload !== null) {
+    if (row.payload === null) {
+      cloudTombstones.set(row.id, {
+        kind: "tombstone",
+        source: "cloud",
+        courseId: row.id,
+        revision: row.revision,
+        ...(row.deletedAt === undefined ? {} : { deletedAt: row.deletedAt }),
+      });
+    } else {
       try {
         parsed = parseStoredScheduleCourse(row.payload);
         if (parsed.id !== row.id) throw new Error("Cloud row ID mismatch.");
@@ -127,10 +140,30 @@ export function reconcileScheduleSources(input: {
   const courses: ReconciliationVersion[] = [];
   const conflicts: Array<{
     courseId: string;
-    versions: ReconciliationVersion[];
+    versions: ReconciliationCandidate[];
   }> = [];
-  for (const courseId of [...byId.keys()].sort(compareIds)) {
-    const versions = byId.get(courseId)!;
+  const courseIds = new Set([...byId.keys(), ...cloudTombstones.keys()]);
+  for (const courseId of [...courseIds].sort(compareIds)) {
+    const versions = byId.get(courseId) ?? [];
+    const tombstone = cloudTombstones.get(courseId);
+    if (tombstone) {
+      if (versions.length > 0) {
+        conflicts.push({
+          courseId,
+          versions: [
+            ...versions
+              .sort(
+                (a, b) =>
+                  SOURCE_ORDER.indexOf(a.source) -
+                  SOURCE_ORDER.indexOf(b.source),
+              )
+              .map((version) => ({ kind: "active" as const, ...version })),
+            tombstone,
+          ],
+        });
+      }
+      continue;
+    }
     const signatures = new Set(versions.map(({ course }) => semanticCourse(course)));
     if (signatures.size === 1) {
       courses.push(preferredVersion(versions));
@@ -140,7 +173,7 @@ export function reconcileScheduleSources(input: {
         versions: [...versions].sort(
           (a, b) =>
             SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source),
-        ),
+        ).map((version) => ({ kind: "active", ...version })),
       });
     }
   }
@@ -178,7 +211,7 @@ export function resolvePulledRow(input: {
 
   if (input.cloud.payload === null) {
     if (pendingMutation?.operation === "upsert") {
-      if (input.cloud.revision > pendingMutation.expectedRevision) {
+      if (input.cloud.revision !== pendingMutation.expectedRevision) {
         return {
           kind: "conflict",
           local: pendingMutation.course ?? input.accountLocal?.course,
@@ -201,7 +234,7 @@ export function resolvePulledRow(input: {
   }
 
   if (pendingMutation) {
-    if (input.cloud.revision > pendingMutation.expectedRevision) {
+    if (input.cloud.revision !== pendingMutation.expectedRevision) {
       return {
         kind: "conflict",
         local:

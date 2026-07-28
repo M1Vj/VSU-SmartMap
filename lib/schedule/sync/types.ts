@@ -41,6 +41,16 @@ export type ReconciliationVersion = {
   revision?: number;
 };
 
+export type ReconciliationCandidate =
+  | (ReconciliationVersion & { kind: "active" })
+  | {
+      kind: "tombstone";
+      source: "cloud";
+      courseId: string;
+      revision: number;
+      deletedAt?: string;
+    };
+
 export type ReconciliationIssue =
   | {
       kind: "duplicate-id";
@@ -63,7 +73,7 @@ export type ScheduleSourceReconciliation =
       courses: ReconciliationVersion[];
       conflicts: Array<{
         courseId: string;
-        versions: ReconciliationVersion[];
+        versions: ReconciliationCandidate[];
       }>;
     }
   | {
