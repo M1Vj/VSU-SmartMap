@@ -125,10 +125,12 @@ dialog leaves guest and cloud data unchanged.
 
 ## Local data architecture
 
-Upgrade the Dexie database with scoped internal rows:
+Upgrade the Dexie database with scoped internal rows. Because IndexedDB primary
+keys cannot be changed safely in place, add a new scoped course store and copy
+the legacy rows instead of mutating the v10 object store's primary key:
 
-- `schedule_courses`
-  - compound key `[scope+id]`;
+- `schedule_scoped_courses`
+  - stable encoded key derived from `scope` and course ID;
   - indexed by `scope` and local update time;
   - contains the validated `ScheduleCourse` document plus its known server
     revision.
@@ -145,8 +147,11 @@ Upgrade the Dexie database with scoped internal rows:
   - one row per unresolved course conflict;
   - local and remote validated versions plus their revisions.
 
-The v10 upgrade assigns every existing unscoped course to `guest`. No course is
-uploaded or deleted during migration.
+The v11 upgrade copies every existing unscoped course to
+`schedule_scoped_courses` under `guest`, validates the copied row, and clears the
+legacy store only after the copy succeeds. The empty legacy object store remains
+for this release to avoid a destructive schema transition. No course is uploaded
+or deleted during migration.
 
 `ScheduleRepository` becomes scope-aware but retains its validation and
 transactional behavior. A `ScheduleSyncCoordinator` owns network activity,
