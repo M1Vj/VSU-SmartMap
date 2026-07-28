@@ -47,6 +47,8 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
   const {
     searchQuery,
     debouncedQuery,
+    selectedFacility,
+    pendingFacilityId,
     selectedCategories,
     selectFacility,
     setCategories,
@@ -258,8 +260,10 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
                 label="Search buildings or facilities"
                 query={searchQuery}
                 options={facilitySearchOptions}
+                selectedFacilityId={selectedFacility?.id ?? pendingFacilityId ?? undefined}
                 loading={facilitySearchLoading}
                 unavailable={Boolean(facilitySearchError)}
+                suppressResults={isTbaQuery}
                 placeholder="Search buildings or facilities..."
                 dataTour="map-search"
                 recents={recentSearches}

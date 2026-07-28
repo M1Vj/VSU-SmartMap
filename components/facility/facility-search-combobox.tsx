@@ -22,6 +22,7 @@ export type FacilitySearchComboboxProps = {
   selectedFacilityId?: string;
   loading?: boolean;
   unavailable?: boolean;
+  suppressResults?: boolean;
   placeholder: string;
   className?: string;
   inputClassName?: string;
@@ -42,6 +43,7 @@ export function FacilitySearchCombobox({
   selectedFacilityId,
   loading = false,
   unavailable = false,
+  suppressResults = false,
   placeholder,
   className,
   inputClassName,
@@ -62,12 +64,20 @@ export function FacilitySearchCombobox({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const trimmedQuery = query.trim();
   const showRecents =
-    focused && trimmedQuery.length === 0 && recents.length > 0;
-  const renderedCount = showRecents ? recents.length : options.length;
+    !suppressResults &&
+    focused &&
+    trimmedQuery.length === 0 &&
+    recents.length > 0;
+  const renderedCount = suppressResults
+    ? 0
+    : showRecents
+      ? recents.length
+      : options.length;
   const showStatus =
     trimmedQuery.length > 0 &&
     (loading || unavailable || (!loading && options.length === 0));
   const shouldRenderListbox =
+    !suppressResults &&
     focused &&
     open &&
     (showRecents || trimmedQuery.length > 0);
@@ -81,6 +91,12 @@ export function FacilitySearchCombobox({
       current >= renderedCount ? renderedCount - 1 : current,
     );
   }, [renderedCount]);
+
+  useEffect(() => {
+    if (!suppressResults) return;
+    setOpen(false);
+    setHighlightedIndex(-1);
+  }, [suppressResults]);
 
   useEffect(() => {
     if (!focused) return;
@@ -114,6 +130,8 @@ export function FacilitySearchCombobox({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (suppressResults) return;
+
     if (event.key === "ArrowDown") {
       if (renderedCount === 0) return;
       event.preventDefault();
@@ -183,12 +201,12 @@ export function FacilitySearchCombobox({
         value={query}
         onChange={(event) => {
           onQueryChange(event.target.value);
-          setOpen(true);
+          setOpen(!suppressResults);
           setHighlightedIndex(-1);
         }}
         onFocus={() => {
           setFocused(true);
-          setOpen(true);
+          setOpen(!suppressResults);
           onFocusChange?.(true);
         }}
         onBlur={() => {
@@ -257,10 +275,7 @@ export function FacilitySearchCombobox({
                   id={`${listboxId}-option-${index}`}
                   type="button"
                   role="option"
-                  aria-selected={
-                    highlightedIndex === index ||
-                    selectedFacilityId === option.facility.id
-                  }
+                  aria-selected={selectedFacilityId === option.facility.id}
                   className={cn(
                     "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left transition-colors",
                     highlightedIndex === index
