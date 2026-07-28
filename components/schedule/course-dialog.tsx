@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   applyFacilitySearchSelection,
+  buildFacilityDisplayQueries,
   buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
@@ -141,6 +142,7 @@ export function CourseDialog({
   const [facilityQueries, setFacilityQueries] = useState<string[]>([]);
   const [errorSummary, setErrorSummary] = useState("");
   const summaryRef = useRef<HTMLDivElement>(null);
+  const courseContentKey = JSON.stringify(course ?? null);
   const facilityStatus = getFacilityOptionsStatus({
     source: facilitySource,
     loading: facilitiesLoading,
@@ -150,24 +152,26 @@ export function CourseDialog({
 
   useEffect(() => {
     if (open) {
-      const nextDefaults = defaults(course);
+      const courseSnapshot =
+        courseContentKey === "null"
+          ? undefined
+          : JSON.parse(courseContentKey) as ScheduleCourse;
+      const nextDefaults = defaults(courseSnapshot);
       form.reset(nextDefaults);
       setFacilityQueries(nextDefaults.meetings.map(() => ""));
       onFacilityQueryChange("");
       setErrorSummary("");
     }
-  }, [course, form, onFacilityQueryChange, open]);
+  }, [courseContentKey, form, onFacilityQueryChange, open]);
   useEffect(() => {
     if (!open) return;
     const currentMeetings = form.getValues("meetings");
     setFacilityQueries((current) =>
-      currentMeetings.map((meeting, index) => {
-        if (current[index]) return current[index];
-        return facilities.find((facility) => facility.id === meeting.facilityId)
-          ?.name ?? "";
-      }),
+      buildFacilityDisplayQueries(currentMeetings, facilities).map(
+        (savedName, index) => current[index] || savedName,
+      ),
     );
-  }, [facilities, form, open]);
+  }, [courseContentKey, facilities, form, open]);
   useEffect(() => {
     if (errorSummary) summaryRef.current?.focus();
   }, [errorSummary]);
@@ -491,9 +495,11 @@ export function CourseDialog({
                             selectedFacilityId={
                               watchedMeetings[index]?.facilityId || undefined
                             }
-                            suppressResults={
+                            loading={facilitiesLoading}
+                            unavailable={
                               Boolean(facilitiesError) && facilities.length === 0
                             }
+                            unavailableMessage="Facility search is unavailable. Try again online or choose Other location."
                             placeholder="Search by building, code, alias, or room..."
                             inputClassName={
                               facilityError
@@ -536,7 +542,7 @@ export function CourseDialog({
                               onFacilityQueryChange(facility.name);
                             }}
                           />
-                          {facilityStatus ? (
+                          {facilityStatus && facilitySource === "cache" ? (
                             <p
                               id={`facility-${index}-status`}
                               role={facilityStatus.tone === "warning" ? "status" : undefined}

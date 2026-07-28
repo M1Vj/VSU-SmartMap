@@ -27,6 +27,7 @@ export type FacilitySearchComboboxProps = {
   selectedFacilityId?: string;
   loading?: boolean;
   unavailable?: boolean;
+  unavailableMessage?: string;
   suppressResults?: boolean;
   placeholder: string;
   className?: string;
@@ -49,6 +50,7 @@ export function FacilitySearchCombobox({
   selectedFacilityId,
   loading = false,
   unavailable = false,
+  unavailableMessage = "Search suggestions are temporarily unavailable.",
   suppressResults = false,
   placeholder,
   className,
@@ -153,14 +155,14 @@ export function FacilitySearchCombobox({
 
   const statusText = useMemo(() => {
     if (loading) return "Loading places...";
-    if (unavailable) return "Search suggestions are temporarily unavailable.";
+    if (unavailable) return unavailableMessage;
     return (
       <>
         No places match &apos;{trimmedQuery}&apos; &mdash; try a building code
         like DSTAT
       </>
     );
-  }, [loading, trimmedQuery, unavailable]);
+  }, [loading, trimmedQuery, unavailable, unavailableMessage]);
 
   return (
     <div className={cn("relative group", className)} ref={wrapperRef}>

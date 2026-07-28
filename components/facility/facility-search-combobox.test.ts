@@ -77,3 +77,21 @@ test("AppHeader wires selection and TBA suppression into the shared combobox", a
   assert.match(source, /suppressResults=\{isTbaQuery\}/);
   assert.match(source, /optionsQuery=\{debouncedQuery\}/);
 });
+
+test("schedule dialog exposes real loading and unavailable combobox states once", async () => {
+  const source = await readFile(
+    new URL("../schedule/course-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /loading=\{facilitiesLoading\}/);
+  assert.match(
+    source,
+    /unavailable=\{\s*Boolean\(facilitiesError\) && facilities\.length === 0\s*\}/,
+  );
+  assert.match(
+    source,
+    /unavailableMessage="Facility search is unavailable\. Try again online or choose Other location\."/,
+  );
+  assert.doesNotMatch(source, /suppressResults=\{\s*Boolean\(facilitiesError\)/);
+});

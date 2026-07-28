@@ -7,6 +7,7 @@ import {
   assignMeetingColumns,
   assertScheduleFileSize,
   buildFacilityLocationLabel,
+  buildFacilityDisplayQueries,
   buildScheduleFacilitySearchOptions,
   buildWeekGridModel,
   analyzeDayConflicts,
@@ -71,6 +72,23 @@ test("facility search selection preserves the typed room detail exactly", () => 
       "dstat",
     ),
     { facilityId: "dstat", facilityDetail: "Room 101" },
+  );
+});
+
+test("facility display queries reinitialize from the newly edited course", () => {
+  assert.deepEqual(
+    buildFacilityDisplayQueries(
+      [{ facilityId: "dstat" }, { facilityId: "" }],
+      [scheduleSearchFacility],
+    ),
+    ["Department of Statistics", ""],
+  );
+  assert.deepEqual(
+    buildFacilityDisplayQueries(
+      [{ facilityId: "unknown" }],
+      [scheduleSearchFacility],
+    ),
+    [""],
   );
 });
 

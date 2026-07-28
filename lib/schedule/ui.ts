@@ -24,6 +24,16 @@ export function applyFacilitySearchSelection<T extends {
   return { ...meeting, facilityId };
 }
 
+export function buildFacilityDisplayQueries(
+  meetings: readonly { facilityId: string }[],
+  facilities: readonly Facility[],
+): string[] {
+  const namesById = new Map(
+    facilities.map((facility) => [facility.id, facility.name]),
+  );
+  return meetings.map((meeting) => namesById.get(meeting.facilityId) ?? "");
+}
+
 export function timeValueToMinute(value: string): number {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
   if (!match) throw new RangeError("Choose a valid time.");
