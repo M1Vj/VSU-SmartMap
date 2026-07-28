@@ -9,6 +9,7 @@ import {
   analyzeDayConflicts,
   endTimeValueToMinute,
   facilitySelectionError,
+  getFacilityOptionsStatus,
   getMeetingGridPosition,
   mapScheduleIssuesToFormErrors,
   MAX_WEEK_GRID_OCCURRENCES,
@@ -235,6 +236,54 @@ test("requires a selected facility to match the loaded facility options", () => 
 test("cached facility handoff survives refresh failure and live refresh replaces it", () => {
   assert.deepEqual([...reconcileKnownFacilityIds(["cached"], undefined)], ["cached"]);
   assert.deepEqual([...reconcileKnownFacilityIds(["cached"], ["live"])], ["live"]);
+});
+
+test("facility option status distinguishes loading, cached fallback, and unavailable data", () => {
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "empty",
+      loading: true,
+      error: null,
+      facilityCount: 0,
+    }),
+    { message: "Loading campus facilities…", tone: "muted" },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "cache",
+      loading: true,
+      error: null,
+      facilityCount: 2,
+    }),
+    { message: "Showing saved facilities while refreshing…", tone: "muted" },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "cache",
+      loading: false,
+      error: "safe error",
+      facilityCount: 2,
+    }),
+    { message: "Showing saved facilities. Refresh unavailable.", tone: "warning" },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "empty",
+      loading: false,
+      error: "safe error",
+      facilityCount: 0,
+    }),
+    { message: "Campus facilities are unavailable right now.", tone: "warning" },
+  );
+  assert.equal(
+    getFacilityOptionsStatus({
+      source: "remote",
+      loading: false,
+      error: null,
+      facilityCount: 2,
+    }),
+    null,
+  );
 });
 
 test("restore confirmation never overlaps the transfer dialog", () => {

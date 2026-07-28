@@ -1,5 +1,11 @@
 export type SearchDataSource = "cache" | "remote" | "empty";
 
+export type SearchLoadResult<T> = {
+  data: T[];
+  source: SearchDataSource;
+  failed: boolean;
+};
+
 type RemoteResult<T> = {
   data: T[] | null;
   error: unknown;
@@ -20,23 +26,31 @@ export async function loadFacilitySearchFacilities<T>({
   writeCache,
   fetchRemote,
   publish,
-}: FacilityLoaderDependencies<T>): Promise<T[]> {
+}: FacilityLoaderDependencies<T>): Promise<SearchLoadResult<T>> {
   const cached = await readCache();
   if (cached !== null) publish(cached, "cache");
 
   try {
     const remote = await fetchRemote();
     if (!remote.error && remote.data !== null) {
-      await writeCache(remote.data);
+      try {
+        await writeCache(remote.data);
+      } catch {
+        // Remote data remains canonical when best-effort persistence fails.
+      }
       publish(remote.data, "remote");
-      return remote.data;
+      return { data: remote.data, source: "remote", failed: false };
     }
   } catch {
-    // The caller exposes a safe status instead of the underlying service error.
+    // Failure is represented without exposing the underlying service error.
   }
 
   if (cached === null) publish([], "empty");
-  return cached ?? [];
+  return {
+    data: cached ?? [],
+    source: cached === null ? "empty" : "cache",
+    failed: true,
+  };
 }
 
 export async function loadFacilitySearchRooms<T>({
@@ -44,11 +58,11 @@ export async function loadFacilitySearchRooms<T>({
   readCache,
   fetchRemote,
   publish,
-}: LoaderDependencies<T> & { query: string }): Promise<T[]> {
+}: LoaderDependencies<T> & { query: string }): Promise<SearchLoadResult<T>> {
   const term = query.trim();
   if (term.length < 2) {
     publish([], "empty");
-    return [];
+    return { data: [], source: "empty", failed: false };
   }
 
   const cached = await readCache();
@@ -58,12 +72,64 @@ export async function loadFacilitySearchRooms<T>({
     const remote = await fetchRemote();
     if (!remote.error && remote.data !== null) {
       publish(remote.data, "remote");
-      return remote.data;
+      return { data: remote.data, source: "remote", failed: false };
     }
   } catch {
-    // The caller exposes a safe status instead of the underlying service error.
+    // Failure is represented without exposing the underlying service error.
   }
 
   if (cached === null) publish([], "empty");
-  return cached ?? [];
+  return {
+    data: cached ?? [],
+    source: cached === null ? "empty" : "cache",
+    failed: true,
+  };
+}
+
+export type FacilitySearchRequest<T> = {
+  available: Promise<T[]>;
+  complete: Promise<SearchLoadResult<T>>;
+  subscribe: (
+    listener: (data: T[], source: SearchDataSource) => void,
+  ) => () => void;
+};
+
+export function startFacilitySearchFacilities<T>(
+  dependencies: Omit<FacilityLoaderDependencies<T>, "publish">,
+): FacilitySearchRequest<T> {
+  const listeners = new Set<(data: T[], source: SearchDataSource) => void>();
+  let latest: { data: T[]; source: SearchDataSource } | null = null;
+  let resolveAvailable!: (data: T[]) => void;
+  let availableResolved = false;
+  const available = new Promise<T[]>((resolve) => {
+    resolveAvailable = resolve;
+  });
+  const publish = (data: T[], source: SearchDataSource) => {
+    latest = { data, source };
+    if (!availableResolved && source === "cache") {
+      availableResolved = true;
+      resolveAvailable(data);
+    }
+    for (const listener of listeners) listener(data, source);
+  };
+  const complete = loadFacilitySearchFacilities({
+    ...dependencies,
+    publish,
+  }).then((result) => {
+    if (!availableResolved) {
+      availableResolved = true;
+      resolveAvailable(result.data);
+    }
+    return result;
+  });
+
+  return {
+    available,
+    complete,
+    subscribe(listener) {
+      listeners.add(listener);
+      if (latest) listener(latest.data, latest.source);
+      return () => listeners.delete(listener);
+    },
+  };
 }

@@ -23,6 +23,7 @@ import {
   buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
+  getFacilityOptionsStatus,
   mapScheduleIssuesToFormErrors,
   minuteToTimeValue,
   timeValueToMinute,
@@ -35,6 +36,7 @@ import type {
   ScheduleCourse,
 } from "@/lib/schedule/types";
 import type { Facility } from "@/lib/types";
+import type { SearchDataSource } from "@/lib/map/facility-search-loader";
 
 type LocationMode = "facility" | "text" | "tba";
 interface MeetingForm {
@@ -107,6 +109,9 @@ export function CourseDialog({
   open,
   course,
   facilities,
+  facilitySource,
+  facilitiesLoading,
+  facilitiesError,
   saving,
   onClose,
   onSave,
@@ -114,6 +119,9 @@ export function CourseDialog({
   open: boolean;
   course?: ScheduleCourse;
   facilities: readonly Facility[];
+  facilitySource: SearchDataSource;
+  facilitiesLoading: boolean;
+  facilitiesError: string | null;
   saving: boolean;
   onClose: () => void;
   onSave: (value: unknown) => Promise<void>;
@@ -123,6 +131,12 @@ export function CourseDialog({
   const watchedMeetings = useWatch({ control: form.control, name: "meetings" });
   const [errorSummary, setErrorSummary] = useState("");
   const summaryRef = useRef<HTMLDivElement>(null);
+  const facilityStatus = getFacilityOptionsStatus({
+    source: facilitySource,
+    loading: facilitiesLoading,
+    error: facilitiesError,
+    facilityCount: facilities.length,
+  });
 
   useEffect(() => {
     if (open) {
@@ -426,7 +440,11 @@ export function CourseDialog({
                           <select
                             id={`facility-${index}`}
                             aria-invalid={Boolean(facilityError)}
-                            aria-describedby={facilityError ? `facility-${index}-error` : undefined}
+                            aria-describedby={[
+                              facilityError ? `facility-${index}-error` : null,
+                              facilityStatus ? `facility-${index}-status` : null,
+                            ].filter(Boolean).join(" ") || undefined}
+                            disabled={facilitiesLoading && facilities.length === 0}
                             className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                             {...form.register(`meetings.${index}.facilityId`, {
                               validate: (facilityId) =>
@@ -448,6 +466,19 @@ export function CourseDialog({
                               <option key={facility.id} value={facility.id}>{facility.name}</option>
                             ))}
                           </select>
+                          {facilityStatus ? (
+                            <p
+                              id={`facility-${index}-status`}
+                              role={facilityStatus.tone === "warning" ? "status" : undefined}
+                              className={
+                                facilityStatus.tone === "warning"
+                                  ? "mt-1 text-sm text-amber-700 dark:text-amber-400"
+                                  : "mt-1 text-sm text-muted-foreground"
+                              }
+                            >
+                              {facilityStatus.message}
+                            </p>
+                          ) : null}
                           <InlineError id={`facility-${index}-error`} message={facilityError} />
                         </div>
                         <div>

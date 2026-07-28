@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities-cache";
 import { getCachedRooms } from "@/lib/cache/rooms-cache";
 import {
-  loadFacilitySearchFacilities,
   loadFacilitySearchRooms,
+  startFacilitySearchFacilities,
+  type FacilitySearchRequest,
   type SearchDataSource,
 } from "@/lib/map/facility-search-loader";
 import type { RoomSearchSource } from "@/lib/map/search-suggestions";
@@ -30,25 +31,6 @@ type FacilitySearchData = {
 
 const SAFE_LOAD_ERROR = "Search suggestions could not be refreshed.";
 
-function loadFacilities(
-  publish: (facilities: Facility[], source: SearchDataSource) => void,
-  onRemoteError?: () => void,
-) {
-  return loadFacilitySearchFacilities<Facility>({
-    readCache: getCachedFacilities,
-    writeCache: setCachedFacilities,
-    fetchRemote: async () => {
-      const result = await getFacilitiesLite();
-      if (result.error) onRemoteError?.();
-      return {
-        data: result.data as Facility[] | null,
-        error: result.error,
-      };
-    },
-    publish,
-  });
-}
-
 export function useFacilitySearchData({
   enabled,
   query,
@@ -61,13 +43,34 @@ export function useFacilitySearchData({
     source: initialFacilities.length > 0 ? "cache" : "empty",
     error: null,
   });
+  const facilityRequestRef = useRef<FacilitySearchRequest<Facility> | null>(null);
+  const getFacilityRequest = useCallback(() => {
+    if (facilityRequestRef.current) return facilityRequestRef.current;
+
+    const request = startFacilitySearchFacilities<Facility>({
+      readCache: getCachedFacilities,
+      writeCache: setCachedFacilities,
+      fetchRemote: async () => {
+        const result = await getFacilitiesLite();
+        return {
+          data: result.data as Facility[] | null,
+          error: result.error,
+        };
+      },
+    });
+    facilityRequestRef.current = request;
+    void request.complete.finally(() => {
+      if (facilityRequestRef.current === request) facilityRequestRef.current = null;
+    });
+    return request;
+  }, []);
   const ensureFacilitiesLoaded = useCallback(async () => {
     try {
-      return await loadFacilities(() => {});
+      return await getFacilityRequest().available;
     } catch {
       return [];
     }
-  }, []);
+  }, [getFacilityRequest]);
 
   useEffect(() => {
     if (!enabled) {
@@ -82,26 +85,13 @@ export function useFacilitySearchData({
     }
 
     let cancelled = false;
-    let hadError = false;
     setState((current) => ({ ...current, loading: true, error: null }));
 
-    const recordError = () => {
-      hadError = true;
+    const facilityRequest = getFacilityRequest();
+    const unsubscribeFacilities = facilityRequest.subscribe((facilities, source) => {
       if (!cancelled) {
-        setState((current) => ({ ...current, error: SAFE_LOAD_ERROR }));
+        setState((current) => ({ ...current, facilities, source }));
       }
-    };
-
-    const facilitiesPromise = loadFacilities(
-      (facilities, source) => {
-        if (!cancelled) {
-          setState((current) => ({ ...current, facilities, source }));
-        }
-      },
-      recordError,
-    ).catch(() => {
-      recordError();
-      return [] as Facility[];
     });
 
     const roomsPromise = loadFacilitySearchRooms<RoomSearchSource>({
@@ -112,7 +102,6 @@ export function useFacilitySearchData({
           term: query.trim().toLowerCase(),
           includeFacility: true,
         });
-        if (result.error) recordError();
         return {
           data: result.data as RoomSearchSource[] | null,
           error: result.error,
@@ -123,25 +112,36 @@ export function useFacilitySearchData({
           setState((current) => ({ ...current, rooms, source }));
         }
       },
-    }).catch(() => {
-      recordError();
-      return [] as RoomSearchSource[];
     });
 
-    void Promise.all([facilitiesPromise, roomsPromise]).then(() => {
-      if (!cancelled) {
-        setState((current) => ({
-          ...current,
-          loading: false,
-          error: hadError ? SAFE_LOAD_ERROR : current.error,
-        }));
-      }
-    });
+    void Promise.all([facilityRequest.complete, roomsPromise])
+      .then(([facilityResult, roomResult]) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            error:
+              facilityResult.failed || roomResult.failed
+                ? SAFE_LOAD_ERROR
+                : null,
+          }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            error: SAFE_LOAD_ERROR,
+          }));
+        }
+      });
 
     return () => {
       cancelled = true;
+      unsubscribeFacilities();
     };
-  }, [enabled, query]);
+  }, [enabled, getFacilityRequest, query]);
 
   return { ...state, ensureFacilitiesLoaded };
 }

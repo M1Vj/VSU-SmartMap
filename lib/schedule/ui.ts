@@ -216,6 +216,39 @@ export function reconcileKnownFacilityIds(
   return new Set(liveIds ?? cachedIds);
 }
 
+export function getFacilityOptionsStatus({
+  source,
+  loading,
+  error,
+  facilityCount,
+}: {
+  source: "cache" | "remote" | "empty";
+  loading: boolean;
+  error: string | null;
+  facilityCount: number;
+}): { message: string; tone: "muted" | "warning" } | null {
+  if (error) {
+    return facilityCount > 0
+      ? {
+          message: "Showing saved facilities. Refresh unavailable.",
+          tone: "warning",
+        }
+      : {
+          message: "Campus facilities are unavailable right now.",
+          tone: "warning",
+        };
+  }
+  if (loading) {
+    return source === "cache" && facilityCount > 0
+      ? {
+          message: "Showing saved facilities while refreshing…",
+          tone: "muted",
+        }
+      : { message: "Loading campus facilities…", tone: "muted" };
+  }
+  return null;
+}
+
 export type RestoreDialogState = "closed" | "transfer" | "confirm";
 export type RestoreDialogEvent = "restore-ready" | "cancel" | "confirmed";
 export function transitionRestoreDialogs(

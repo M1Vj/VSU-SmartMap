@@ -4,6 +4,7 @@ import type { Facility } from "@/lib/types/facility";
 import {
   loadFacilitySearchFacilities,
   loadFacilitySearchRooms,
+  startFacilitySearchFacilities,
   type SearchDataSource,
 } from "./facility-search-loader";
 
@@ -38,7 +39,7 @@ test("facilities publish cache before a deferred canonical empty remote result",
   resolveRemote({ data: [], error: null });
   const result = await loading;
 
-  assert.deepEqual(result, []);
+  assert.deepEqual(result, { data: [], source: "remote", failed: false });
   assert.deepEqual(publications, [
     { data: [cachedFacility], source: "cache" },
     { data: [], source: "remote" },
@@ -64,7 +65,7 @@ test("rooms trim queries and publish empty without remote fetch below two charac
     },
   });
 
-  assert.deepEqual(result, []);
+  assert.deepEqual(result, { data: [], source: "empty", failed: false });
   assert.equal(remoteCalls, 0);
   assert.deepEqual(publications, [{ data: [], source: "empty" }]);
 });
@@ -83,6 +84,90 @@ test("facilities return cached data when the remote refresh fails", async () => 
     },
   });
 
-  assert.deepEqual(result, [cachedFacility]);
+  assert.deepEqual(result, {
+    data: [cachedFacility],
+    source: "cache",
+    failed: true,
+  });
   assert.deepEqual(publications, [{ data: [cachedFacility], source: "cache" }]);
+});
+
+test("facility request exposes cached data before its deferred refresh settles", async () => {
+  let resolveRemote!: (value: { data: Facility[]; error: null }) => void;
+  const remote = new Promise<{ data: Facility[]; error: null }>((resolve) => {
+    resolveRemote = resolve;
+  });
+  const request = startFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {},
+    fetchRemote: async () => remote,
+  });
+
+  assert.deepEqual(await request.available, [cachedFacility]);
+  let completed = false;
+  void request.complete.then(() => {
+    completed = true;
+  });
+  await Promise.resolve();
+  assert.equal(completed, false);
+
+  resolveRemote({ data: [], error: null });
+  assert.deepEqual(await request.complete, {
+    data: [],
+    source: "remote",
+    failed: false,
+  });
+});
+
+test("thrown facility refresh failure reports failure while preserving cached data", async () => {
+  const result = await loadFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {},
+    fetchRemote: async () => {
+      throw new Error("offline");
+    },
+    publish: () => {},
+  });
+
+  assert.deepEqual(result, {
+    data: [cachedFacility],
+    source: "cache",
+    failed: true,
+  });
+});
+
+test("room result errors report failure and publish empty without cache", async () => {
+  const publications: Array<{ data: readonly unknown[]; source: SearchDataSource }> = [];
+  const result = await loadFacilitySearchRooms({
+    query: "ab",
+    readCache: async () => null,
+    fetchRemote: async () => ({ data: null, error: new Error("offline") }),
+    publish: (data, source) => publications.push({ data, source }),
+  });
+
+  assert.deepEqual(result, { data: [], source: "empty", failed: true });
+  assert.deepEqual(publications, [{ data: [], source: "empty" }]);
+});
+
+test("cache write failure does not discard a successful canonical remote result", async () => {
+  const remoteFacility = { id: "remote", name: "Remote Hall" } as Facility;
+  const publications: Array<{ data: readonly Facility[]; source: SearchDataSource }> = [];
+  const result = await loadFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {
+      throw new Error("quota exceeded");
+    },
+    fetchRemote: async () => ({ data: [remoteFacility], error: null }),
+    publish: (data, source) => publications.push({ data, source }),
+  });
+
+  assert.deepEqual(result, {
+    data: [remoteFacility],
+    source: "remote",
+    failed: false,
+  });
+  assert.deepEqual(publications, [
+    { data: [cachedFacility], source: "cache" },
+    { data: [remoteFacility], source: "remote" },
+  ]);
 });
