@@ -80,9 +80,13 @@ const UNAVAILABLE_ERROR_NAMES = new Set([
   "OpenFailedError",
 ]);
 
-function nestedErrorNames(error: unknown): Set<string> {
+function nestedErrorDetails(error: unknown): {
+  names: Set<string>;
+  hasScheduleValidationError: boolean;
+} {
   const names = new Set<string>();
   const seen = new Set<object>();
+  let hasScheduleValidationError = false;
   const pending: Array<{ value: unknown; depth: number }> = [
     { value: error, depth: 0 },
   ];
@@ -98,10 +102,16 @@ function nestedErrorNames(error: unknown): Set<string> {
       continue;
     }
     seen.add(current.value);
+    if (current.value instanceof ScheduleValidationError) {
+      hasScheduleValidationError = true;
+    }
 
     const record = current.value as Record<string, unknown>;
     if (typeof record.name === "string") names.add(record.name);
 
+    if (record.inner !== undefined) {
+      pending.push({ value: record.inner, depth: current.depth + 1 });
+    }
     if (record.cause !== undefined) {
       pending.push({ value: record.cause, depth: current.depth + 1 });
     }
@@ -120,18 +130,21 @@ function nestedErrorNames(error: unknown): Set<string> {
     }
   }
 
-  return names;
+  return { names, hasScheduleValidationError };
 }
 
 function storageError(error: unknown): ScheduleStorageError {
   if (error instanceof ScheduleStorageError) return error;
 
-  const names = nestedErrorNames(error);
+  const { names, hasScheduleValidationError } = nestedErrorDetails(error);
   if ([...names].some((name) => QUOTA_ERROR_NAMES.has(name))) {
     return new ScheduleStorageError("quota");
   }
   if ([...names].some((name) => UNAVAILABLE_ERROR_NAMES.has(name))) {
     return new ScheduleStorageError("unavailable");
+  }
+  if (hasScheduleValidationError) {
+    return new ScheduleStorageError("corrupt");
   }
   return new ScheduleStorageError("unknown");
 }

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import Dexie from "dexie";
+import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 
+import { VSUDatabase } from "../db";
 import {
   MAX_SCHEDULE_COURSES,
   type ScheduleCourse,
@@ -28,6 +31,9 @@ const OTHER_ID = "123e4567-e89b-42d3-a456-426614174002";
 const MEETING_ID = "123e4567-e89b-42d3-a456-426614174001";
 const CREATED_AT = "2026-07-01T01:02:03.000Z";
 const UPDATED_AT = "2026-07-02T01:02:03.000Z";
+const DATABASE_NAME = "VSUSmartMapDB";
+Dexie.dependencies.indexedDB = indexedDB;
+Dexie.dependencies.IDBKeyRange = IDBKeyRange;
 
 function storedCourse(id = COURSE_ID): ScheduleCourse {
   return {
@@ -247,6 +253,65 @@ test("malformed stored rows become a safe corrupt storage error", async () => {
     assert.doesNotMatch(error.message, /secret|must not leak/);
     return true;
   });
+});
+
+test("a real malformed v10 upgrade is classified as corrupt without leaking row detail", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const legacy = new Dexie(DATABASE_NAME);
+  legacy.version(10).stores({
+    schedule_courses: "id, code, updatedAt",
+  });
+  const malformed = {
+    id: COURSE_ID,
+    code: "PRIVATE-COURSE-CODE",
+    updatedAt: UPDATED_AT,
+  };
+  await legacy.open();
+  await legacy.table("schedule_courses").put(malformed);
+  legacy.close();
+
+  const database = new VSUDatabase();
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+  const store = new FakeStore();
+  store.list = async (scope) => {
+    await database.open();
+    return database.schedule_scoped_courses
+      .where("scope")
+      .equals(scope)
+      .toArray();
+  };
+
+  await assert.rejects(
+    new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store).list(),
+    (error: unknown) => {
+      assert.ok(error instanceof ScheduleStorageError);
+      assert.equal(error.code, "corrupt");
+      assert.doesNotMatch(error.message, /PRIVATE-COURSE-CODE|updatedAt|meetings/);
+      return true;
+    },
+  );
+});
+
+test("direct validation failures from storage are classified as corrupt", async () => {
+  const store = new FakeStore();
+  store.list = async () => {
+    throw new ScheduleValidationError([
+      { field: "private-field", message: "private row detail" },
+    ]);
+  };
+
+  await assert.rejects(
+    new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store).list(),
+    (error: unknown) => {
+      assert.ok(error instanceof ScheduleStorageError);
+      assert.equal(error.code, "corrupt");
+      assert.doesNotMatch(error.message, /private-field|private row detail/);
+      return true;
+    },
+  );
 });
 
 test("storage failures have stable quota, unavailable, and unknown classifications", async () => {
