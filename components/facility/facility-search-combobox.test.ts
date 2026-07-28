@@ -58,8 +58,18 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
   assert.match(source, /\{showRecents && onClearRecents && \(/);
   assert.match(
     source,
+    /showRecents && onClearRecents[\s\S]*?<button[\s\S]*?Clear history/,
+  );
+  assert.doesNotMatch(
+    source,
     /showRecents && onClearRecents[\s\S]*?<button[\s\S]*?tabIndex=\{-1\}[\s\S]*?Clear history/,
   );
+  assert.doesNotMatch(
+    source,
+    /showRecents && onClearRecents[\s\S]*?<button[\s\S]*?onMouseDown=\{\(event\) => event\.preventDefault\(\)\}[\s\S]*?Clear history/,
+  );
+  assert.match(source, /onBlurCapture=\{\(event\) =>/);
+  assert.match(source, /event\.currentTarget\.contains\(event\.relatedTarget as Node \| null\)/);
   assert.match(source, /role="listbox"[\s\S]*\{showRecents[\s\S]*recents\.map/);
   assert.doesNotMatch(
     source,

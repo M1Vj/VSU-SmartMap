@@ -5,6 +5,7 @@ import {
   loadFacilitySearchFacilities,
   loadFacilitySearchRooms,
   startFacilitySearchFacilities,
+  startFacilitySearchRooms,
   type SearchDataSource,
 } from "./facility-search-loader";
 
@@ -170,4 +171,85 @@ test("cache write failure does not discard a successful canonical remote result"
     { data: [cachedFacility], source: "cache" },
     { data: [remoteFacility], source: "remote" },
   ]);
+});
+
+test("room request publishes the current query with cached options before deferred remote completion", async () => {
+  const cachedRoom = { id: "cached-room", name: "Cached Room" };
+  let resolveRemote!: (value: { data: typeof cachedRoom[]; error: null }) => void;
+  const remote = new Promise<{ data: typeof cachedRoom[]; error: null }>((resolve) => {
+    resolveRemote = resolve;
+  });
+  const publications: Array<{
+    query: string;
+    data: typeof cachedRoom[];
+    source: SearchDataSource;
+  }> = [];
+
+  const request = startFacilitySearchRooms({
+    query: "  Cached Hall ",
+    readCache: async () => [cachedRoom],
+    fetchRemote: async () => remote,
+  });
+  request.subscribe((publication) => publications.push(publication));
+
+  assert.deepEqual(await request.available, {
+    query: "  Cached Hall ",
+    data: [cachedRoom],
+    source: "cache",
+  });
+  assert.deepEqual(publications, [{
+    query: "  Cached Hall ",
+    data: [cachedRoom],
+    source: "cache",
+  }]);
+
+  let completed = false;
+  void request.complete.then(() => {
+    completed = true;
+  });
+  await Promise.resolve();
+  assert.equal(completed, false);
+
+  resolveRemote({ data: [], error: null });
+  assert.deepEqual(await request.complete, {
+    data: [],
+    source: "remote",
+    failed: false,
+  });
+  assert.deepEqual(publications.at(-1), {
+    query: "  Cached Hall ",
+    data: [],
+    source: "remote",
+  });
+});
+
+test("one facility lifecycle request is reusable across query-dependent room refreshes", async () => {
+  let facilityFetches = 0;
+  let roomFetches = 0;
+  const facilityRequest = startFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {},
+    fetchRemote: async () => {
+      facilityFetches += 1;
+      return { data: [cachedFacility], error: null };
+    },
+  });
+
+  const loadRooms = (query: string) => startFacilitySearchRooms({
+    query,
+    readCache: async () => [],
+    fetchRemote: async () => {
+      roomFetches += 1;
+      return { data: [], error: null };
+    },
+  }).complete;
+
+  await Promise.all([
+    facilityRequest.complete,
+    loadRooms("first"),
+    loadRooms("second"),
+  ]);
+
+  assert.equal(facilityFetches, 1);
+  assert.equal(roomFetches, 2);
 });

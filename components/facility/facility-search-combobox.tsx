@@ -173,7 +173,17 @@ export function FacilitySearchCombobox({
   }, [loading, trimmedQuery, unavailable, unavailableMessage]);
 
   return (
-    <div className={cn("relative group", className)} ref={wrapperRef}>
+    <div
+      className={cn("relative group", className)}
+      ref={wrapperRef}
+      onBlurCapture={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setFocused(false);
+        setOpen(false);
+        setHighlightedIndex(-1);
+        onFocusChange?.(false);
+      }}
+    >
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
@@ -209,16 +219,6 @@ export function FacilitySearchCombobox({
           setOpen(!suppressResults);
           onFocusChange?.(true);
         }}
-        onBlur={() => {
-          window.setTimeout(() => {
-            if (!wrapperRef.current?.contains(document.activeElement)) {
-              setFocused(false);
-              setOpen(false);
-              setHighlightedIndex(-1);
-              onFocusChange?.(false);
-            }
-          }, 0);
-        }}
         onKeyDown={handleKeyDown}
       />
 
@@ -233,9 +233,7 @@ export function FacilitySearchCombobox({
               </span>
               <button
                 type="button"
-                tabIndex={-1}
                 className="rounded-full px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onMouseDown={(event) => event.preventDefault()}
                 onClick={onClearRecents}
               >
                 Clear history

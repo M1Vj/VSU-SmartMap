@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities-cache";
 import { getCachedRooms } from "@/lib/cache/rooms-cache";
 import {
-  loadFacilitySearchRooms,
   startFacilitySearchFacilities,
+  startFacilitySearchRooms,
   type FacilitySearchRequest,
   type SearchDataSource,
 } from "@/lib/map/facility-search-loader";
@@ -61,9 +61,6 @@ export function useFacilitySearchData({
       },
     });
     facilityRequestRef.current = request;
-    void request.complete.finally(() => {
-      if (facilityRequestRef.current === request) facilityRequestRef.current = null;
-    });
     return request;
   }, []);
   const ensureFacilitiesLoaded = useCallback(async () => {
@@ -76,11 +73,9 @@ export function useFacilitySearchData({
 
   useEffect(() => {
     if (!enabled) {
+      facilityRequestRef.current = null;
       setState((current) => ({
         ...current,
-        rooms: [],
-        optionsQuery: "",
-        loading: false,
         source: current.facilities.length > 0 ? current.source : "empty",
         error: null,
       }));
@@ -88,8 +83,6 @@ export function useFacilitySearchData({
     }
 
     let cancelled = false;
-    setState((current) => ({ ...current, loading: true, error: null }));
-
     const facilityRequest = getFacilityRequest();
     const unsubscribeFacilities = facilityRequest.subscribe((facilities, source) => {
       if (!cancelled) {
@@ -97,7 +90,40 @@ export function useFacilitySearchData({
       }
     });
 
-    const roomsPromise = loadFacilitySearchRooms<RoomSearchSource>({
+    void facilityRequest.complete.then((result) => {
+      if (!cancelled && result.failed) {
+        setState((current) => ({ ...current, error: SAFE_LOAD_ERROR }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribeFacilities();
+    };
+  }, [enabled, getFacilityRequest]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setState((current) => ({
+        ...current,
+        rooms: [],
+        optionsQuery: "",
+        loading: false,
+        error: null,
+      }));
+      return;
+    }
+
+    let cancelled = false;
+    setState((current) => ({
+      ...current,
+      rooms: [],
+      optionsQuery: "",
+      loading: true,
+      error: null,
+    }));
+
+    const roomRequest = startFacilitySearchRooms<RoomSearchSource>({
       query,
       readCache: getCachedRooms,
       fetchRemote: async () => {
@@ -110,24 +136,24 @@ export function useFacilitySearchData({
           error: result.error,
         };
       },
-      publish: (rooms) => {
-        if (!cancelled) {
-          setState((current) => ({ ...current, rooms }));
-        }
-      },
+    });
+    const unsubscribeRooms = roomRequest.subscribe((publication) => {
+      if (!cancelled) {
+        setState((current) => ({
+          ...current,
+          rooms: publication.data,
+          optionsQuery: publication.query,
+        }));
+      }
     });
 
-    void Promise.all([facilityRequest.complete, roomsPromise])
-      .then(([facilityResult, roomResult]) => {
+    void roomRequest.complete
+      .then((roomResult) => {
         if (!cancelled) {
           setState((current) => ({
             ...current,
             loading: false,
-            optionsQuery: query,
-            error:
-              facilityResult.failed || roomResult.failed
-                ? SAFE_LOAD_ERROR
-                : null,
+            error: roomResult.failed ? SAFE_LOAD_ERROR : current.error,
           }));
         }
       })
@@ -136,7 +162,6 @@ export function useFacilitySearchData({
           setState((current) => ({
             ...current,
             loading: false,
-            optionsQuery: query,
             error: SAFE_LOAD_ERROR,
           }));
         }
@@ -144,9 +169,9 @@ export function useFacilitySearchData({
 
     return () => {
       cancelled = true;
-      unsubscribeFacilities();
+      unsubscribeRooms();
     };
-  }, [enabled, getFacilityRequest, query]);
+  }, [enabled, query]);
 
   return { ...state, ensureFacilitiesLoaded };
 }

@@ -94,6 +94,20 @@ export type FacilitySearchRequest<T> = {
   ) => () => void;
 };
 
+export type RoomSearchPublication<T> = {
+  query: string;
+  data: T[];
+  source: SearchDataSource;
+};
+
+export type RoomSearchRequest<T> = {
+  available: Promise<RoomSearchPublication<T>>;
+  complete: Promise<SearchLoadResult<T>>;
+  subscribe: (
+    listener: (publication: RoomSearchPublication<T>) => void,
+  ) => () => void;
+};
+
 export function startFacilitySearchFacilities<T>(
   dependencies: Omit<FacilityLoaderDependencies<T>, "publish">,
 ): FacilitySearchRequest<T> {
@@ -129,6 +143,47 @@ export function startFacilitySearchFacilities<T>(
     subscribe(listener) {
       listeners.add(listener);
       if (latest) listener(latest.data, latest.source);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+export function startFacilitySearchRooms<T>({
+  query,
+  readCache,
+  fetchRemote,
+}: Omit<LoaderDependencies<T>, "publish"> & {
+  query: string;
+}): RoomSearchRequest<T> {
+  const listeners = new Set<(publication: RoomSearchPublication<T>) => void>();
+  let latest: RoomSearchPublication<T> | null = null;
+  let resolveAvailable!: (publication: RoomSearchPublication<T>) => void;
+  let availableResolved = false;
+  const available = new Promise<RoomSearchPublication<T>>((resolve) => {
+    resolveAvailable = resolve;
+  });
+  const publish = (data: T[], source: SearchDataSource) => {
+    const publication = { query, data, source };
+    latest = publication;
+    if (!availableResolved) {
+      availableResolved = true;
+      resolveAvailable(publication);
+    }
+    for (const listener of listeners) listener(publication);
+  };
+  const complete = loadFacilitySearchRooms({
+    query,
+    readCache,
+    fetchRemote,
+    publish,
+  });
+
+  return {
+    available,
+    complete,
+    subscribe(listener) {
+      listeners.add(listener);
+      if (latest) listener(latest);
       return () => listeners.delete(listener);
     },
   };
