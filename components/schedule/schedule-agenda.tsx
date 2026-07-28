@@ -55,7 +55,7 @@ export function ScheduleAgenda({
           })}
         </ol>
       )}
-      {tbaCount > 0 ? <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{tbaCount} timed {tbaCount === 1 ? "meeting has" : "meetings have"} a TBA location. The meeting remains in the agenda above.</p> : null}
+      {tbaCount > 0 ? <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{tbaCount} timed {tbaCount === 1 ? "meeting has" : "meetings have"} a TBA location. {tbaCount === 1 ? "It remains" : "They remain"} in the agenda above.</p> : null}
     </section>
   );
 }

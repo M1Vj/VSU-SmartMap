@@ -1,11 +1,12 @@
 # Campus SmartMap for VSU
 
-Smart, offline-friendly campus navigation for Visayas State University. Browse facilities, search rooms, navigate with real walking routes, find verified off-campus boarding houses, chat with an AI assistant, and manage everything through a secure admin console.
+Smart, offline-friendly campus navigation for Visayas State University. Browse facilities, search rooms, plan a private weekly class schedule, navigate with real walking routes, find verified off-campus boarding houses, chat with an AI assistant, and manage everything through a secure admin console.
 
 ![Campus SmartMap for VSU Banner](public/vsu-banner-21x9.png)
 
 ## Quick Links
 - Map: `/`
+- Schedule: `/schedule`
 - Boarding houses: `/boarding-houses`
 - Directory: `/directory`
 - Events: `/events`
@@ -22,6 +23,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Turn-by-turn walking navigation on a campus path graph, with nearest-gate handoff to real road routing for off-campus starts
 - Boarding houses: owner-submitted, admin-verified off-campus listings with multi-room offerings, photos, amenities/safety checklists, reviews, price-anomaly flagging, routed walk times, and student filters
 - Directory with search/filter and map handoff; campus events calendar
+- Private, device-only weekly schedule with conflict warnings, next-class guidance, campus-facility handoff, JSON backup/restore, and ICS export
 - AI chat assistant (Gemini via Genkit) with API-key rotation, model fallback ladder, answer caching, per-IP rate limits, and boarding-house awareness
 - Interactive per-page guides (spotlight tours) for students, owners, and admins
 - User suggestions (add/edit) with admin review and approval
@@ -120,7 +122,7 @@ through whichever gate minimizes total detour.
 - `npm run ai:dev` — start Genkit dev server
 
 ## Project Structure
-- `app/(student)` — student-facing map, boarding houses, directory, events, chat, info, offline
+- `app/(student)` — student-facing map, schedule, boarding houses, directory, events, chat, info, offline
 - `app/owner` — boarding-house owner console (listings, offerings, photos, vacancy)
 - `app/admin` — admin shell: facilities/rooms CRUD, boarding-house moderation, navigation editor, AI knowledge
 - `app/api` — API routes (chat)
@@ -130,6 +132,8 @@ through whichever gate minimizes total detour.
 
 ## Offline & PWA
 - Service worker caches static assets, map tiles (OpenFreeMap/OSM/CARTO/Esri hosts), and public Supabase facility/room endpoints
+- The `/schedule` shell works offline, while personal courses remain only in IndexedDB and are never copied into service-worker caches or Supabase
+- Schedule data does not sync between devices; use the in-app JSON backup/restore controls before clearing browser data, and use ICS export for a calendar copy
 - Offline page at `/offline` with retry/back-to-map actions
 - Facilities and chat history cached locally (with TTL/quotas)
 - Manifest/icons included for installability; theme color matches brand green
@@ -157,6 +161,7 @@ through whichever gate minimizes total detour.
   - Map load, pin selection/declutter at multiple zooms, category filter, search, navigation (on- and off-campus start)
   - Boarding houses: filters, detail page (photos zoom, room options, reviews), owner create/edit → admin review → publish
   - Directory search/filter and "View on Map" handoff; events list
+  - Schedule: tab visibility/reset, add/edit/delete, conflicts and TBA locations, facility map handoff, JSON restore, ICS download, reload, and offline reload
   - Chat: send/stream responses, boarding-house questions, follow-ups, rate-limit messaging
   - Suggest add/edit flows and admin approval/rejection
   - Admin CRUD (facilities, rooms, images, history) and boarding-house moderation

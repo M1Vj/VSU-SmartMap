@@ -171,6 +171,7 @@ export function SettingsDropdown() {
                 {STUDENT_DESTINATIONS.map((destination) => (
                   <DropdownMenuCheckboxItem
                     key={destination.id}
+                    aria-label={destination.label}
                     checked={visibleStudentDestinations.includes(destination.id)}
                     disabled={destination.required}
                     onCheckedChange={() => toggleStudentDestination(destination.id)}
