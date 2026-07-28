@@ -26,7 +26,14 @@ type CreateMutationInput = {
 export function createScheduleMutation(
   input: CreateMutationInput,
 ): ScheduleOutboxMutation {
-  if (input.scope === GUEST_SCHEDULE_SCOPE) {
+  const accountId =
+    input.scope.startsWith("user:") ? input.scope.slice("user:".length) : "";
+  if (
+    input.scope === GUEST_SCHEDULE_SCOPE ||
+    !isValidScheduleId(accountId) ||
+    accountId !== accountId.toLowerCase() ||
+    input.scope !== `user:${accountId}`
+  ) {
     throw new Error("Guest schedules do not create sync mutations.");
   }
   const courseId = input.courseId.trim().toLowerCase();
@@ -42,8 +49,20 @@ export function createScheduleMutation(
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     throw new Error("Schedule mutation revision is invalid.");
   }
-  if (input.operation === "upsert" && input.course?.id !== courseId) {
+  if (
+    input.operation === "upsert" &&
+    (!input.course ||
+      input.course.id !== courseId ||
+      input.course.id !== input.course.id.toLowerCase())
+  ) {
     throw new Error("Schedule mutation course does not match its identifier.");
+  }
+  if (input.operation === "delete" && input.course !== undefined) {
+    throw new Error("Delete mutations cannot contain a course.");
+  }
+  const createdAt = (input.now ?? defaultScheduleMutationDependencies.now)();
+  if (!Number.isFinite(createdAt.getTime())) {
+    throw new Error("Schedule mutation time is invalid.");
   }
   return {
     mutationId,
@@ -52,7 +71,7 @@ export function createScheduleMutation(
     expectedRevision,
     operation: input.operation,
     ...(input.course === undefined ? {} : { course: input.course }),
-    createdAt: (input.now ?? defaultScheduleMutationDependencies.now)().toISOString(),
+    createdAt: createdAt.toISOString(),
   };
 }
 

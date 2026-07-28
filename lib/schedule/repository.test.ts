@@ -736,3 +736,197 @@ test("real IndexedDB clear and restore create bounded per-course desired mutatio
   );
   assert.equal(await database.schedule_scoped_courses.where("scope").equals(scope).count(), 2);
 });
+
+test("real IndexedDB delete then recreate reads the pending compound index", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+  await database.schedule_scoped_courses.add({
+    key: scopedCourseKey(scope, COURSE_ID),
+    scope,
+    id: COURSE_ID,
+    course: storedCourse(),
+    serverRevision: 12,
+  });
+  const ids = [
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  ];
+  const dependencies = {
+    mutationId: () => ids.shift()!,
+    now: () => new Date(CREATED_AT),
+  };
+  await new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+    dependencies,
+  ).remove(COURSE_ID);
+  await new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+    dependencies,
+  ).put({ ...storedCourse(), title: "Recreated" });
+
+  const mutations = await database.schedule_outbox.where("scope").equals(scope).toArray();
+  assert.equal(mutations.length, 1);
+  assert.equal(mutations[0]?.operation, "upsert");
+  assert.equal(mutations[0]?.expectedRevision, 12);
+  assert.equal(mutations[0]?.mutationId, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+});
+
+test("real IndexedDB rolls back remove clear and replaceAll when outbox creation fails", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = createDexieScopedScheduleStore(database);
+  const failingRepository = new ScheduleRepository(scope, () => store, {
+    mutationId: () => "invalid",
+    now: () => new Date(CREATED_AT),
+  });
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+
+  const seed = async () => {
+    await database.schedule_scoped_courses.clear();
+    await database.schedule_outbox.clear();
+    await database.schedule_scoped_courses.bulkAdd([
+      {
+        key: scopedCourseKey(scope, COURSE_ID),
+        scope,
+        id: COURSE_ID,
+        course: storedCourse(COURSE_ID),
+        serverRevision: 4,
+      },
+      {
+        key: scopedCourseKey(scope, OTHER_ID),
+        scope,
+        id: OTHER_ID,
+        course: storedCourse(OTHER_ID),
+        serverRevision: 8,
+      },
+    ]);
+  };
+  const snapshot = async () => ({
+    courses: await database.schedule_scoped_courses.toArray(),
+    outbox: await database.schedule_outbox.toArray(),
+  });
+
+  await seed();
+  const beforeRemove = await snapshot();
+  await assert.rejects(failingRepository.remove(COURSE_ID), ScheduleStorageError);
+  assert.deepEqual(await snapshot(), beforeRemove);
+
+  await seed();
+  const beforeClear = await snapshot();
+  await assert.rejects(failingRepository.clear(), ScheduleStorageError);
+  assert.deepEqual(await snapshot(), beforeClear);
+
+  await seed();
+  const beforeReplace = await snapshot();
+  await assert.rejects(
+    failingRepository.replaceAll([{ ...storedCourse(COURSE_ID), title: "Changed" }]),
+    ScheduleStorageError,
+  );
+  assert.deepEqual(await snapshot(), beforeReplace);
+});
+
+test("real IndexedDB clear preserves absent pending deletes and replaceAll unions affected IDs", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const otherScope = accountScheduleScope("22222222-2222-4222-8222-222222222222");
+  const absentId = courseId(99);
+  const store = createDexieScopedScheduleStore(database);
+  let nextId = 1;
+  const repository = new ScheduleRepository(scope, () => store, {
+    mutationId: () =>
+      `00000000-0000-4000-8000-${(nextId++).toString(16).padStart(12, "0")}`,
+    now: () => new Date(CREATED_AT),
+  });
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+  await database.schedule_outbox.bulkAdd([
+    {
+      mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      scope,
+      courseId: absentId,
+      expectedRevision: 6,
+      operation: "delete",
+      createdAt: CREATED_AT,
+    },
+    {
+      mutationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      scope: otherScope,
+      courseId: COURSE_ID,
+      expectedRevision: 3,
+      operation: "delete",
+      createdAt: CREATED_AT,
+    },
+  ]);
+  await repository.clear();
+  assert.equal(
+    (await database.schedule_outbox
+      .where("[scope+courseId]")
+      .equals([scope, absentId])
+      .first())?.expectedRevision,
+    6,
+  );
+  await repository.replaceAll([storedCourse(absentId), storedCourse(OTHER_ID)]);
+  const scoped = await database.schedule_outbox.where("scope").equals(scope).toArray();
+  assert.equal(scoped.length, 2);
+  assert.equal(scoped.find((item) => item.courseId === absentId)?.expectedRevision, 6);
+  assert.equal(
+    await database.schedule_outbox.where("scope").equals(otherScope).count(),
+    1,
+  );
+});
+
+test("real IndexedDB account replacement enforces the practical 200-course bound atomically", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  let nextMutation = 1;
+  const repository = new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+    {
+      mutationId: () =>
+        `10000000-0000-4000-8000-${(nextMutation++).toString(16).padStart(12, "0")}`,
+      now: () => new Date(CREATED_AT),
+    },
+  );
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+  const maximum = Array.from({ length: MAX_SCHEDULE_COURSES }, (_, index) =>
+    storedCourse(courseId(index)),
+  );
+  await repository.replaceAll(maximum);
+  assert.equal(
+    await database.schedule_scoped_courses.where("scope").equals(scope).count(),
+    MAX_SCHEDULE_COURSES,
+  );
+  assert.equal(
+    await database.schedule_outbox.where("scope").equals(scope).count(),
+    MAX_SCHEDULE_COURSES,
+  );
+  const before = await database.schedule_outbox.toArray();
+  await assert.rejects(
+    repository.replaceAll([...maximum, storedCourse(courseId(MAX_SCHEDULE_COURSES))]),
+    ScheduleCourseLimitError,
+  );
+  assert.equal(
+    await database.schedule_scoped_courses.where("scope").equals(scope).count(),
+    MAX_SCHEDULE_COURSES,
+  );
+  assert.deepEqual(await database.schedule_outbox.toArray(), before);
+});

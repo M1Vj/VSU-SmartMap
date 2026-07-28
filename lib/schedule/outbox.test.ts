@@ -58,6 +58,57 @@ test("guest and non-canonical generated mutation IDs are rejected", () => {
       mutationId: () => "not-a-uuid",
     }),
   );
+  for (const scope of [
+    "user:not-a-uuid",
+    "user:11111111-1111-4111-8111-111111111111:extra",
+    "user:11111111-1111-4111-8111-11111111111A",
+    "arbitrary",
+  ]) {
+    assert.throws(() =>
+      createScheduleMutation({
+        scope: scope as typeof SCOPE,
+        courseId: COURSE_ID,
+        operation: "delete",
+      }),
+    );
+  }
+});
+
+test("mutation operation and payload must agree exactly", () => {
+  assert.throws(() =>
+    createScheduleMutation({
+      scope: SCOPE,
+      courseId: COURSE_ID,
+      operation: "upsert",
+    }),
+  );
+  assert.throws(() =>
+    createScheduleMutation({
+      scope: SCOPE,
+      courseId: COURSE_ID,
+      operation: "delete",
+      course,
+    }),
+  );
+  assert.throws(() =>
+    createScheduleMutation({
+      scope: SCOPE,
+      courseId: COURSE_ID,
+      operation: "upsert",
+      course: { ...course, id: COURSE_ID.toUpperCase() },
+    }),
+  );
+});
+
+test("mutation time must be a finite valid ISO instant", () => {
+  assert.throws(() =>
+    createScheduleMutation({
+      scope: SCOPE,
+      courseId: COURSE_ID,
+      operation: "delete",
+      now: () => new Date(Number.NaN),
+    }),
+  );
 });
 
 test("coalescing preserves the original expected revision", () => {

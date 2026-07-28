@@ -187,7 +187,10 @@ export function createDexieScopedScheduleStore(
   database: VSUDatabase,
 ): ScopedScheduleStore {
   const pendingFor = (scope: ScheduleScope, courseId: string) =>
-    database.schedule_outbox.get([scope, courseId]);
+    database.schedule_outbox
+      .where("[scope+courseId]")
+      .equals([scope, courseId])
+      .first();
   const replaceMutation = async (
     scope: ScheduleScope,
     courseId: string,
