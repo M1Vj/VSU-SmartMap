@@ -170,7 +170,7 @@ export type ScheduleSyncEvent =
       lastSyncedAt?: string;
     }
   | { type: "ONLINE" }
-  | { type: "OFFLINE"; pending?: number }
+  | { type: "OFFLINE" }
   | ({ type: "PUSH_STARTED" } & ScopedSyncRunEvent)
   | ({
       type: "PUSH_ACKNOWLEDGED";
@@ -184,5 +184,5 @@ export type ScheduleSyncEvent =
       lastSyncedAt: string;
     } & ScopedSyncRunEvent)
   | ({ type: "CONFLICT"; conflicts: number } & ScopedSyncRunEvent)
-  | { type: "AUTH_EXPIRED" }
+  | ({ type: "AUTH_EXPIRED" } & ScopedSyncRunEvent)
   | ({ type: "FAILED" } & ScopedSyncRunEvent);

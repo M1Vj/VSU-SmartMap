@@ -49,7 +49,6 @@ export function reduceScheduleSyncState(
         ...state,
         online: false,
         pushing: false,
-        ...(event.pending === undefined ? {} : { pending: count(event.pending) }),
       };
     case "PUSH_STARTED":
       if (
@@ -95,7 +94,13 @@ export function reduceScheduleSyncState(
         activeRunToken: undefined,
       };
     case "AUTH_EXPIRED":
-      return { ...state, authExpired: true, pushing: false };
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        authExpired: true,
+        pushing: false,
+        activeRunToken: undefined,
+      };
     case "FAILED":
       if (!matchesActiveRun(state, event)) return state;
       return {

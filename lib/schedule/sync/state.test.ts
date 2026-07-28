@@ -5,7 +5,10 @@ import {
   reduceScheduleSyncState,
   scheduleSyncStatus,
 } from "./state";
-import type { ScheduleSyncReducerState } from "./types";
+import type {
+  ScheduleSyncEvent,
+  ScheduleSyncReducerState,
+} from "./types";
 
 const accountA = "00000000-0000-4000-8000-000000000001";
 const accountB = "00000000-0000-4000-8000-000000000002";
@@ -20,10 +23,10 @@ test("offline edits, reconnect, push, pull, and acknowledgement preserve exact c
   state = reduceScheduleSyncState(state, {
     type: "AUTH_CHANGED",
     accountId: accountA,
-    pending: 0,
+    pending: 2,
     conflicts: 0,
   });
-  state = reduceScheduleSyncState(state, { type: "OFFLINE", pending: 2 });
+  state = reduceScheduleSyncState(state, { type: "OFFLINE" });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "offline", pending: 2 });
   state = reduceScheduleSyncState(state, { type: "ONLINE" });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "pending", pending: 2 });
@@ -84,12 +87,20 @@ test("auth expiry and offline precedence retain pending and conflict counts", ()
   let state = reduceScheduleSyncState(initialScheduleSyncState, {
     type: "AUTH_CHANGED",
     accountId: accountA,
-    pending: 3,
+    pending: 4,
     conflicts: 2,
   });
-  state = reduceScheduleSyncState(state, { type: "OFFLINE", pending: 4 });
+  const activeRun = runContext(state);
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...activeRun,
+  });
+  state = reduceScheduleSyncState(state, { type: "OFFLINE" });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "offline", pending: 4 });
-  state = reduceScheduleSyncState(state, { type: "AUTH_EXPIRED" });
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_EXPIRED",
+    ...activeRun,
+  });
   assert.deepEqual(scheduleSyncStatus(state), {
     kind: "auth-required",
     pending: 4,
@@ -171,8 +182,10 @@ test("negative or non-integer counts are rejected", () => {
   assert.throws(
     () =>
       reduceScheduleSyncState(initialScheduleSyncState, {
-        type: "OFFLINE",
+        type: "AUTH_CHANGED",
+        accountId: accountA,
         pending: -1,
+        conflicts: 0,
       }),
     /count/i,
   );
@@ -251,4 +264,72 @@ test("late account A async events cannot mutate account B state", () => {
   for (const event of lateEvents) {
     assert.deepEqual(reduceScheduleSyncState(state, event), accountBState);
   }
+});
+
+test("AUTH_EXPIRED ignores a late account A run and accepts the active account B run", () => {
+  let state = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId: accountA,
+    pending: 2,
+    conflicts: 0,
+  });
+  const accountARun = runContext(state);
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...accountARun,
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_CHANGED",
+    accountId: accountB,
+    pending: 1,
+    conflicts: 0,
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state),
+  });
+  const accountBRunState = state;
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_EXPIRED",
+    ...accountARun,
+  });
+  assert.deepEqual(state, accountBRunState);
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_EXPIRED",
+    ...runContext(state),
+  });
+  assert.deepEqual(scheduleSyncStatus(state), {
+    kind: "auth-required",
+    pending: 1,
+  });
+});
+
+test("OFFLINE is global connectivity state and cannot carry a late account pending count", () => {
+  let state = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId: accountA,
+    pending: 4,
+    conflicts: 0,
+  });
+  const accountARun = runContext(state);
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...accountARun,
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_CHANGED",
+    accountId: accountB,
+    pending: 1,
+    conflicts: 0,
+  });
+  state = reduceScheduleSyncState(
+    state,
+    {
+      type: "OFFLINE",
+      pending: 4,
+      ...accountARun,
+    } as unknown as ScheduleSyncEvent,
+  );
+  assert.equal(state.pending, 1);
+  assert.deepEqual(scheduleSyncStatus(state), { kind: "offline", pending: 1 });
 });
