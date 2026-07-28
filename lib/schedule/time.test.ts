@@ -203,9 +203,9 @@ test("calculates Manila time independently of the child process device timezone"
   const timeModuleUrl = new URL("./time.ts", import.meta.url).href;
   const tsxImportPath = createRequire(import.meta.url).resolve("tsx");
   const script = `
-    import { getManilaWeekPosition } from ${JSON.stringify(timeModuleUrl)};
+    import timeModule from ${JSON.stringify(timeModuleUrl)};
     process.stdout.write(JSON.stringify(
-      getManilaWeekPosition(new Date("2026-07-27T16:30:00.000Z"))
+      timeModule.getManilaWeekPosition(new Date("2026-07-27T16:30:00.000Z"))
     ));
   `;
   const child = spawnSync(
