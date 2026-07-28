@@ -44,7 +44,7 @@ class Store implements ScheduleSyncLocalStore {
       scope: requested, sent, result: remote as Exclude<CloudMutationResult, { kind: "conflict" }>,
       currentRow: this.rows.get(sent.courseId), currentMutation: current,
       createCompensatingDelete: ({ expectedRevision }) => ({
-        sequence: 99, mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         scope: requested, courseId: sent.courseId, expectedRevision,
         operation: "delete", createdAt: "2026-07-29T00:00:00.000Z",
       }),
@@ -154,7 +154,7 @@ test("compensating delete factory output is validated structurally", () => {
     scope, sent, result, currentRow: undefined, currentMutation: undefined,
   };
   const valid = {
-    sequence: 2, mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     scope, courseId, expectedRevision: 1, operation: "delete" as const,
     createdAt: "2026-07-29T00:00:00Z",
   };
@@ -165,7 +165,11 @@ test("compensating delete factory output is validated structurally", () => {
     { ...valid, operation: "upsert" as const },
     { ...valid, course },
     { ...valid, mutationId: "BAD" },
+    { ...valid, mutationId: sent.mutationId },
     { ...valid, createdAt: "tomorrow" },
+    { ...valid, sequence: 1 },
+    { ...valid, sequence: -1 },
+    { ...valid, sequence: Number.NaN },
   ];
   for (const candidate of invalid) {
     assert.throws(() => decideScheduleAcknowledgement({

@@ -109,6 +109,8 @@ export function decideScheduleAcknowledgement(
       mutation.operation !== "delete" ||
       mutation.course !== undefined ||
       !isCanonicalUuid(mutation.mutationId) ||
+      mutation.mutationId === input.sent.mutationId ||
+      mutation.sequence !== undefined ||
       !isScheduleSyncTimestamp(mutation.createdAt)
     ) {
       throw new Error("Invalid compensating schedule mutation.");
