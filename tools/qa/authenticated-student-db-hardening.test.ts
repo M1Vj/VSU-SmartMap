@@ -63,7 +63,11 @@ test("hardening migration closes SECURITY DEFINER execution and mutable paths", 
   );
   assert.match(
     sql,
-    /GRANT EXECUTE ON FUNCTION public\.delete_expired_verification_documents\(\) TO service_role/,
+    /CREATE OR REPLACE FUNCTION public\.delete_expired_verification_documents\(\)[\s\S]*RAISE EXCEPTION 'verification cleanup deprecated'/,
+  );
+  assert.match(
+    sql,
+    /REVOKE (?:ALL|EXECUTE) ON FUNCTION public\.delete_expired_verification_documents\(\) FROM PUBLIC, anon, authenticated, service_role/,
   );
   for (const signature of [
     "delete_expired_verification_documents\\(\\)",
@@ -78,6 +82,39 @@ test("hardening migration closes SECURITY DEFINER execution and mutable paths", 
       new RegExp(`ALTER FUNCTION public\\.${signature} SET search_path = ''`),
     );
   }
+});
+
+test("hardening migration uses a bounded service-only verification-document lease protocol", async () => {
+  const sql = await migrationSql();
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS deletion_started_at TIMESTAMPTZ/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS deletion_claim_token UUID/);
+  assert.match(sql, /owner_verification_documents_deletion_claim_check/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS owner_verification_documents_expiry_claim_idx/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.claim_expired_verification_documents\(/);
+  assert.match(sql, /p_limit < 1 OR p_limit > 100/);
+  assert.match(sql, /p_lease_seconds < 60 OR p_lease_seconds > 3600/);
+  assert.match(sql, /FOR UPDATE SKIP LOCKED/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.complete_verification_document_deletion\(/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.release_verification_document_deletion\(/);
+  for (const signature of [
+    "claim_expired_verification_documents\\(TIMESTAMPTZ, INTEGER, INTEGER\\)",
+    "complete_verification_document_deletion\\(UUID, UUID\\)",
+    "release_verification_document_deletion\\(UUID, UUID\\)",
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(`REVOKE ALL ON FUNCTION public\\.${signature} FROM PUBLIC, anon, authenticated, service_role`),
+    );
+    assert.match(
+      sql,
+      new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${signature} TO service_role`),
+    );
+  }
+  assert.doesNotMatch(
+    sql,
+    /DELETE FROM storage\.objects/,
+    "database SQL must never delete Storage metadata directly",
+  );
 });
 
 test("hardening migration preserves intended RPC and future-function boundaries", async () => {

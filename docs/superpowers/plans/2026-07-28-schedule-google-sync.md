@@ -571,9 +571,11 @@ rtk git commit -m "feat(schedule): add private sync schema and RLS"
 - [ ] Run the database lint warning gate and all proportional quality gates.
 - [ ] Before provider enablement, deploy and invoke the existing daily
   `/api/cron/storage-retention` job with `CRON_SECRET` plus service-role
-  credentials, confirm its verification-document completion marker, and
-  monitor non-2xx Vercel cron executions. Hosted `pg_cron` remains absent; the
-  cleanup RPC must remain unavailable to browser roles.
+  credentials, confirm its bounded verification-document claim → Storage API
+  removal → exact completion/release summaries, and monitor non-2xx Vercel cron
+  executions. Confirm all three cleanup jobs run even when one fails. Hosted
+  `pg_cron` remains absent; the disabled legacy metadata-only cleanup and new
+  lease RPCs must remain unavailable to browser roles.
 
 This task is a blocking OAuth rollout gate and requires security review before
 the provider or schedule-sync flag is enabled.

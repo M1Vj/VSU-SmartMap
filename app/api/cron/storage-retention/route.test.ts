@@ -10,7 +10,7 @@ let proofCleanupError: Error | null = null;
 let proofCleanupResult = { scanned: 4, reclaimed: 3, retry: 1 };
 let verificationCleanupCalls = 0;
 let verificationCleanupError: Error | null = null;
-let verificationCleanupResult = { completed: true };
+let verificationCleanupResult = { scanned: 2, reclaimed: 1, retry: 1 };
 
 mock.module("@/lib/storage/pending-uploads", {
   namedExports: {
@@ -60,7 +60,7 @@ function reset() {
   proofCleanupResult = { scanned: 4, reclaimed: 3, retry: 1 };
   verificationCleanupCalls = 0;
   verificationCleanupError = null;
-  verificationCleanupResult = { completed: true };
+  verificationCleanupResult = { scanned: 2, reclaimed: 1, retry: 1 };
 }
 
 test.beforeEach(reset);
@@ -111,6 +111,9 @@ test("returns a generic no-cache error when cleanup fails", async () => {
   const body = await response.json();
   assert.deepEqual(body, { error: "Unable to reclaim storage." });
   assert.equal(JSON.stringify(body).includes("test-cron-secret"), false);
+  assert.equal(cleanupCalls, 1);
+  assert.equal(proofCleanupCalls, 1);
+  assert.equal(verificationCleanupCalls, 1);
 });
 
 test("keeps cleanup failures generic when event-proof retention cannot run", async () => {
@@ -119,6 +122,9 @@ test("keeps cleanup failures generic when event-proof retention cannot run", asy
   const response = await GET(request("Bearer test-cron-secret"));
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: "Unable to reclaim storage." });
+  assert.equal(cleanupCalls, 1);
+  assert.equal(proofCleanupCalls, 1);
+  assert.equal(verificationCleanupCalls, 1);
 });
 
 test("returns an observable generic failure when verification-document retention fails", async () => {
@@ -130,6 +136,8 @@ test("returns an observable generic failure when verification-document retention
   const body = await response.json();
   assert.deepEqual(body, { error: "Unable to reclaim storage." });
   assert.equal(JSON.stringify(body).includes("verification document"), false);
+  assert.equal(cleanupCalls, 1);
+  assert.equal(proofCleanupCalls, 1);
   assert.equal(verificationCleanupCalls, 1);
 });
 

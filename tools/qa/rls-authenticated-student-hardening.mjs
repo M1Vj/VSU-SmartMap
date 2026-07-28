@@ -85,6 +85,11 @@ async function main() {
   let triggerReviewId = null;
   let triggerOwnerProfileId = null;
   let originalOwnerDisplayName = null;
+  let disposableFacilityId = null;
+  let disposableRoomId = null;
+  let adminFacilityId = null;
+  let verificationDocumentId = null;
+  let knowledgeFixtureId = null;
 
   console.log("Authenticated student database-hardening matrix (loopback Supabase only)\n");
 
@@ -137,7 +142,7 @@ async function main() {
     ORDER BY procedure.proname;
   `);
   const expectedFunctionCatalog = [
-    "delete_expired_verification_documents|t|t|f|f|t",
+    "delete_expired_verification_documents|t|t|f|f|f",
     "enforce_owner_listing_transition|t|t|f|f|f",
     "has_app_role|t|t|f|t|f",
     "propagate_owner_display_name|t|t|f|f|f",
@@ -148,6 +153,51 @@ async function main() {
     "catalog has exact SECURITY DEFINER paths and API ACLs",
     JSON.stringify(functionCatalog) === JSON.stringify(expectedFunctionCatalog),
     functionCatalog.join("; "),
+  );
+
+  const verificationRetentionCatalog = catalogRows(`
+    SELECT
+      procedure.proname,
+      procedure.prosecdef,
+      procedure.proconfig = ARRAY['search_path=""'],
+      pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE'),
+      pg_catalog.has_function_privilege('service_role', procedure.oid, 'EXECUTE')
+    FROM pg_catalog.pg_proc AS procedure
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+    WHERE namespace.nspname = 'public'
+      AND procedure.proname IN (
+        'claim_expired_verification_documents',
+        'complete_verification_document_deletion',
+        'release_verification_document_deletion'
+      )
+    ORDER BY procedure.proname;
+  `);
+  check(
+    "verification retention RPCs are fixed-path and service-only",
+    verificationRetentionCatalog.length === 3
+      && verificationRetentionCatalog.every((row) => row.endsWith("|t|t|f|f|t")),
+    verificationRetentionCatalog.join("; "),
+  );
+  const legacyCleanupDefinition = catalogRows(`
+    SELECT
+      pg_catalog.strpos(
+        pg_catalog.pg_get_functiondef(
+          'public.delete_expired_verification_documents()'::pg_catalog.regprocedure
+        ),
+        'DELETE FROM storage.objects'
+      ) = 0,
+      pg_catalog.strpos(
+        pg_catalog.pg_get_functiondef(
+          'public.delete_expired_verification_documents()'::pg_catalog.regprocedure
+        ),
+        'verification cleanup deprecated'
+      ) > 0;
+  `);
+  check(
+    "legacy cleanup is disabled and cannot delete Storage metadata",
+    legacyCleanupDefinition[0] === "t|t",
+    legacyCleanupDefinition[0],
   );
 
   const searchCatalog = catalogRows(`
@@ -202,50 +252,84 @@ async function main() {
     defaultAcl[0],
   );
 
-  const ownerCleanup = catalogRows(
-    "SELECT public.delete_expired_verification_documents();",
-  );
-  check("postgres owner can invoke cleanup", ownerCleanup.length === 0, ownerCleanup[0]);
-
   for (const table of ["facilities", "rooms"]) {
     const publicRead = await anon.from(table).select("id").limit(1);
-    check(`public can still read ${table}`, !publicRead.error, publicRead.error?.message);
+    check(
+      `public can still read a known ${table} fixture`,
+      !publicRead.error && (publicRead.data?.length ?? 0) > 0,
+      publicRead.error?.message,
+    );
   }
 
   const facility = {
-    name: `Forbidden ${suffix}`,
-    slug: `forbidden-${suffix}`,
+    name: `Disposable ${suffix}`,
+    slug: `disposable-${suffix}`,
     category: "academic",
     latitude: 10.74,
     longitude: 124.79,
   };
-  check("student cannot insert facilities", denied(await student.from("facilities").insert(facility)));
+  const disposableFacility = await service
+    .from("facilities")
+    .insert(facility)
+    .select("id")
+    .single();
+  if (disposableFacility.error || !disposableFacility.data?.id) {
+    throw new Error("Unable to create the disposable facility fixture.");
+  }
+  disposableFacilityId = disposableFacility.data.id;
+  const disposableRoom = await service
+    .from("rooms")
+    .insert({
+      facility_id: disposableFacilityId,
+      room_code: `SAFE-${suffix.slice(0, 8)}`,
+      name: "Disposable room",
+    })
+    .select("id")
+    .single();
+  if (disposableRoom.error || !disposableRoom.data?.id) {
+    throw new Error("Unable to create the disposable room fixture.");
+  }
+  disposableRoomId = disposableRoom.data.id;
+
+  check(
+    "student cannot insert facilities",
+    denied(await student.from("facilities").insert({
+      ...facility,
+      slug: `forbidden-${suffix}`,
+    })),
+  );
   check(
     "student cannot update facilities",
     changedNothing(
-      await student.from("facilities").update({ name: "Forbidden" }).neq("id", suffix).select("id"),
+      await student
+        .from("facilities")
+        .update({ name: "Forbidden" })
+        .eq("id", disposableFacilityId)
+        .select("id"),
     ),
   );
   check(
     "student cannot delete facilities",
-    changedNothing(await student.from("facilities").delete().neq("id", suffix).select("id")),
+    changedNothing(
+      await student.from("facilities").delete().eq("id", disposableFacilityId).select("id"),
+    ),
   );
   check(
     "student cannot insert rooms",
     denied(await student.from("rooms").insert({
-      facility_id: suffix,
+      facility_id: disposableFacilityId,
       room_code: "NOPE",
     })),
   );
   check(
     "student cannot update rooms",
     changedNothing(
-      await student.from("rooms").update({ name: "Forbidden" }).neq("id", suffix).select("id"),
+      await student.from("rooms").update({ name: "Forbidden" }).eq("id", disposableRoomId).select("id"),
     ),
   );
   check(
     "student cannot delete rooms",
-    changedNothing(await student.from("rooms").delete().neq("id", suffix).select("id")),
+    changedNothing(await student.from("rooms").delete().eq("id", disposableRoomId).select("id")),
   );
 
   const seededSuggestion = await service
@@ -327,9 +411,14 @@ async function main() {
     adminRole.error?.message,
   );
 
+  const adminFacilityInput = {
+    ...facility,
+    name: `Admin disposable ${suffix}`,
+    slug: `admin-disposable-${suffix}`,
+  };
   const adminFacility = await admin
     .from("facilities")
-    .insert(facility)
+    .insert(adminFacilityInput)
     .select("id")
     .single();
   check(
@@ -338,6 +427,7 @@ async function main() {
     adminFacility.error?.message,
   );
   if (adminFacility.data?.id) {
+    adminFacilityId = adminFacility.data.id;
     const adminRoom = await admin
       .from("rooms")
       .insert({
@@ -371,12 +461,17 @@ async function main() {
       !adminDelete.error && adminDelete.data?.length === 1,
       adminDelete.error?.message,
     );
+    if (!adminDelete.error && adminDelete.data?.length === 1) adminFacilityId = null;
   }
 
   const serviceRead = await service.from("suggestions").select("id").limit(1);
   check("service operations retain suggestion access", !serviceRead.error, serviceRead.error?.message);
   const serviceCleanup = await service.rpc("delete_expired_verification_documents");
-  check("service can invoke cleanup explicitly", !serviceCleanup.error, serviceCleanup.error?.message);
+  check(
+    "service cannot invoke deprecated metadata-only cleanup",
+    Boolean(serviceCleanup.error),
+    serviceCleanup.error?.message,
+  );
 
   const ownerIdentity = await owner.auth.getUser();
   const ownerProfile = await service
@@ -389,6 +484,122 @@ async function main() {
   }
   triggerOwnerProfileId = ownerProfile.data.id;
   originalOwnerDisplayName = ownerProfile.data.display_name;
+
+  const ownerApplication = await service
+    .from("owner_applications")
+    .select("id,user_id")
+    .eq("user_id", ownerIdentity.data.user?.id)
+    .limit(1)
+    .single();
+  if (ownerApplication.error || !ownerApplication.data) {
+    throw new Error("Unable to load the verification retention fixture.");
+  }
+  const verificationDocument = await service
+    .from("owner_verification_documents")
+    .insert({
+      application_id: ownerApplication.data.id,
+      user_id: ownerApplication.data.user_id,
+      storage_bucket: "boarding-house-verification",
+      storage_path: `${ownerApplication.data.user_id}/${ownerApplication.data.id}/fixture-${suffix}.pdf`,
+      original_filename: "fixture.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 128,
+      delete_after: "2020-01-01T00:00:00.000Z",
+    })
+    .select("id")
+    .single();
+  if (verificationDocument.error || !verificationDocument.data?.id) {
+    throw new Error("Unable to seed the verification retention fixture.");
+  }
+  verificationDocumentId = verificationDocument.data.id;
+  const firstClaim = await service.rpc("claim_expired_verification_documents", {
+    p_now: "2026-07-29T00:00:00.000Z",
+    p_limit: 1,
+    p_lease_seconds: 900,
+  });
+  const claimedDocument = firstClaim.data?.find((row) => row.id === verificationDocumentId);
+  check(
+    "verification retention claims the exact expired fixture with a lease token",
+    !firstClaim.error && Boolean(claimedDocument?.claim_token),
+    firstClaim.error?.message,
+  );
+  if (!claimedDocument?.claim_token) {
+    throw new Error("Verification retention did not claim its fixture.");
+  }
+  const wrongCompletion = await service.rpc("complete_verification_document_deletion", {
+    p_document_id: verificationDocumentId,
+    p_claim_token: randomUUID(),
+  });
+  const afterWrongCompletion = await service
+    .from("owner_verification_documents")
+    .select("id")
+    .eq("id", verificationDocumentId)
+    .single();
+  check(
+    "wrong verification claim token cannot delete the retained row",
+    !wrongCompletion.error
+      && wrongCompletion.data === false
+      && !afterWrongCompletion.error,
+    wrongCompletion.error?.message ?? afterWrongCompletion.error?.message,
+  );
+  const releaseClaim = await service.rpc("release_verification_document_deletion", {
+    p_document_id: verificationDocumentId,
+    p_claim_token: claimedDocument.claim_token,
+  });
+  const repeatedRelease = await service.rpc("release_verification_document_deletion", {
+    p_document_id: verificationDocumentId,
+    p_claim_token: claimedDocument.claim_token,
+  });
+  check(
+    "verification claim release is exact and idempotent",
+    !releaseClaim.error
+      && releaseClaim.data === true
+      && !repeatedRelease.error
+      && repeatedRelease.data === false,
+    releaseClaim.error?.message ?? repeatedRelease.error?.message,
+  );
+  const leaseStart = "2026-07-29T01:00:00.000Z";
+  const leasedClaim = await service.rpc("claim_expired_verification_documents", {
+    p_now: leaseStart,
+    p_limit: 1,
+    p_lease_seconds: 900,
+  });
+  const leasedDocument = leasedClaim.data?.find((row) => row.id === verificationDocumentId);
+  const earlyRecovery = await service.rpc("claim_expired_verification_documents", {
+    p_now: "2026-07-29T01:14:59.000Z",
+    p_limit: 1,
+    p_lease_seconds: 900,
+  });
+  const staleRecovery = await service.rpc("claim_expired_verification_documents", {
+    p_now: "2026-07-29T01:15:01.000Z",
+    p_limit: 1,
+    p_lease_seconds: 900,
+  });
+  const recoveredDocument = staleRecovery.data?.find((row) => row.id === verificationDocumentId);
+  check(
+    "verification leases block early reclaim and recover after expiry",
+    !leasedClaim.error
+      && Boolean(leasedDocument?.claim_token)
+      && !earlyRecovery.error
+      && (earlyRecovery.data?.length ?? 0) === 0
+      && !staleRecovery.error
+      && Boolean(recoveredDocument?.claim_token)
+      && recoveredDocument?.claim_token !== leasedDocument?.claim_token,
+    leasedClaim.error?.message
+      ?? earlyRecovery.error?.message
+      ?? staleRecovery.error?.message,
+  );
+  if (recoveredDocument?.claim_token) {
+    const releaseRecoveredClaim = await service.rpc("release_verification_document_deletion", {
+      p_document_id: verificationDocumentId,
+      p_claim_token: recoveredDocument.claim_token,
+    });
+    check(
+      "recovered verification lease releases with its new exact token",
+      !releaseRecoveredClaim.error && releaseRecoveredClaim.data === true,
+      releaseRecoveredClaim.error?.message,
+    );
+  }
 
   const triggerListing = await service
     .from("boarding_house_listings")
@@ -503,10 +714,37 @@ async function main() {
   const eventWrite = await student.storage
     .from("event-images")
     .upload(`hardening/${suffix}.txt`, new Blob(["blocked"], { type: "text/plain" }));
+  if (!eventWrite.error) {
+    const cleanupUnexpectedUpload = await service.storage
+      .from("event-images")
+      .remove([`hardening/${suffix}.txt`]);
+    check(
+      "unexpected event-images write is removed before failing",
+      !cleanupUnexpectedUpload.error,
+      cleanupUnexpectedUpload.error?.message,
+    );
+  }
   check("event-images write remains denied", Boolean(eventWrite.error), eventWrite.error?.message);
 
+  const searchToken = `hardeningsearch${suffix.slice(0, 8)}`;
+  const knowledgeFixture = await service
+    .from("ai_knowledge_entries")
+    .insert({
+      title: `Retention fixture ${searchToken}`,
+      content: `Known public search fixture ${searchToken}`,
+      keywords: [searchToken],
+      source: "local-adversarial-harness",
+      is_active: true,
+      priority: 100,
+    })
+    .select("id")
+    .single();
+  if (knowledgeFixture.error || !knowledgeFixture.data?.id) {
+    throw new Error("Unable to seed the public search fixture.");
+  }
+  knowledgeFixtureId = knowledgeFixture.data.id;
   const publicSearch = await anon.rpc("search_ai_knowledge_entries", {
-    search_query: "library",
+    search_query: searchToken,
     match_limit: 3,
     fetch_limit: 10,
   });
@@ -514,11 +752,23 @@ async function main() {
     "public AI knowledge search keeps its result contract",
     !publicSearch.error
       && Array.isArray(publicSearch.data)
+      && publicSearch.data.length > 0
       && publicSearch.data.every((row) => typeof row.search_rank === "number"),
     publicSearch.error?.message,
   );
 
   } finally {
+    if (knowledgeFixtureId) {
+      const cleanup = await service.from("ai_knowledge_entries").delete().eq("id", knowledgeFixtureId);
+      check("cleanup removes the public search fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (verificationDocumentId) {
+      const cleanup = await service
+        .from("owner_verification_documents")
+        .delete()
+        .eq("id", verificationDocumentId);
+      check("cleanup removes the verification retention fixture", !cleanup.error, cleanup.error?.message);
+    }
     if (triggerReviewId) {
       const cleanup = await service.from("boarding_house_reviews").delete().eq("id", triggerReviewId);
       check("cleanup removes trigger review fixture", !cleanup.error, cleanup.error?.message);
@@ -537,6 +787,18 @@ async function main() {
     if (seededSuggestionId) {
       const cleanup = await service.from("suggestions").delete().eq("id", seededSuggestionId);
       check("cleanup removes the trusted suggestion fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (adminFacilityId) {
+      const cleanup = await service.from("facilities").delete().eq("id", adminFacilityId);
+      check("cleanup removes the admin facility fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (disposableRoomId) {
+      const cleanup = await service.from("rooms").delete().eq("id", disposableRoomId);
+      check("cleanup removes the disposable room fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (disposableFacilityId) {
+      const cleanup = await service.from("facilities").delete().eq("id", disposableFacilityId);
+      check("cleanup removes the disposable facility fixture", !cleanup.error, cleanup.error?.message);
     }
   }
 

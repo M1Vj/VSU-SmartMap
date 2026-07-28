@@ -23,15 +23,156 @@ DROP POLICY IF EXISTS "Authenticated upload event-images" ON storage.objects;
 DROP POLICY IF EXISTS "Authenticated update event-images" ON storage.objects;
 DROP POLICY IF EXISTS "Authenticated delete event-images" ON storage.objects;
 
--- Trigger and cleanup routines are not API endpoints. Trigger execution does
--- not require callers to hold EXECUTE, and the postgres owner retains access.
-REVOKE EXECUTE ON FUNCTION public.delete_expired_verification_documents() FROM PUBLIC, anon, authenticated;
+-- Verification documents must be deleted through the Storage API so the
+-- physical object and metadata remain consistent. Claims retain the database
+-- row and path until removal succeeds or Storage confirms the object is absent.
+ALTER TABLE public.owner_verification_documents
+  ADD COLUMN IF NOT EXISTS deletion_started_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS deletion_claim_token UUID;
+
+ALTER TABLE public.owner_verification_documents
+  DROP CONSTRAINT IF EXISTS owner_verification_documents_deletion_claim_check;
+ALTER TABLE public.owner_verification_documents
+  ADD CONSTRAINT owner_verification_documents_deletion_claim_check CHECK (
+    (deletion_started_at IS NULL) = (deletion_claim_token IS NULL)
+  );
+
+CREATE INDEX IF NOT EXISTS owner_verification_documents_expiry_claim_idx
+  ON public.owner_verification_documents (delete_after, deletion_started_at, id)
+  WHERE delete_after IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.claim_expired_verification_documents(
+  p_now TIMESTAMPTZ,
+  p_limit INTEGER DEFAULT 100,
+  p_lease_seconds INTEGER DEFAULT 900
+)
+RETURNS TABLE (
+  id UUID,
+  storage_bucket TEXT,
+  storage_path TEXT,
+  claim_token UUID
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF p_now IS NULL OR p_limit < 1 OR p_limit > 100 OR
+     p_lease_seconds < 60 OR p_lease_seconds > 3600 THEN
+    RAISE EXCEPTION 'invalid verification document claim';
+  END IF;
+
+  RETURN QUERY
+  WITH candidates AS (
+    SELECT document.id
+    FROM public.owner_verification_documents AS document
+    WHERE document.delete_after IS NOT NULL
+      AND document.delete_after < p_now
+      AND (
+        document.deletion_started_at IS NULL OR
+        document.deletion_started_at <
+          p_now - pg_catalog.make_interval(secs => p_lease_seconds)
+      )
+    ORDER BY document.delete_after, document.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_limit
+  )
+  UPDATE public.owner_verification_documents AS document
+  SET deletion_started_at = p_now,
+      deletion_claim_token = pg_catalog.gen_random_uuid()
+  FROM candidates
+  WHERE document.id = candidates.id
+  RETURNING document.id,
+            document.storage_bucket,
+            document.storage_path,
+            document.deletion_claim_token;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.complete_verification_document_deletion(
+  p_document_id UUID,
+  p_claim_token UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  IF p_document_id IS NULL OR p_claim_token IS NULL THEN
+    RETURN false;
+  END IF;
+
+  DELETE FROM public.owner_verification_documents
+  WHERE id = p_document_id
+    AND deletion_claim_token = p_claim_token;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count = 1;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.release_verification_document_deletion(
+  p_document_id UUID,
+  p_claim_token UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  IF p_document_id IS NULL OR p_claim_token IS NULL THEN
+    RETURN false;
+  END IF;
+
+  UPDATE public.owner_verification_documents
+  SET deletion_started_at = NULL,
+      deletion_claim_token = NULL
+  WHERE id = p_document_id
+    AND deletion_claim_token = p_claim_token;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count = 1;
+END;
+$$;
+
+-- Disable the legacy routine that directly deleted storage.objects metadata.
+CREATE OR REPLACE FUNCTION public.delete_expired_verification_documents()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'verification cleanup deprecated';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.delete_expired_verification_documents()
+  FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.claim_expired_verification_documents(TIMESTAMPTZ, INTEGER, INTEGER)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.claim_expired_verification_documents(TIMESTAMPTZ, INTEGER, INTEGER)
+  TO service_role;
+REVOKE ALL ON FUNCTION public.complete_verification_document_deletion(UUID, UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.complete_verification_document_deletion(UUID, UUID)
+  TO service_role;
+REVOKE ALL ON FUNCTION public.release_verification_document_deletion(UUID, UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.release_verification_document_deletion(UUID, UUID)
+  TO service_role;
+
+-- Trigger routines are not API endpoints. Trigger execution does not require
+-- callers to hold EXECUTE.
 REVOKE EXECUTE ON FUNCTION public.enforce_owner_listing_transition() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.propagate_owner_display_name() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.recompute_boarding_house_rating() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.set_boarding_house_owner_display_name() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.has_app_role(public.app_user_role) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.delete_expired_verification_documents() TO service_role;
 GRANT EXECUTE ON FUNCTION public.has_app_role(public.app_user_role) TO authenticated;
 
 -- Empty paths are safe because relations and non-catalog schemas referenced by

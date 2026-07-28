@@ -30,12 +30,22 @@ export async function GET(request: Request) {
     return response({ error: "Unauthorized." }, 401);
   }
 
-  try {
-    const pendingUploads = await reclaimExpiredPendingUploads();
-    const eventProofs = await reclaimExpiredEventProofs();
-    const verificationDocuments = await reclaimExpiredVerificationDocuments();
-    return response({ pendingUploads, eventProofs, verificationDocuments }, 200);
-  } catch {
+  const [pendingUploads, eventProofs, verificationDocuments] =
+    await Promise.allSettled([
+      reclaimExpiredPendingUploads(),
+      reclaimExpiredEventProofs(),
+      reclaimExpiredVerificationDocuments(),
+    ]);
+  if (
+    pendingUploads.status === "rejected"
+    || eventProofs.status === "rejected"
+    || verificationDocuments.status === "rejected"
+  ) {
     return response({ error: "Unable to reclaim storage." }, 500);
   }
+  return response({
+    pendingUploads: pendingUploads.value,
+    eventProofs: eventProofs.value,
+    verificationDocuments: verificationDocuments.value,
+  }, 200);
 }

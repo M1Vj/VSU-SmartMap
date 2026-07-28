@@ -303,9 +303,16 @@ The hosted project has no `pg_cron` extension, so the historical conditional
 database schedule does not create a cleanup job. The existing daily Vercel
 `/api/cron/storage-retention` job is the owner-controlled cleanup mechanism: it
 keeps the exact `CRON_SECRET` bearer boundary, uses the server-only service-role
-client to invoke `delete_expired_verification_documents`, returns only a
-non-sensitive completion marker, and converts database details to a generic
-non-2xx response. Production requires `CRON_SECRET`,
+client to claim at most 100 expired rows with bounded leases, validates the
+fixed private bucket/path, deletes each physical object through the Supabase
+Storage API, and only then completes deletion of the exactly claimed database
+row. Missing objects are treated as removed; invalid paths and transient
+Storage failures release their exact claims, while completion failures retain
+the claim for stale-lease recovery. The legacy metadata-only SQL cleanup is
+disabled and uncallable, because direct deletion from `storage.objects` can
+orphan physical files. All three daily retention jobs start independently;
+any failure produces only a generic no-store non-2xx response without
+preventing the other jobs from running. Production requires `CRON_SECRET`,
 `NEXT_PUBLIC_SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`; after deployment,
 invoke the job and monitor its Vercel execution logs for a successful daily run.
 
