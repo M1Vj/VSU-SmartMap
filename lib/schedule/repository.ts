@@ -140,11 +140,11 @@ function storageError(error: unknown): ScheduleStorageError {
   if ([...names].some((name) => QUOTA_ERROR_NAMES.has(name))) {
     return new ScheduleStorageError("quota");
   }
-  if ([...names].some((name) => UNAVAILABLE_ERROR_NAMES.has(name))) {
-    return new ScheduleStorageError("unavailable");
-  }
   if (hasScheduleValidationError) {
     return new ScheduleStorageError("corrupt");
+  }
+  if ([...names].some((name) => UNAVAILABLE_ERROR_NAMES.has(name))) {
+    return new ScheduleStorageError("unavailable");
   }
   return new ScheduleStorageError("unknown");
 }

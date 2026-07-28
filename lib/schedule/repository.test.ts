@@ -277,11 +277,11 @@ test("a real malformed v10 upgrade is classified as corrupt without leaking row 
   });
   const store = new FakeStore();
   store.list = async (scope) => {
-    await database.open();
-    return database.schedule_scoped_courses
+    const rows = await database.schedule_scoped_courses
       .where("scope")
       .equals(scope)
       .toArray();
+    return rows.map((row) => row.course);
   };
 
   await assert.rejects(
