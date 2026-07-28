@@ -325,20 +325,28 @@ export function createDexieScopedScheduleStore(
           const rows = await database.schedule_scoped_courses.where("scope").equals(scope).toArray();
           const pending = await database.schedule_outbox.where("scope").equals(scope).toArray();
           const pendingById = new Map(pending.map((mutation) => [mutation.courseId, mutation]));
-          await database.schedule_scoped_courses.where("scope").equals(scope).delete();
-          for (const row of rows) {
-            await replaceMutation(
+          const desired = rows.map((row) =>
+            desiredScheduleMutation({
+              existing: pendingById.get(row.id),
               scope,
-              row.id,
-              desiredScheduleMutation({
-                existing: pendingById.get(row.id),
-                scope,
-                courseId: row.id,
-                operation: "delete",
-                knownRevision: row.serverRevision,
-                ...dependencies,
-              }),
-            );
+              courseId: row.id,
+              operation: "delete",
+              knownRevision: row.serverRevision,
+              ...dependencies,
+            }),
+          );
+          const sequences = rows
+            .map((row) => pendingById.get(row.id)?.sequence)
+            .filter((sequence): sequence is number => sequence !== undefined);
+          const replacements = desired.filter(
+            (mutation): mutation is ScheduleOutboxMutation => mutation !== undefined,
+          );
+          await database.schedule_scoped_courses.where("scope").equals(scope).delete();
+          if (sequences.length > 0) {
+            await database.schedule_outbox.bulkDelete(sequences);
+          }
+          if (replacements.length > 0) {
+            await database.schedule_outbox.bulkAdd(replacements);
           }
         },
       );
@@ -360,6 +368,24 @@ export function createDexieScopedScheduleStore(
             ...pendingById.keys(),
             ...desiredById.keys(),
           ]);
+          const desired = [...affectedIds].map((id) => {
+            const course = desiredById.get(id);
+            return desiredScheduleMutation({
+              existing: pendingById.get(id),
+              scope,
+              courseId: id,
+              operation: course ? "upsert" : "delete",
+              course,
+              knownRevision: rowsById.get(id)?.serverRevision,
+              ...dependencies,
+            });
+          });
+          const sequences = pending
+            .map((mutation) => mutation.sequence)
+            .filter((sequence): sequence is number => sequence !== undefined);
+          const replacements = desired.filter(
+            (mutation): mutation is ScheduleOutboxMutation => mutation !== undefined,
+          );
           await database.schedule_scoped_courses.where("scope").equals(scope).delete();
           await database.schedule_scoped_courses.bulkAdd(
             courses.map((course) => {
@@ -375,21 +401,11 @@ export function createDexieScopedScheduleStore(
               };
             }),
           );
-          for (const id of affectedIds) {
-            const course = desiredById.get(id);
-            await replaceMutation(
-              scope,
-              id,
-              desiredScheduleMutation({
-                existing: pendingById.get(id),
-                scope,
-                courseId: id,
-                operation: course ? "upsert" : "delete",
-                course,
-                knownRevision: rowsById.get(id)?.serverRevision,
-                ...dependencies,
-              }),
-            );
+          if (sequences.length > 0) {
+            await database.schedule_outbox.bulkDelete(sequences);
+          }
+          if (replacements.length > 0) {
+            await database.schedule_outbox.bulkAdd(replacements);
           }
         },
       );

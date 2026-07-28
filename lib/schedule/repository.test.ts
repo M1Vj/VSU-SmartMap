@@ -175,23 +175,31 @@ class FakeStore implements ScopedScheduleStore {
     dependencies: ScheduleMutationDependencies,
   ): Promise<void> {
     this.transactions += 1;
-    const row = this.rows.find((item) => item.key === scopedCourseKey(scope, id));
-    const existing = this.outbox.find(
-      (item) => item.scope === scope && item.courseId === id,
-    );
-    await this.remove(scope, id);
-    this.outbox = this.outbox.filter(
-      (item) => item.scope !== scope || item.courseId !== id,
-    );
-    const mutation = desiredScheduleMutation({
-      existing,
-      scope,
-      courseId: id,
-      operation: "delete",
-      knownRevision: row?.serverRevision,
-      ...dependencies,
-    });
-    if (mutation) this.persistMutation(mutation);
+    const beforeRows = structuredClone(this.rows);
+    const beforeOutbox = structuredClone(this.outbox);
+    try {
+      const row = this.rows.find((item) => item.key === scopedCourseKey(scope, id));
+      const existing = this.outbox.find(
+        (item) => item.scope === scope && item.courseId === id,
+      );
+      await this.remove(scope, id);
+      this.outbox = this.outbox.filter(
+        (item) => item.scope !== scope || item.courseId !== id,
+      );
+      const mutation = desiredScheduleMutation({
+        existing,
+        scope,
+        courseId: id,
+        operation: "delete",
+        knownRevision: row?.serverRevision,
+        ...dependencies,
+      });
+      if (mutation) this.persistMutation(mutation);
+    } catch (error) {
+      this.rows = beforeRows;
+      this.outbox = beforeOutbox;
+      throw error;
+    }
   }
 
   async accountClear(
@@ -199,24 +207,32 @@ class FakeStore implements ScopedScheduleStore {
     dependencies: ScheduleMutationDependencies,
   ): Promise<void> {
     this.transactions += 1;
-    const rows = this.rows.filter((row) => row.scope === scope);
-    await this.clear(scope);
-    for (const row of rows) {
-      const id = row.id;
-      const mutation = desiredScheduleMutation({
-        existing: this.outbox.find(
-          (item) => item.scope === scope && item.courseId === id,
-        ),
-        scope,
-        courseId: id,
-        operation: "delete",
-        knownRevision: row.serverRevision,
-        ...dependencies,
-      });
-      this.outbox = this.outbox.filter(
-        (item) => item.scope !== scope || item.courseId !== id,
-      );
-      if (mutation) this.persistMutation(mutation);
+    const beforeRows = structuredClone(this.rows);
+    const beforeOutbox = structuredClone(this.outbox);
+    try {
+      const rows = this.rows.filter((row) => row.scope === scope);
+      await this.clear(scope);
+      for (const row of rows) {
+        const id = row.id;
+        const mutation = desiredScheduleMutation({
+          existing: this.outbox.find(
+            (item) => item.scope === scope && item.courseId === id,
+          ),
+          scope,
+          courseId: id,
+          operation: "delete",
+          knownRevision: row.serverRevision,
+          ...dependencies,
+        });
+        this.outbox = this.outbox.filter(
+          (item) => item.scope !== scope || item.courseId !== id,
+        );
+        if (mutation) this.persistMutation(mutation);
+      }
+    } catch (error) {
+      this.rows = beforeRows;
+      this.outbox = beforeOutbox;
+      throw error;
     }
   }
 
@@ -227,31 +243,39 @@ class FakeStore implements ScopedScheduleStore {
     dependencies: ScheduleMutationDependencies,
   ): Promise<void> {
     this.transactions += 1;
-    const rows = this.rows.filter((row) => row.scope === scope);
-    const desired = new Map(courses.map((course) => [course.id, course]));
-    const ids = new Set([
-      ...rows.map((row) => row.id),
-      ...this.outbox.filter((item) => item.scope === scope).map((item) => item.courseId),
-      ...desired.keys(),
-    ]);
-    await this.replaceAll(scope, courses, maximumCourses);
-    for (const id of ids) {
-      const course = desired.get(id);
-      const mutation = desiredScheduleMutation({
-        existing: this.outbox.find(
-          (item) => item.scope === scope && item.courseId === id,
-        ),
-        scope,
-        courseId: id,
-        operation: course ? "upsert" : "delete",
-        course,
-        knownRevision: rows.find((row) => row.id === id)?.serverRevision,
-        ...dependencies,
-      });
-      this.outbox = this.outbox.filter(
-        (item) => item.scope !== scope || item.courseId !== id,
-      );
-      if (mutation) this.persistMutation(mutation);
+    const beforeRows = structuredClone(this.rows);
+    const beforeOutbox = structuredClone(this.outbox);
+    try {
+      const rows = this.rows.filter((row) => row.scope === scope);
+      const desired = new Map(courses.map((course) => [course.id, course]));
+      const ids = new Set([
+        ...rows.map((row) => row.id),
+        ...this.outbox.filter((item) => item.scope === scope).map((item) => item.courseId),
+        ...desired.keys(),
+      ]);
+      await this.replaceAll(scope, courses, maximumCourses);
+      for (const id of ids) {
+        const course = desired.get(id);
+        const mutation = desiredScheduleMutation({
+          existing: this.outbox.find(
+            (item) => item.scope === scope && item.courseId === id,
+          ),
+          scope,
+          courseId: id,
+          operation: course ? "upsert" : "delete",
+          course,
+          knownRevision: rows.find((row) => row.id === id)?.serverRevision,
+          ...dependencies,
+        });
+        this.outbox = this.outbox.filter(
+          (item) => item.scope !== scope || item.courseId !== id,
+        );
+        if (mutation) this.persistMutation(mutation);
+      }
+    } catch (error) {
+      this.rows = beforeRows;
+      this.outbox = beforeOutbox;
+      throw error;
     }
   }
 
@@ -583,6 +607,44 @@ test("failed outbox persistence rolls back the account course change", async () 
   await assert.rejects(new ScheduleRepository(scope, () => store).put(storedCourse()));
   assert.deepEqual(store.rows, []);
   assert.deepEqual(store.outbox, []);
+});
+
+test("fake account remove clear and replaceAll roll back courses and outbox together", async () => {
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const originalRows = [{
+    key: scopedCourseKey(scope, COURSE_ID),
+    scope,
+    id: COURSE_ID,
+    course: storedCourse(),
+    serverRevision: 5,
+  }];
+  const originalOutbox: ScheduleOutboxMutation[] = [{
+    mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    scope,
+    courseId: COURSE_ID,
+    expectedRevision: 5,
+    operation: "upsert",
+    course: storedCourse(),
+    createdAt: CREATED_AT,
+  }];
+
+  for (const operation of ["remove", "clear", "replaceAll"] as const) {
+    const store = new FakeStore();
+    store.rows = structuredClone(originalRows);
+    store.outbox = structuredClone(originalOutbox);
+    store.failOutbox = true;
+    const repository = new ScheduleRepository(scope, () => store);
+    await assert.rejects(
+      operation === "remove"
+        ? repository.remove(COURSE_ID)
+        : operation === "clear"
+          ? repository.clear()
+          : repository.replaceAll([{ ...storedCourse(), title: "Changed" }]),
+      ScheduleStorageError,
+    );
+    assert.deepEqual(store.rows, originalRows);
+    assert.deepEqual(store.outbox, originalOutbox);
+  }
 });
 
 test("repeated edits coalesce and create then delete becomes net zero", async () => {
@@ -929,4 +991,91 @@ test("real IndexedDB account replacement enforces the practical 200-course bound
     MAX_SCHEDULE_COURSES,
   );
   assert.deepEqual(await database.schedule_outbox.toArray(), before);
+});
+
+test("real IndexedDB replaceAll bulk-coalesces the 400-row worst case", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const otherScope = accountScheduleScope("22222222-2222-4222-8222-222222222222");
+  let nextMutation = 1;
+  const repository = new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+    {
+      mutationId: () =>
+        `30000000-0000-4000-8000-${(nextMutation++).toString(16).padStart(12, "0")}`,
+      now: () => new Date(CREATED_AT),
+    },
+  );
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+  const pendingDeletes = Array.from(
+    { length: MAX_SCHEDULE_COURSES },
+    (_, index): ScheduleOutboxMutation => ({
+      mutationId: `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+      scope,
+      courseId: courseId(index),
+      expectedRevision: index + 1,
+      operation: "delete",
+      createdAt: CREATED_AT,
+    }),
+  );
+  await database.schedule_outbox.bulkAdd([
+    ...pendingDeletes,
+    {
+      mutationId: "20000000-0000-4000-8000-000000000000",
+      scope: otherScope,
+      courseId: OTHER_ID,
+      expectedRevision: 7,
+      operation: "delete",
+      createdAt: CREATED_AT,
+    },
+  ]);
+  const replacements = Array.from(
+    { length: MAX_SCHEDULE_COURSES },
+    (_, index) => storedCourse(courseId(index + MAX_SCHEDULE_COURSES)),
+  );
+  let bulkDeleteCalls = 0;
+  let bulkAddCalls = 0;
+  const originalBulkDelete = database.schedule_outbox.bulkDelete.bind(
+    database.schedule_outbox,
+  );
+  const originalBulkAdd = database.schedule_outbox.bulkAdd.bind(
+    database.schedule_outbox,
+  );
+  database.schedule_outbox.bulkDelete = ((keys: number[]) => {
+    bulkDeleteCalls += 1;
+    return originalBulkDelete(keys);
+  }) as typeof database.schedule_outbox.bulkDelete;
+  database.schedule_outbox.bulkAdd = ((rows: ScheduleOutboxMutation[]) => {
+    bulkAddCalls += 1;
+    return originalBulkAdd(rows);
+  }) as typeof database.schedule_outbox.bulkAdd;
+
+  await repository.replaceAll(replacements);
+
+  assert.equal(bulkDeleteCalls, 1);
+  assert.equal(bulkAddCalls, 1);
+  assert.equal(
+    await database.schedule_scoped_courses.where("scope").equals(scope).count(),
+    MAX_SCHEDULE_COURSES,
+  );
+  const outbox = await database.schedule_outbox.where("scope").equals(scope).toArray();
+  assert.equal(outbox.length, MAX_SCHEDULE_COURSES * 2);
+  assert.equal(outbox.filter((item) => item.operation === "delete").length, 200);
+  assert.equal(outbox.filter((item) => item.operation === "upsert").length, 200);
+  assert.deepEqual(
+    outbox
+      .filter((item) => item.operation === "delete")
+      .map((item) => item.expectedRevision)
+      .sort((a, b) => a - b),
+    Array.from({ length: MAX_SCHEDULE_COURSES }, (_, index) => index + 1),
+  );
+  assert.equal(
+    await database.schedule_outbox.where("scope").equals(otherScope).count(),
+    1,
+  );
 });
