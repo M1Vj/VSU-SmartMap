@@ -153,28 +153,23 @@ test("assertOwnerAction preserves owner authorization and delays service access 
   assert.equal(privilegedRoleQueries, 0);
 });
 
-test("the explicit missing-role-table fallback still authorizes admin only after an authenticated lookup", async () => {
+test("assertAdminAction rejects a missing role table without constructing a service client", async () => {
   resetAuthState([]);
   roleError = {
     code: "PGRST205",
     message: "Could not find the table 'public.app_user_roles' in the schema cache",
   };
-  const previousFallback = process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK;
   process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK = "true";
   const { assertAdminAction } = await serverModule;
 
   try {
     const result = await assertAdminAction();
 
-    assert.equal("error" in result, false);
+    assert.deepEqual(result, { error: "Unauthorized" });
     assert.equal(authenticatedRoleQueries, 1);
-    assert.equal(serviceClientConstructions, 1);
+    assert.equal(serviceClientConstructions, 0);
     assert.equal(privilegedRoleQueries, 0);
   } finally {
-    if (previousFallback === undefined) {
-      delete process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK;
-    } else {
-      process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK = previousFallback;
-    }
+    delete process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK;
   }
 });

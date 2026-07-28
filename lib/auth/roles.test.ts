@@ -5,12 +5,10 @@ import {
   APP_ROLES,
   canAccessAdminArea,
   canAccessOwnerArea,
-  getMetadataAppRoles,
   isBreakGlassAdmin,
   isMissingAppRoleTableError,
   mergeAppRoles,
   normalizeAppRoles,
-  shouldAllowMissingRoleTableAdminFallback,
 } from "./roles.ts";
 
 test("APP_ROLES keeps admin and boarding_house_owner as protected app roles", () => {
@@ -24,34 +22,7 @@ test("normalizeAppRoles ignores untrusted or unknown role values", () => {
   );
 });
 
-test("getMetadataAppRoles trusts app metadata roles", () => {
-  assert.deepEqual(
-    getMetadataAppRoles({
-      app_metadata: {
-        role: "admin",
-        roles: ["boarding_house_owner", "student"],
-      },
-    }),
-    ["admin", "boarding_house_owner"],
-  );
-});
-
-test("getMetadataAppRoles ignores user metadata unless explicitly allowed", () => {
-  const user = {
-    app_metadata: {},
-    user_metadata: {
-      role: "admin",
-    },
-  };
-
-  assert.deepEqual(getMetadataAppRoles(user), []);
-  assert.deepEqual(
-    getMetadataAppRoles(user, { includeUserMetadata: true }),
-    ["admin"],
-  );
-});
-
-test("mergeAppRoles deduplicates role-table and metadata roles", () => {
+test("mergeAppRoles deduplicates normalized role sources", () => {
   assert.deepEqual(
     mergeAppRoles(["admin"], ["admin", "boarding_house_owner"]),
     ["admin", "boarding_house_owner"],
@@ -69,14 +40,6 @@ test("isMissingAppRoleTableError detects Supabase schema-cache misses", () => {
   assert.equal(isMissingAppRoleTableError({ code: "42501", message: "denied" }), false);
 });
 
-test("shouldAllowMissingRoleTableAdminFallback requires explicit env opt-in", () => {
-  assert.equal(shouldAllowMissingRoleTableAdminFallback({}), false);
-  assert.equal(
-    shouldAllowMissingRoleTableAdminFallback({ allowFallback: "true" }),
-    true,
-  );
-});
-
 test("isBreakGlassAdmin only matches allowlisted user ids", () => {
   assert.equal(isBreakGlassAdmin("user-1", "user-1,user-2"), true);
   assert.equal(isBreakGlassAdmin("user-3", "user-1,user-2"), false);
@@ -85,6 +48,7 @@ test("isBreakGlassAdmin only matches allowlisted user ids", () => {
 });
 
 test("canAccessAdminArea requires the admin role", () => {
+  assert.equal(canAccessAdminArea([]), false);
   assert.equal(canAccessAdminArea(["boarding_house_owner"]), false);
   assert.equal(canAccessAdminArea(["admin"]), true);
 });

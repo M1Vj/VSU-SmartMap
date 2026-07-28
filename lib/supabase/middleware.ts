@@ -3,13 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   canAccessAdminArea,
   canAccessOwnerArea,
-  getMetadataAppRoles,
   isBreakGlassAdmin,
-  isMissingAppRoleTableError,
   mergeAppRoles,
   normalizeAppRoles,
-  shouldAllowMissingRoleTableAdminFallback,
-  shouldAllowLegacyUserMetadataRoles,
 } from "@/lib/auth/roles";
 import type { AppRole } from "@/lib/auth/roles";
 import { decideAdminRouteAccess } from "@/lib/auth/route-access";
@@ -61,17 +57,9 @@ export async function updateSession(request: NextRequest) {
 
   const roles = user
     ? mergeAppRoles(
-        mergeAppRoles(
-          normalizeAppRoles(roleResult?.data?.map((row) => row.role)),
-          roleResult?.error &&
-            isMissingAppRoleTableError(roleResult.error) &&
-            isAdminRoute &&
-            shouldAllowMissingRoleTableAdminFallback()
-            ? ["admin"]
-            : getMetadataAppRoles(user, {
-                includeUserMetadata: shouldAllowLegacyUserMetadataRoles(),
-              }),
-        ),
+        roleResult?.error
+          ? []
+          : normalizeAppRoles(roleResult?.data?.map((row) => row.role)),
         breakGlassRoles,
       )
     : [];

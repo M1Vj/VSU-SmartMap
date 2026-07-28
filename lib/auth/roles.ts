@@ -2,13 +2,6 @@ export const APP_ROLES = ["admin", "boarding_house_owner"] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
 
-type RoleMetadata = Record<string, unknown> | null | undefined;
-
-type MetadataRoleUser = {
-  app_metadata?: RoleMetadata;
-  user_metadata?: RoleMetadata;
-};
-
 type RoleLookupError = {
   code?: string | null;
   message?: string | null;
@@ -31,41 +24,6 @@ export function normalizeAppRoles(values: readonly unknown[] | null | undefined)
   }
 
   return roles;
-}
-
-function collectMetadataRoleValues(metadata: RoleMetadata): unknown[] {
-  if (!metadata || typeof metadata !== "object") return [];
-
-  return [
-    metadata.role,
-    ...(Array.isArray(metadata.roles) ? metadata.roles : []),
-  ];
-}
-
-export function getMetadataAppRoles(
-  user: MetadataRoleUser,
-  options: { includeUserMetadata?: boolean } = {},
-): AppRole[] {
-  const values = [
-    ...collectMetadataRoleValues(user.app_metadata),
-    ...(options.includeUserMetadata
-      ? collectMetadataRoleValues(user.user_metadata)
-      : []),
-  ];
-
-  return normalizeAppRoles(values);
-}
-
-export function shouldAllowLegacyUserMetadataRoles(): boolean {
-  return process.env.ALLOW_LEGACY_USER_METADATA_ROLES === "true";
-}
-
-export function shouldAllowMissingRoleTableAdminFallback(
-  env: { allowFallback?: string } = {
-    allowFallback: process.env.ALLOW_MISSING_ROLE_TABLE_ADMIN_FALLBACK,
-  },
-): boolean {
-  return env.allowFallback === "true";
 }
 
 export function getBreakGlassAdminUserIds(
