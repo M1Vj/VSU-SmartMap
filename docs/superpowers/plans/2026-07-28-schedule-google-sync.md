@@ -130,13 +130,18 @@ rtk git commit -m "fix(auth): fail closed before student OAuth"
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  boardingHouseOAuthNext,
   oauthFailurePath,
   safeOauthNext,
 } from "./oauth-return.ts";
 
-test("accepts schedule and owner relative return paths", () => {
+test("accepts typed schedule, owner, and boarding-house return paths", () => {
   assert.equal(safeOauthNext("/schedule"), "/schedule");
   assert.equal(safeOauthNext("/owner"), "/owner");
+  assert.equal(
+    safeOauthNext("/boarding-houses/green-gate-abc123"),
+    boardingHouseOAuthNext("green-gate-abc123"),
+  );
 });
 
 test("rejects absolute and protocol-relative destinations", () => {
@@ -175,7 +180,25 @@ Expected: FAIL because `oauth-return.ts` is absent.
 - [ ] **Step 3: Implement the return policy**
 
 ```ts
-export function safeOauthNext(value: string | null): string {
+declare const boardingHouseOAuthNextBrand: unique symbol;
+export type BoardingHouseOAuthNext = string & {
+  readonly [boardingHouseOAuthNextBrand]: true;
+};
+export type OAuthNext = "/schedule" | "/owner" | BoardingHouseOAuthNext;
+
+const BOARDING_HOUSE_PREFIX = "/boarding-houses/";
+const BOARDING_HOUSE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function boardingHouseOAuthNext(
+  slug: string,
+): BoardingHouseOAuthNext {
+  if (slug.length > 90 || !BOARDING_HOUSE_SLUG.test(slug)) {
+    throw new Error("Invalid boarding-house slug");
+  }
+  return `${BOARDING_HOUSE_PREFIX}${slug}` as BoardingHouseOAuthNext;
+}
+
+export function safeOauthNext(value: string | null): OAuthNext | "/" {
   if (
     !value ||
     /[\\\u0000-\u001f\u007f]/.test(value) ||
@@ -191,22 +214,35 @@ export function safeOauthNext(value: string | null): string {
     parsed.origin !== "https://smartmap.invalid" ||
     parsed.hash ||
     parsed.search ||
-    (parsed.pathname !== "/schedule" && parsed.pathname !== "/owner")
+    parsed.pathname !== value
   ) return "/";
-  return parsed.pathname;
+  if (parsed.pathname === "/schedule" || parsed.pathname === "/owner") {
+    return parsed.pathname;
+  }
+  if (parsed.pathname.startsWith(BOARDING_HOUSE_PREFIX)) {
+    const slug = parsed.pathname.slice(BOARDING_HOUSE_PREFIX.length);
+    if (slug.length <= 90 && BOARDING_HOUSE_SLUG.test(slug)) {
+      return parsed.pathname as BoardingHouseOAuthNext;
+    }
+  }
+  return "/";
 }
 
-export function oauthFailurePath(next: string): string {
-  return next === "/schedule" || next.startsWith("/schedule?")
-    ? "/schedule?auth_error=oauth"
-    : "/owner/login?error=oauth";
+export function oauthFailurePath(next: OAuthNext | "/"): string {
+  if (next === "/schedule") return "/schedule?auth_error=oauth";
+  if (next.startsWith(BOARDING_HOUSE_PREFIX)) {
+    return `${next}?auth_error=oauth`;
+  }
+  return "/owner/login?error=oauth";
 }
 ```
 
 Change `signInWithGoogle` to require an explicit safe `next`:
 
 ```ts
-export async function signInWithGoogle(next: "/schedule" | "/owner"): Promise<void> {
+import type { OAuthNext } from "@/lib/auth/oauth-return";
+
+export async function signInWithGoogle(next: OAuthNext): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   const redirectTo =
     `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
@@ -223,9 +259,10 @@ export async function signInWithGoogle(next: "/schedule" | "/owner"): Promise<vo
 Use `safeOauthNext` before exchange. On success redirect to `next`; on missing
 code, initialization, cookie handling, thrown exchange, or returned exchange
 error redirect to `oauthFailurePath(next)` without logging sensitive details.
-Collect Supabase cookie writes and apply them to the actual returned
-`NextResponse`, including legitimate verifier cleanup cookies on failed
-exchanges. Emit only relative allowlisted `Location` values so request-host
+Collect and forward any cookies Supabase emits by applying them to the actual
+returned `NextResponse`. The pinned SDK's returned-error path emits no cookies;
+tests model that behavior separately from a synthetic adapter-contract case
+that proves emitted cookies are forwarded. Emit only relative allowlisted `Location` values so request-host
 input cannot control the destination. Add mocked route tests proving schedule
 success/failure, owner and review compatibility, response cookie propagation,
 generic exception handling, hostile-host isolation, and rejection of external

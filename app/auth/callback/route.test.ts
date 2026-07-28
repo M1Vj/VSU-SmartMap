@@ -11,6 +11,7 @@ let exchangeError: Error | null = null;
 let exchangeRejection: Error | null = null;
 let initializationError: Error | null = null;
 let invalidCookieWrite = false;
+let syntheticCookiesOnError = false;
 let exchangedCodes: string[] = [];
 let cookieAdapter: { setAll(cookies: Cookie[]): void } | null = null;
 
@@ -34,7 +35,7 @@ const supabase = {
             options: { maxAge: 0, path: "/" },
           },
         ]);
-      } else {
+      } else if (syntheticCookiesOnError) {
         cookieAdapter?.setAll([
           {
             name: "sb-verifier",
@@ -82,6 +83,7 @@ function reset() {
   exchangeRejection = null;
   initializationError = null;
   invalidCookieWrite = false;
+  syntheticCookiesOnError = false;
   exchangedCodes = [];
   cookieAdapter = null;
 }
@@ -128,8 +130,23 @@ test("schedule OAuth missing-code and exchange failures return to schedule", asy
   assert.deepEqual(exchangedCodes, ["bad-code"]);
   assert.deepEqual(
     response.cookies.getAll().map(({ name, value }) => ({ name, value })),
+    [],
+  );
+  assert.equal(response.headers.get("set-cookie"), null);
+});
+
+test("forwards cookies when a synthetic Supabase adapter emits them with an error", async () => {
+  exchangeError = new Error("exchange failed");
+  syntheticCookiesOnError = true;
+
+  const response = await callback("code=synthetic-error&next=%2Fschedule");
+
+  assert.equal(response.headers.get("location"), "/schedule?auth_error=oauth");
+  assert.deepEqual(
+    response.cookies.getAll().map(({ name, value }) => ({ name, value })),
     [{ name: "sb-verifier", value: "" }],
   );
+  assert.match(response.headers.get("set-cookie") ?? "", /sb-verifier=/);
   assert.equal(
     (response.headers.get("set-cookie") ?? "").includes("sb-session="),
     false,
