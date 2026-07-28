@@ -253,7 +253,7 @@ export function FacilitySearchCombobox({
                   id={`${listboxId}-option-${index}`}
                   type="button"
                   role="option"
-                  aria-selected={highlightedIndex === index}
+                  aria-selected={selectedFacilityId === recent.id}
                   className={cn(
                     "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors",
                     highlightedIndex === index

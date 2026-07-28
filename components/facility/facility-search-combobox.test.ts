@@ -45,12 +45,15 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
     "loading || unavailable || (!loading && options.length === 0)",
     'role="status"',
     "aria-selected={selectedFacilityId === option.facility.id}",
+    "aria-selected={selectedFacilityId === recent.id}",
   ]) {
     assert.match(
       source,
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+
+  assert.doesNotMatch(source, /aria-selected=\{highlightedIndex === index\}/);
 });
 
 test("AppHeader wires selection and TBA suppression into the shared combobox", async () => {
