@@ -2,11 +2,6 @@ export const APP_ROLES = ["admin", "boarding_house_owner"] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
 
-type RoleLookupError = {
-  code?: string | null;
-  message?: string | null;
-} | null | undefined;
-
 const APP_ROLE_SET = new Set<string>(APP_ROLES);
 
 export function isAppRole(value: unknown): value is AppRole {
@@ -42,15 +37,6 @@ export function isBreakGlassAdmin(
 ): boolean {
   if (!userId) return false;
   return getBreakGlassAdminUserIds(raw).includes(userId);
-}
-
-export function isMissingAppRoleTableError(error: RoleLookupError): boolean {
-  const message = error?.message ?? "";
-  return (
-    error?.code === "PGRST205" &&
-    message.includes("app_user_roles") &&
-    message.includes("schema cache")
-  );
 }
 
 export function mergeAppRoles(

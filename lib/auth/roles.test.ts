@@ -6,7 +6,6 @@ import {
   canAccessAdminArea,
   canAccessOwnerArea,
   isBreakGlassAdmin,
-  isMissingAppRoleTableError,
   mergeAppRoles,
   normalizeAppRoles,
 } from "./roles.ts";
@@ -27,17 +26,6 @@ test("mergeAppRoles deduplicates normalized role sources", () => {
     mergeAppRoles(["admin"], ["admin", "boarding_house_owner"]),
     ["admin", "boarding_house_owner"],
   );
-});
-
-test("isMissingAppRoleTableError detects Supabase schema-cache misses", () => {
-  assert.equal(
-    isMissingAppRoleTableError({
-      code: "PGRST205",
-      message: "Could not find the table 'public.app_user_roles' in the schema cache",
-    }),
-    true,
-  );
-  assert.equal(isMissingAppRoleTableError({ code: "42501", message: "denied" }), false);
 });
 
 test("isBreakGlassAdmin only matches allowlisted user ids", () => {
