@@ -149,6 +149,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "fake-indexeddb": "6.2.5",
     "genkit-cli": "^1.29.0",
     "postcss": "8.5.15",
     "tailwindcss": "^3.4.1",

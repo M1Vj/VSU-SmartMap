@@ -112,7 +112,6 @@ export class VSUDatabase extends Dexie {
     });
 
     this.version(11).stores({
-      schedule_courses: "",
       schedule_scoped_courses: "&key, scope, id, course.updatedAt",
       schedule_outbox: "++sequence, &[scope+courseId], scope, mutationId, createdAt",
       schedule_sync_state: "&scope",
