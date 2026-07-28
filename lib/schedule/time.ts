@@ -48,6 +48,13 @@ const MANILA_POSITION_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
 });
 
+const MANILA_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Manila",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 const WEEKDAY_FROM_LABEL: Record<string, IsoWeekday> = {
   Mon: 1,
   Tue: 2,
@@ -70,6 +77,20 @@ export function getManilaWeekPosition(now: Date): ManilaWeekPosition {
     throw new Error("Unable to calculate Manila schedule time.");
   }
   return { weekday, minuteOfDay: hour * 60 + minute };
+}
+
+export function formatManilaCivilDate(now: Date): string {
+  if (!Number.isFinite(now.getTime())) throw new RangeError("Date must be valid.");
+  const parts = MANILA_DATE_FORMATTER.formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value;
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+  if (!year || !month || !day) {
+    throw new Error("Unable to calculate the Manila calendar date.");
+  }
+  return `${year}-${month}-${day}`;
 }
 
 export interface NextClassOccurrence {

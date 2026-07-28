@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import type { ScheduleCourse } from "./types";
+import {
+  MAX_SCHEDULE_COURSES,
+  type ScheduleCourse,
+} from "./types";
 import { ScheduleValidationError } from "./validation";
 import {
+  ScheduleCourseLimitError,
   ScheduleRepository,
   ScheduleStorageError,
   type ScheduleStore,
@@ -35,6 +39,10 @@ function storedCourse(id = COURSE_ID): ScheduleCourse {
   };
 }
 
+function courseId(index: number): string {
+  return `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
 class FakeStore implements ScheduleStore {
   rows: unknown[];
   replaceCalls = 0;
@@ -47,12 +55,17 @@ class FakeStore implements ScheduleStore {
     return structuredClone(this.rows);
   }
 
-  async put(course: ScheduleCourse): Promise<void> {
+  async put(course: ScheduleCourse, maximumCourses: number): Promise<void> {
     const index = this.rows.findIndex(
       (row) => typeof row === "object" && row !== null && "id" in row && row.id === course.id,
     );
     if (index >= 0) this.rows[index] = structuredClone(course);
-    else this.rows.push(structuredClone(course));
+    else {
+      if (this.rows.length >= maximumCourses) {
+        throw new ScheduleCourseLimitError();
+      }
+      this.rows.push(structuredClone(course));
+    }
   }
 
   async remove(id: string): Promise<void> {
@@ -65,7 +78,10 @@ class FakeStore implements ScheduleStore {
     this.rows = [];
   }
 
-  async replaceAll(courses: ScheduleCourse[]): Promise<void> {
+  async replaceAll(courses: ScheduleCourse[], maximumCourses: number): Promise<void> {
+    if (courses.length > maximumCourses) {
+      throw new ScheduleCourseLimitError();
+    }
     this.replaceCalls += 1;
     this.rows = structuredClone(courses);
   }
@@ -103,6 +119,28 @@ test("put validates before writing", async () => {
   assert.deepEqual(store.rows, []);
 });
 
+test("put refuses a new course at the shared limit but still permits editing", async () => {
+  const store = new FakeStore(
+    Array.from({ length: MAX_SCHEDULE_COURSES }, (_, index) =>
+      storedCourse(courseId(index)),
+    ),
+  );
+  const repository = new ScheduleRepository(() => store);
+
+  await assert.rejects(
+    repository.put(storedCourse(courseId(MAX_SCHEDULE_COURSES))),
+    ScheduleCourseLimitError,
+  );
+  assert.equal(store.rows.length, MAX_SCHEDULE_COURSES);
+
+  const updated = await repository.put({
+    ...storedCourse(courseId(0)),
+    title: "Updated title",
+  });
+  assert.equal(updated.title, "Updated title");
+  assert.equal(store.rows.length, MAX_SCHEDULE_COURSES);
+});
+
 test("list parses stored rows without changing persisted timestamps", async () => {
   const store = new FakeStore([storedCourse()]);
   const result = await new ScheduleRepository(() => store).list();
@@ -137,6 +175,23 @@ test("invalid or duplicate replacement makes no store call and leaves data uncha
     assert.equal(store.replaceCalls, 0);
     assert.deepEqual(store.rows, original);
   }
+});
+
+test("replaceAll rejects schedules above the shared course limit atomically", async () => {
+  const original = [storedCourse(OTHER_ID)];
+  const store = new FakeStore(original);
+  const repository = new ScheduleRepository(() => store);
+  const oversized = Array.from(
+    { length: MAX_SCHEDULE_COURSES + 1 },
+    (_, index) => storedCourse(courseId(index)),
+  );
+
+  await assert.rejects(
+    repository.replaceAll(oversized),
+    ScheduleCourseLimitError,
+  );
+  assert.equal(store.replaceCalls, 0);
+  assert.deepEqual(store.rows, original);
 });
 
 test("malformed stored rows become a safe corrupt storage error", async () => {

@@ -1,5 +1,7 @@
 export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+export const MAX_SCHEDULE_COURSES = 200;
+
 export type ScheduleColor =
   | "blue"
   | "green"

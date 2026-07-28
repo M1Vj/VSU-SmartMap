@@ -1,5 +1,8 @@
 import { db } from "../db";
-import type { ScheduleCourse } from "./types";
+import {
+  MAX_SCHEDULE_COURSES,
+  type ScheduleCourse,
+} from "./types";
 import {
   ScheduleValidationError,
   isValidScheduleId,
@@ -30,12 +33,21 @@ export class ScheduleStorageError extends Error {
   }
 }
 
+export class ScheduleCourseLimitError extends Error {
+  readonly code = "too_many_courses";
+
+  constructor() {
+    super(`A schedule can contain up to ${MAX_SCHEDULE_COURSES} courses.`);
+    this.name = "ScheduleCourseLimitError";
+  }
+}
+
 export interface ScheduleStore {
   list(): Promise<unknown[]>;
-  put(course: ScheduleCourse): Promise<void>;
+  put(course: ScheduleCourse, maximumCourses: number): Promise<void>;
   remove(id: string): Promise<void>;
   clear(): Promise<void>;
-  replaceAll(courses: ScheduleCourse[]): Promise<void>;
+  replaceAll(courses: ScheduleCourse[], maximumCourses: number): Promise<void>;
 }
 
 export type ScheduleStoreFactory = () => ScheduleStore;
@@ -117,8 +129,17 @@ function productionStore(): ScheduleStore {
     async list() {
       return db.schedule_courses.toArray();
     },
-    async put(course) {
-      await db.schedule_courses.put(course);
+    async put(course, maximumCourses) {
+      await db.transaction("rw", db.schedule_courses, async () => {
+        const existing = await db.schedule_courses.get(course.id);
+        if (
+          existing === undefined &&
+          (await db.schedule_courses.count()) >= maximumCourses
+        ) {
+          throw new ScheduleCourseLimitError();
+        }
+        await db.schedule_courses.put(course);
+      });
     },
     async remove(id) {
       await db.schedule_courses.delete(id);
@@ -126,7 +147,10 @@ function productionStore(): ScheduleStore {
     async clear() {
       await db.schedule_courses.clear();
     },
-    async replaceAll(courses) {
+    async replaceAll(courses, maximumCourses) {
+      if (courses.length > maximumCourses) {
+        throw new ScheduleCourseLimitError();
+      }
       await db.transaction("rw", db.schedule_courses, async () => {
         await db.schedule_courses.clear();
         await db.schedule_courses.bulkAdd(courses);
@@ -157,9 +181,10 @@ export class ScheduleRepository {
   async put(value: unknown): Promise<ScheduleCourse> {
     const course = normalizeScheduleCourse(value);
     try {
-      await this.storeFactory().put(course);
+      await this.storeFactory().put(course, MAX_SCHEDULE_COURSES);
       return course;
     } catch (error) {
+      if (error instanceof ScheduleCourseLimitError) throw error;
       throw storageError(error);
     }
   }
@@ -186,6 +211,9 @@ export class ScheduleRepository {
   }
 
   async replaceAll(values: readonly unknown[]): Promise<ScheduleCourse[]> {
+    if (values.length > MAX_SCHEDULE_COURSES) {
+      throw new ScheduleCourseLimitError();
+    }
     const courses = values.map(parseStoredScheduleCourse);
     const ids = new Set<string>();
     for (const course of courses) {
@@ -198,9 +226,10 @@ export class ScheduleRepository {
     }
 
     try {
-      await this.storeFactory().replaceAll(courses);
+      await this.storeFactory().replaceAll(courses, MAX_SCHEDULE_COURSES);
       return courses;
     } catch (error) {
+      if (error instanceof ScheduleCourseLimitError) throw error;
       throw storageError(error);
     }
   }

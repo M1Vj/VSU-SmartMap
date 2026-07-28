@@ -1,4 +1,7 @@
-import type { ScheduleCourse } from "./types";
+import {
+  MAX_SCHEDULE_COURSES,
+  type ScheduleCourse,
+} from "./types";
 import {
   ScheduleValidationError,
   isValidScheduleId,
@@ -6,7 +9,7 @@ import {
 } from "./validation";
 
 export const MAX_SCHEDULE_BACKUP_BYTES = 4 * 1024 * 1024;
-export const MAX_SCHEDULE_BACKUP_COURSES = 200;
+export const MAX_SCHEDULE_BACKUP_COURSES = MAX_SCHEDULE_COURSES;
 
 export interface ScheduleBackupDocument {
   version: 1;

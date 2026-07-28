@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   DAY_LABELS,
+  formatManilaCivilDate,
   formatMinuteOfDay,
   formatWeekdays,
   getManilaWeekPosition,
@@ -47,6 +48,21 @@ test("gets Manila weekday and minute across a UTC date boundary", () => {
     weekday: 1,
     minuteOfDay: 15,
   });
+});
+
+test("formats the Manila civil date across the UTC date boundary", () => {
+  assert.equal(
+    formatManilaCivilDate(new Date("2026-07-28T16:30:00.000Z")),
+    "2026-07-29",
+  );
+  assert.equal(
+    formatManilaCivilDate(new Date("2026-07-28T15:59:59.999Z")),
+    "2026-07-28",
+  );
+  assert.throws(
+    () => formatManilaCivilDate(new Date(Number.NaN)),
+    /valid/,
+  );
 });
 
 test("returns an active class before future classes", () => {

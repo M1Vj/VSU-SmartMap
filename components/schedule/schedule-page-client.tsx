@@ -12,7 +12,11 @@ import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities
 import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
 import type { Facility } from "@/lib/types";
 import { ScheduleRepository } from "@/lib/schedule/repository";
-import type { IsoWeekday, ScheduleCourse } from "@/lib/schedule/types";
+import {
+  MAX_SCHEDULE_COURSES,
+  type IsoWeekday,
+  type ScheduleCourse,
+} from "@/lib/schedule/types";
 import { DAY_LABELS, formatMinuteOfDay, getManilaWeekPosition, getNextClassOccurrence } from "@/lib/schedule/time";
 import type { ScheduleBackupDocument } from "@/lib/schedule/backup";
 import { reconcileKnownFacilityIds, transitionRestoreDialogs } from "@/lib/schedule/ui";
@@ -88,6 +92,7 @@ export function SchedulePageClient() {
   }, []);
 
   const next = useMemo(() => getNextClassOccurrence(courses, now), [courses, now]);
+  const atCourseLimit = courses.length >= MAX_SCHEDULE_COURSES;
   const save = useCallback(async (value: unknown) => {
     setBusy(true);
     try {
@@ -137,7 +142,10 @@ export function SchedulePageClient() {
       <div className="mx-auto w-full max-w-7xl space-y-6 px-3 py-5 pb-28 sm:px-6 md:pb-8">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div><h1 id="schedule-page-heading" className="text-2xl font-bold md:text-3xl">My Schedule</h1><p className="mt-1 text-muted-foreground">A private, offline-first weekly planner stored on this device.</p></div>
-          <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setTransferOpen(true)}><Database className="mr-2 h-4 w-4" />Backup & export</Button>{courses.length > 0 ? <Button variant="outline" onClick={() => setConfirmation({ kind: "clear" })}><Trash2 className="mr-2 h-4 w-4" />Clear</Button> : null}<Button onClick={() => setEditing(null)}><Plus className="mr-2 h-4 w-4" />Add course</Button></div>
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setTransferOpen(true)}><Database className="mr-2 h-4 w-4" />Backup & export</Button>{courses.length > 0 ? <Button variant="outline" onClick={() => setConfirmation({ kind: "clear" })}><Trash2 className="mr-2 h-4 w-4" />Clear</Button> : null}<Button onClick={() => setEditing(null)} disabled={atCourseLimit} aria-describedby={atCourseLimit ? "schedule-course-limit" : undefined}><Plus className="mr-2 h-4 w-4" />Add course</Button></div>
+            {atCourseLimit ? <p id="schedule-course-limit" role="status" className="max-w-sm text-xs text-muted-foreground">This device has reached the {MAX_SCHEDULE_COURSES}-course schedule limit. Edit or delete a course before adding another.</p> : null}
+          </div>
         </header>
 
         {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (

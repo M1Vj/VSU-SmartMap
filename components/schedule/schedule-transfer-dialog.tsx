@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { assertScheduleFileSize } from "@/lib/schedule/ui";
 import { exportScheduleBackup, parseScheduleBackup, type ScheduleBackupDocument } from "@/lib/schedule/backup";
 import { exportScheduleIcs } from "@/lib/schedule/ics";
+import { formatManilaCivilDate } from "@/lib/schedule/time";
 import type { ScheduleCourse } from "@/lib/schedule/types";
 
 function download(contents: string, filename: string, type: string) {
@@ -33,7 +34,7 @@ export function ScheduleTransferDialog({
   onClose: () => void;
   onRestoreReady: (backup: ScheduleBackupDocument) => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatManilaCivilDate(new Date());
   const [termStart, setTermStart] = useState(today);
   const [termEnd, setTermEnd] = useState(today);
   const [error, setError] = useState("");
@@ -50,6 +51,23 @@ export function ScheduleTransferDialog({
     }
   };
 
+  const downloadJson = () => {
+    setError("");
+    try {
+      download(
+        exportScheduleBackup(courses),
+        "vsu-smartmap-schedule.json",
+        "application/json",
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to create this schedule backup.",
+      );
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
       <DialogScaffoldContent
@@ -58,7 +76,7 @@ export function ScheduleTransferDialog({
       >
         <DialogScaffoldHeader><DialogTitle>Backup and calendar</DialogTitle><DialogDescription>All files are created and read on this device.</DialogDescription></DialogScaffoldHeader>
         <DialogScaffoldBody className="space-y-6 px-4 sm:px-6">
-          <section className="space-y-2"><h3 className="font-semibold">JSON backup</h3><p className="text-sm text-muted-foreground">Download a private copy or choose a backup to replace this schedule after confirmation.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => download(exportScheduleBackup(courses), "vsu-smartmap-schedule.json", "application/json")}>Download JSON</Button><Label className="inline-flex min-h-11 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">Choose backup<Input type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} /></Label></div>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}</section>
+          <section className="space-y-2"><h3 className="font-semibold">JSON backup</h3><p className="text-sm text-muted-foreground">Download a private copy or choose a backup to replace this schedule after confirmation.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={downloadJson}>Download JSON</Button><Label className="inline-flex min-h-11 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">Choose backup<Input type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} /></Label></div>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}</section>
           <section className="space-y-3"><h3 className="font-semibold">Calendar export</h3><div className="grid grid-cols-2 gap-3"><div><Label htmlFor="term-start">Term start</Label><Input id="term-start" type="date" value={termStart} onChange={(event) => setTermStart(event.target.value)} /></div><div><Label htmlFor="term-end">Term end</Label><Input id="term-end" type="date" value={termEnd} onChange={(event) => setTermEnd(event.target.value)} /></div></div><Button type="button" variant="outline" onClick={() => { try { setError(""); download(exportScheduleIcs(courses, { termStart, termEnd, generatedAt: new Date() }), "vsu-smartmap-schedule.ics", "text/calendar;charset=utf-8"); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to export calendar."); } }}>Download ICS</Button><p className="text-xs text-muted-foreground">TBA-only meetings are not included as timed calendar events.</p></section>
         </DialogScaffoldBody>
         <DialogScaffoldFooter className="px-4 sm:px-6"><Button type="button" onClick={onClose} disabled={busy}>Close</Button></DialogScaffoldFooter>
