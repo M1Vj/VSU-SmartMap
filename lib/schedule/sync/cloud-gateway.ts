@@ -36,10 +36,38 @@ function record(value: unknown): value is RawRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function timestamp(value: unknown): value is string {
+const INSTANT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/;
+
+export function isScheduleSyncTimestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  const match = INSTANT_PATTERN.exec(value);
+  if (!match) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , zone] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > new Date(Date.UTC(year, month, 0)).getUTCDate() ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return false;
+  }
+  if (zone !== "Z") {
+    const zoneHour = Number(zone.slice(1, 3));
+    const zoneMinute = Number(zone.slice(4, 6));
+    if (zoneHour > 23 || zoneMinute > 59) return false;
+  }
+  return Number.isFinite(Date.parse(value));
 }
 
 function positive(value: unknown): value is number {
@@ -53,14 +81,14 @@ function parseRow(value: unknown, validatePayload: boolean): CloudScheduleRow {
     value.id !== value.id.trim().toLowerCase() ||
     !positive(value.revision) ||
     !positive(value.server_version) ||
-    !timestamp(value.created_at) ||
-    !timestamp(value.updated_at)
+    !isScheduleSyncTimestamp(value.created_at) ||
+    !isScheduleSyncTimestamp(value.updated_at)
   ) {
     throw new ScheduleSyncError("invalid-remote");
   }
   const deleted = value.deleted_at;
   if (
-    (value.payload === null && !timestamp(deleted)) ||
+    (value.payload === null && !isScheduleSyncTimestamp(deleted)) ||
     (value.payload !== null && deleted !== null && deleted !== undefined)
   ) {
     throw new ScheduleSyncError("invalid-remote");
@@ -93,14 +121,18 @@ function allNull(result: RawRow): boolean {
     result.deleted_at === null;
 }
 
-function parseMutationResult(value: unknown, courseId: string): CloudMutationResult {
+function parseMutationResult(
+  value: unknown,
+  mutation: ScheduleOutboxMutation,
+): CloudMutationResult {
   if (!Array.isArray(value) || value.length !== 1 || !record(value[0])) {
     throw new ScheduleSyncError("invalid-remote");
   }
   const result = value[0];
   if (
     result.status === "deleted" &&
-    result.id === courseId &&
+    mutation.operation === "delete" &&
+    result.id === mutation.courseId &&
     result.id === result.id.toLowerCase() &&
     result.revision === 0 &&
     allNull(result)
@@ -108,7 +140,10 @@ function parseMutationResult(value: unknown, courseId: string): CloudMutationRes
     return { kind: "deleted-noop", courseId: result.id, revision: 0 };
   }
   if (result.status === "conflict") {
-    if (result.id !== courseId || result.id !== result.id.toLowerCase()) {
+    if (
+      result.id !== mutation.courseId ||
+      result.id !== result.id.toLowerCase()
+    ) {
       throw new ScheduleSyncError("invalid-remote");
     }
     if (result.revision === null) {
@@ -126,7 +161,13 @@ function parseMutationResult(value: unknown, courseId: string): CloudMutationRes
   }
   const row = parseRow(result, true);
   if (
-    row.id !== courseId ||
+    row.id !== mutation.courseId ||
+    (mutation.operation === "upsert" &&
+      (row.payload === null ||
+        (result.status !== "upserted" && result.status !== "replayed"))) ||
+    (mutation.operation === "delete" &&
+      (row.payload !== null ||
+        (result.status !== "deleted" && result.status !== "replayed"))) ||
     (result.status === "upserted" && row.payload === null) ||
     (result.status === "deleted" && row.payload !== null)
   ) {
@@ -153,7 +194,10 @@ function classify(error: unknown): ScheduleSyncError {
   if (
     (record(error) && error.name === "TypeError") ||
     message.includes("failed to fetch") ||
-    message.includes("networkerror")
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("network request failed") ||
+    message === "load failed"
   ) {
     return new ScheduleSyncError("offline");
   }
@@ -175,7 +219,7 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
       },
     );
     if (error) throw classify(error);
-    return parseMutationResult(data, mutation.courseId);
+    return parseMutationResult(data, mutation);
   }
 
   async pull(afterServerVersion: number): Promise<CloudScheduleRow[]> {

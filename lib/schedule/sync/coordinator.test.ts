@@ -43,7 +43,7 @@ class Store implements ScheduleSyncLocalStore {
     const decision = decideScheduleAcknowledgement({
       scope: requested, sent, result: remote as Exclude<CloudMutationResult, { kind: "conflict" }>,
       currentRow: this.rows.get(sent.courseId), currentMutation: current,
-      createMutation: ({ expectedRevision }) => ({
+      createCompensatingDelete: ({ expectedRevision }) => ({
         sequence: 99, mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         scope: requested, courseId: sent.courseId, expectedRevision,
         operation: "delete", createdAt: "2026-07-29T00:00:00.000Z",
@@ -145,6 +145,37 @@ test("accepted create cancelled in flight enqueues a compensating delete without
   assert.equal(store.rows.has(courseId), false);
   assert.equal(store.outbox[0]?.operation, "delete");
   assert.equal(store.outbox[0]?.expectedRevision, 1);
+});
+
+test("compensating delete factory output is validated structurally", () => {
+  const sent = mutation("22222222-2222-4222-8222-222222222222");
+  const result = { kind: "accepted", status: "upserted", row: row(1) } as const;
+  const base = {
+    scope, sent, result, currentRow: undefined, currentMutation: undefined,
+  };
+  const valid = {
+    sequence: 2, mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    scope, courseId, expectedRevision: 1, operation: "delete" as const,
+    createdAt: "2026-07-29T00:00:00Z",
+  };
+  const invalid = [
+    { ...valid, scope: "guest" as const },
+    { ...valid, courseId: "99999999-9999-4999-8999-999999999999" },
+    { ...valid, expectedRevision: 0 },
+    { ...valid, operation: "upsert" as const },
+    { ...valid, course },
+    { ...valid, mutationId: "BAD" },
+    { ...valid, createdAt: "tomorrow" },
+  ];
+  for (const candidate of invalid) {
+    assert.throws(() => decideScheduleAcknowledgement({
+      ...base,
+      createCompensatingDelete: () => candidate as never,
+    }));
+  }
+  assert.equal(decideScheduleAcknowledgement({
+    ...base, createCompensatingDelete: () => valid,
+  }).mutation?.operation, "delete");
 });
 
 test("newer delete during old upsert remains absent and rebases", async () => {

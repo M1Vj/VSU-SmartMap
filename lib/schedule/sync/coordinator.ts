@@ -3,9 +3,12 @@ import type {
   StoredScopedScheduleCourse,
 } from "../local-types";
 import { GUEST_SCHEDULE_SCOPE, type ScheduleScope } from "../scope";
-import { parseStoredScheduleCourse } from "../validation";
+import { isValidScheduleId, parseStoredScheduleCourse } from "../validation";
 import type { CloudMutationResult, CloudScheduleRow } from "./types";
-import type { ScheduleCloudGateway } from "./cloud-gateway";
+import {
+  isScheduleSyncTimestamp,
+  type ScheduleCloudGateway,
+} from "./cloud-gateway";
 import { resolvePulledRow } from "./reconcile";
 
 export type SyncRunResult =
@@ -63,7 +66,11 @@ type AcknowledgementInput = {
   result: Exclude<CloudMutationResult, { kind: "conflict" }>;
   currentRow?: StoredScopedScheduleCourse;
   currentMutation?: ScheduleOutboxMutation;
-  createMutation(input: { expectedRevision: number }): ScheduleOutboxMutation;
+  createCompensatingDelete(input: {
+    scope: ScheduleScope;
+    courseId: string;
+    expectedRevision: number;
+  }): ScheduleOutboxMutation;
 };
 
 export function decideScheduleAcknowledgement(
@@ -88,7 +95,25 @@ export function decideScheduleAcknowledgement(
     input.result.kind === "accepted" &&
     input.result.row.payload !== null
   ) {
-    return { mutation: input.createMutation({ expectedRevision: revision }) };
+    const mutation = input.createCompensatingDelete({
+      scope: input.scope,
+      courseId: input.sent.courseId,
+      expectedRevision: revision,
+    });
+    if (
+      mutation.scope !== input.scope ||
+      mutation.scope === GUEST_SCHEDULE_SCOPE ||
+      mutation.courseId !== input.sent.courseId ||
+      mutation.courseId !== mutation.courseId.toLowerCase() ||
+      mutation.expectedRevision !== revision ||
+      mutation.operation !== "delete" ||
+      mutation.course !== undefined ||
+      !isCanonicalUuid(mutation.mutationId) ||
+      !isScheduleSyncTimestamp(mutation.createdAt)
+    ) {
+      throw new Error("Invalid compensating schedule mutation.");
+    }
+    return { mutation };
   }
   if (input.result.kind === "accepted" && input.result.row.payload !== null) {
     return {
@@ -102,6 +127,10 @@ export function decideScheduleAcknowledgement(
     };
   }
   return {};
+}
+
+function isCanonicalUuid(value: unknown): value is string {
+  return isValidScheduleId(value) && value === value.trim().toLowerCase();
 }
 
 function parseCanonicalCourse(payload: unknown) {

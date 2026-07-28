@@ -16,6 +16,16 @@ const mutation: ScheduleOutboxMutation = {
   operation: "delete",
   createdAt: "2026-07-28T00:00:00.000Z",
 };
+const upsertMutation: ScheduleOutboxMutation = {
+  ...mutation,
+  operation: "upsert",
+  course: {
+    id, code: "CS1", title: "Course", color: "blue",
+    meetings: [{ id: "44444444-4444-4444-8444-444444444444", days: [1], startMinute: 60, endMinute: 120 }],
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+  },
+};
 
 class FakeClient {
   lastRpc?: { name: string; params: Record<string, unknown> };
@@ -166,6 +176,66 @@ test("quota and representative PostgREST network failures are generic", async ()
       error.category === "offline" &&
       !error.message.includes("secret"),
   );
+  for (const message of ["fetch failed", "Network request failed", "Load failed"]) {
+    client.rpcResult = { data: null, error: { code: "", message, details: "secret" } };
+    await assert.rejects(
+      () => new SupabaseScheduleGateway(client as never).push(mutation),
+      (error: unknown) => error instanceof ScheduleSyncError && error.category === "offline",
+    );
+  }
+});
+
+test("accepts strict PostgREST timestamptz offsets and microseconds", async () => {
+  const client = new FakeClient();
+  client.rows = [{
+    id, payload: null, revision: 1, server_version: 1,
+    created_at: "2026-07-28T18:46:04.338019+00:00",
+    updated_at: "2026-07-28T20:46:04.1+02:00",
+    deleted_at: "2026-07-29T02:46:04-08:00",
+  }];
+  assert.equal((await new SupabaseScheduleGateway(client as never).pull(0)).length, 1);
+});
+
+test("rejects invalid and ambiguous timestamp strings", async () => {
+  for (const value of [
+    "2026-02-30T18:46:04Z",
+    "2026-07-28 18:46:04+00:00",
+    "07/28/2026 18:46:04",
+    "2026-07-28T18:46:04",
+    "2026-07-28T25:00:00Z",
+  ]) {
+    const client = new FakeClient();
+    client.rows = [{
+      id, payload: null, revision: 1, server_version: 1,
+      created_at: value, updated_at: "2026-07-28T00:00:00Z",
+      deleted_at: "2026-07-28T00:00:00Z",
+    }];
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(0));
+  }
+});
+
+test("RPC status and row state must match the sent operation", async () => {
+  const active = {
+    id, payload: upsertMutation.course, revision: 1, server_version: 1,
+    created_at: "2026-07-28T00:00:00Z",
+    updated_at: "2026-07-28T00:00:00Z", deleted_at: null,
+  };
+  const tombstone = {
+    id, payload: null, revision: 2, server_version: 2,
+    created_at: "2026-07-28T00:00:00Z",
+    updated_at: "2026-07-28T00:00:00Z",
+    deleted_at: "2026-07-28T00:00:00Z",
+  };
+  for (const [sent, result] of [
+    [upsertMutation, { status: "deleted", ...tombstone }],
+    [upsertMutation, { status: "replayed", ...tombstone }],
+    [mutation, { status: "upserted", ...active }],
+    [mutation, { status: "replayed", ...active }],
+  ] as const) {
+    const client = new FakeClient();
+    client.rpcResult = { data: [result], error: null };
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never).push(sent));
+  }
 });
 
 function courseIdUpper(): string {
