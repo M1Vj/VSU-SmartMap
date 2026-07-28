@@ -280,9 +280,30 @@ Before student OAuth is enabled:
 - Retain only the explicit `BREAK_GLASS_ADMIN_USER_IDS` owner-controlled
   emergency allowlist.
 - Verify the removed flags are absent from preview and production environments.
+- Apply `harden_authenticated_student_access` before enabling the provider.
+  Its catalog gate must prove that ordinary authenticated users cannot mutate
+  facilities or rooms, discover/delete suggestions, or execute trigger and
+  cleanup `SECURITY DEFINER` functions. Public facility/room reads and the
+  server-controlled pending-suggestion RPC remain unchanged.
+- Verify the six legacy `SECURITY DEFINER` functions have empty search paths and
+  exact ACLs: only `has_app_role(app_user_role)` is callable by
+  `authenticated`, and cleanup remains callable only by postgres-owned
+  operations plus `service_role`.
+- Verify `search_ai_knowledge_entries(text, integer, integer)` retains its
+  result contract and public/authenticated read behavior with an empty search
+  path and a fully qualified source relation.
+- Recheck that the legacy `event-images` bucket has no upload, update, or delete
+  policy for authenticated callers, and that postgres future-function defaults
+  do not implicitly expose execution to API roles.
 
 This prevents a missing role table or editable user metadata from promoting an
 ordinary authenticated student.
+
+The hosted project currently has no `pg_cron` extension, so the historical
+conditional schedule for expired boarding-house verification documents did not
+create a cleanup job. This is a privacy/operations rollout gap, not a reason to
+expose cleanup as an API RPC. OAuth enablement requires a separately owned,
+monitored cleanup schedule or an explicit retention-risk acceptance.
 
 The browser client uses the existing Supabase SSR integration and PKCE callback.
 Cloud authorization always relies on Supabase's verified access token and RLS.
@@ -412,7 +433,9 @@ production verification against the merged SHA.
 3. Deploy the application to production with the sync flag disabled, and deploy
    schema plus the enabled UI to preview/staging.
 4. Verify Google provider configuration, exact redirect allowlists, removed
-   fallback flags, RLS advisors, and preview browser flows.
+   fallback flags, the authenticated-student database-hardening catalog/runtime
+   gates, a working owner-controlled verification-document cleanup schedule,
+   RLS advisors, and preview browser flows.
 5. Enable sync in preview and complete two-account/offline/conflict tests.
 6. Merge through protected `main`.
 7. Apply the production migration and verify it while the production flag

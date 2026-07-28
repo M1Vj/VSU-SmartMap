@@ -551,6 +551,31 @@ rtk git add supabase/migrations tools/qa/rls-student-schedules.mjs tools/qa/rls-
 rtk git commit -m "feat(schedule): add private sync schema and RLS"
 ```
 
+### Task 3B: Gate student OAuth on database hardening
+
+**Files:**
+- Create: `supabase/migrations/20260728163845_harden_authenticated_student_access.sql`
+- Create: `tools/qa/authenticated-student-db-hardening.test.ts`
+- Create: `tools/qa/rls-authenticated-student-hardening.mjs`
+
+- [ ] Generate the migration with pinned Supabase CLI 2.107.0.
+- [ ] First capture failing contract tests for dangerous hosted policy names,
+  function ACLs/search paths, legacy event-image writes, future-function
+  defaults, and the public AI search RPC.
+- [ ] Apply a fresh local reset and prove with catalog plus adversarial runtime
+  checks that ordinary authenticated students cannot mutate facilities/rooms,
+  read or delete arbitrary suggestions, or execute cleanup/trigger routines.
+- [ ] Prove public facility/room reads, authenticated `has_app_role`, admin RLS,
+  service operations, postgres-owner cleanup invocation, and public AI search
+  remain valid.
+- [ ] Run the database lint warning gate and all proportional quality gates.
+- [ ] Before provider enablement, establish and monitor an owner-controlled
+  expired-verification-document cleanup schedule. Hosted `pg_cron` is currently
+  absent; do not compensate by exposing the cleanup RPC to browser roles.
+
+This task is a blocking OAuth rollout gate and requires security review before
+the provider or schedule-sync flag is enabled.
+
 ### Task 4: Migrate IndexedDB to account-scoped storage
 
 **Files:**
