@@ -31,8 +31,6 @@ const RATING_LABELS = [
 ];
 
 export function ReviewForm({ listingId, slug, isAuthenticated }: ReviewFormProps) {
-  const next = `/boarding-houses/${slug}`;
-
   if (!isAuthenticated) {
     return (
       <div className="rounded-2xl border bg-card p-4 shadow-sm">
@@ -44,7 +42,7 @@ export function ReviewForm({ listingId, slug, isAuthenticated }: ReviewFormProps
           variant="outline"
           className="w-full rounded-full"
           onClick={() => {
-            void signInWithGoogle(next);
+            void signInWithGoogle("/owner");
           }}
         >
           <LogIn className="mr-2 h-4 w-4" aria-hidden="true" />

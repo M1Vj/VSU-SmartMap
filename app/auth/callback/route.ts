@@ -2,17 +2,12 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-function safeNext(value: string | null): string {
-  if (!value) return "/owner";
-  // only allow same-origin relative paths
-  if (!value.startsWith("/") || value.startsWith("//")) return "/owner";
-  return value;
-}
+import { oauthFailurePath, safeOauthNext } from "@/lib/auth/oauth-return";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = safeNext(searchParams.get("next"));
+  const next = safeOauthNext(searchParams.get("next"));
 
   if (code) {
     const cookieStore = await cookies();
@@ -38,5 +33,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/owner/login?error=oauth`);
+  return NextResponse.redirect(`${origin}${oauthFailurePath(next)}`);
 }
