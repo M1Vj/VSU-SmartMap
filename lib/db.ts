@@ -3,6 +3,7 @@ import type { RoomRowWithFacility } from "@/lib/supabase/queries/rooms";
 import type { Facility } from "@/lib/types";
 import type { MapNode, MapEdge } from "@/lib/types/graph";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
+import type { ScheduleCourse } from "@/lib/schedule/types";
 
 export type CacheMetaKey = "facilities" | "rooms" | "navigation" | "boarding_houses";
 
@@ -26,6 +27,7 @@ export class VSUDatabase extends Dexie {
   map_edges!: Table<MapEdge, string>;
   offline_queue!: Table<OfflineAction, number>;
   cache_meta!: Table<CacheMetaEntry, CacheMetaKey>;
+  schedule_courses!: Table<ScheduleCourse, string>;
 
   constructor() {
     super("VSUSmartMapDB");
@@ -88,6 +90,10 @@ export class VSUDatabase extends Dexie {
 
     this.version(9).stores({
       boarding_houses: "id, name, slug",
+    });
+
+    this.version(10).stores({
+      schedule_courses: "id, code, updatedAt",
     });
   }
 }

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SCHEDULE_LIMITS,
   ScheduleValidationError,
+  isValidScheduleId,
   normalizeScheduleCourse,
   parseStoredScheduleCourse,
 } from "./validation";
@@ -11,6 +12,13 @@ import {
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const MEETING_UUID = "123e4567-e89b-42d3-a456-426614174001";
 const CREATED_AT = "2026-07-01T01:02:03.000Z";
+
+test("validates schedule UUIDs through the shared identifier helper", () => {
+  assert.equal(isValidScheduleId(UUID), true);
+  assert.equal(isValidScheduleId(`  ${UUID.toUpperCase()}  `), true);
+  assert.equal(isValidScheduleId("not-a-uuid"), false);
+  assert.equal(isValidScheduleId(undefined), false);
+});
 
 function validDraft() {
   return {

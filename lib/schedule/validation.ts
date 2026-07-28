@@ -44,6 +44,10 @@ const COLORS: readonly ScheduleColor[] = [
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function isValidScheduleId(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value.trim());
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -80,7 +84,7 @@ function normalizedUuid(
   issues: ScheduleValidationIssue[],
 ): string {
   if (value === undefined || value === null) return crypto.randomUUID();
-  if (typeof value !== "string" || !UUID_PATTERN.test(value.trim())) {
+  if (!isValidScheduleId(value)) {
     issues.push({ field, message: "This saved identifier is invalid." });
     return crypto.randomUUID();
   }
@@ -93,7 +97,7 @@ function optionalUuid(
   issues: ScheduleValidationIssue[],
 ): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string" || !UUID_PATTERN.test(value.trim())) {
+  if (!isValidScheduleId(value)) {
     issues.push({ field, message: "Select a valid facility." });
     return undefined;
   }
