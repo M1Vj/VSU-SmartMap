@@ -31,8 +31,8 @@ test("student destinations define the product order and defaults", () => {
     [
       { id: "map", label: "Map", route: "/", defaultVisible: true, required: true },
       { id: "schedule", label: "Schedule", route: "/schedule", defaultVisible: true, required: false },
-      { id: "boarding", label: "Boarding", route: "/boarding-houses", defaultVisible: true, required: false },
-      { id: "events", label: "Events", route: "/events", defaultVisible: true, required: false },
+      { id: "boarding", label: "Boarding", route: "/boarding-houses", defaultVisible: false, required: false },
+      { id: "events", label: "Events", route: "/events", defaultVisible: false, required: false },
       { id: "directory", label: "Directory", route: "/directory", defaultVisible: true, required: false },
       { id: "chat", label: "Chat", route: "/chat", defaultVisible: true, required: false },
     ],
@@ -40,8 +40,6 @@ test("student destinations define the product order and defaults", () => {
   assert.deepEqual(DEFAULT_VISIBLE_STUDENT_DESTINATIONS, [
     "map",
     "schedule",
-    "boarding",
-    "events",
     "directory",
     "chat",
   ]);
@@ -90,6 +88,14 @@ test("parseVisibleStudentDestinations validates JSON and normalizes IDs", () => 
   assert.deepEqual(parseVisibleStudentDestinations(null), DEFAULT_VISIBLE_STUDENT_DESTINATIONS);
 });
 
+test("parseVisibleStudentDestinations respects valid saved optional choices", () => {
+  assert.deepEqual(parseVisibleStudentDestinations('["boarding","events"]'), [
+    "map",
+    "boarding",
+    "events",
+  ]);
+});
+
 test("serializeVisibleStudentDestinations persists only normalized IDs", () => {
   assert.equal(
     serializeVisibleStudentDestinations(["chat", "unknown", "chat"]),
@@ -129,5 +135,6 @@ test("toggle and reset keep Map required and preserve product order", () => {
   assert.deepEqual(toggleVisibleStudentDestination(["map", "chat"], "schedule"), ["map", "schedule", "chat"]);
   assert.deepEqual(toggleVisibleStudentDestination(["map", "schedule"], "schedule"), ["map"]);
   assert.deepEqual(resetVisibleStudentDestinations(), DEFAULT_VISIBLE_STUDENT_DESTINATIONS);
+  assert.deepEqual(resetVisibleStudentDestinations(), ["map", "schedule", "directory", "chat"]);
   assert.notEqual(resetVisibleStudentDestinations(), DEFAULT_VISIBLE_STUDENT_DESTINATIONS);
 });

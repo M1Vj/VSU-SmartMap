@@ -1,8 +1,8 @@
 export const STUDENT_DESTINATIONS = [
   { id: "map", label: "Map", route: "/", defaultVisible: true, required: true },
   { id: "schedule", label: "Schedule", route: "/schedule", defaultVisible: true, required: false },
-  { id: "boarding", label: "Boarding", route: "/boarding-houses", defaultVisible: true, required: false },
-  { id: "events", label: "Events", route: "/events", defaultVisible: true, required: false },
+  { id: "boarding", label: "Boarding", route: "/boarding-houses", defaultVisible: false, required: false },
+  { id: "events", label: "Events", route: "/events", defaultVisible: false, required: false },
   { id: "directory", label: "Directory", route: "/directory", defaultVisible: true, required: false },
   { id: "chat", label: "Chat", route: "/chat", defaultVisible: true, required: false },
 ] as const;
