@@ -8,6 +8,7 @@ import {
   useWatch,
 } from "react-hook-form";
 import { Plus, Trash2 } from "lucide-react";
+import { FacilitySearchCombobox } from "@/components/facility/facility-search-combobox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -20,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  applyFacilitySearchSelection,
   buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
@@ -28,6 +30,7 @@ import {
   minuteToTimeValue,
   timeValueToMinute,
 } from "@/lib/schedule/ui";
+import type { FacilitySearchOption } from "@/lib/map/facility-search-model";
 import { DAY_SHORT_LABELS } from "@/lib/schedule/time";
 import { ScheduleValidationError } from "@/lib/schedule/validation";
 import type {
@@ -109,26 +112,33 @@ export function CourseDialog({
   open,
   course,
   facilities,
+  facilityOptions,
+  facilityOptionsQuery,
   facilitySource,
   facilitiesLoading,
   facilitiesError,
   saving,
+  onFacilityQueryChange,
   onClose,
   onSave,
 }: {
   open: boolean;
   course?: ScheduleCourse;
   facilities: readonly Facility[];
+  facilityOptions: readonly FacilitySearchOption[];
+  facilityOptionsQuery: string;
   facilitySource: SearchDataSource;
   facilitiesLoading: boolean;
   facilitiesError: string | null;
   saving: boolean;
+  onFacilityQueryChange: (query: string) => void;
   onClose: () => void;
   onSave: (value: unknown) => Promise<void>;
 }) {
   const form = useForm<CourseForm>({ defaultValues: defaults(course) });
   const meetings = useFieldArray({ control: form.control, name: "meetings" });
   const watchedMeetings = useWatch({ control: form.control, name: "meetings" });
+  const [facilityQueries, setFacilityQueries] = useState<string[]>([]);
   const [errorSummary, setErrorSummary] = useState("");
   const summaryRef = useRef<HTMLDivElement>(null);
   const facilityStatus = getFacilityOptionsStatus({
@@ -140,10 +150,24 @@ export function CourseDialog({
 
   useEffect(() => {
     if (open) {
-      form.reset(defaults(course));
+      const nextDefaults = defaults(course);
+      form.reset(nextDefaults);
+      setFacilityQueries(nextDefaults.meetings.map(() => ""));
+      onFacilityQueryChange("");
       setErrorSummary("");
     }
-  }, [course, form, open]);
+  }, [course, form, onFacilityQueryChange, open]);
+  useEffect(() => {
+    if (!open) return;
+    const currentMeetings = form.getValues("meetings");
+    setFacilityQueries((current) =>
+      currentMeetings.map((meeting, index) => {
+        if (current[index]) return current[index];
+        return facilities.find((facility) => facility.id === meeting.facilityId)
+          ?.name ?? "";
+      }),
+    );
+  }, [facilities, form, open]);
   useEffect(() => {
     if (errorSummary) summaryRef.current?.focus();
   }, [errorSummary]);
@@ -342,7 +366,17 @@ export function CourseDialog({
                     <div className="flex items-center justify-between">
                       <h3 className="font-medium">Meeting {index + 1}</h3>
                       {meetings.fields.length > 1 ? (
-                        <Button type="button" variant="ghost" size="sm" onClick={() => meetings.remove(index)}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            meetings.remove(index);
+                            setFacilityQueries((current) =>
+                              current.filter((_, queryIndex) => queryIndex !== index),
+                            );
+                          }}
+                        >
                           <Trash2 className="mr-1 h-4 w-4" />Remove
                         </Button>
                       ) : null}
@@ -437,15 +471,8 @@ export function CourseDialog({
                       <div className="space-y-3">
                         <div>
                           <Label htmlFor={`facility-${index}`}>Facility</Label>
-                          <select
-                            id={`facility-${index}`}
-                            aria-invalid={Boolean(facilityError)}
-                            aria-describedby={[
-                              facilityError ? `facility-${index}-error` : null,
-                              facilityStatus ? `facility-${index}-status` : null,
-                            ].filter(Boolean).join(" ") || undefined}
-                            disabled={facilitiesLoading && facilities.length === 0}
-                            className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          <input
+                            type="hidden"
                             {...form.register(`meetings.${index}.facilityId`, {
                               validate: (facilityId) =>
                                 facilitySelectionError(
@@ -453,19 +480,62 @@ export function CourseDialog({
                                   facilityId,
                                   facilities.map((facility) => facility.id),
                                 ),
-                              onChange: () => {
-                                form.clearErrors([
-                                  `meetings.${index}.facilityId`,
-                                  `meetings.${index}.facilityDetail`,
-                                ]);
-                              },
                             })}
-                          >
-                            <option value="">Choose a facility</option>
-                            {facilities.map((facility) => (
-                              <option key={facility.id} value={facility.id}>{facility.name}</option>
-                            ))}
-                          </select>
+                          />
+                          <FacilitySearchCombobox
+                            id={`facility-${index}`}
+                            label="Search campus facility"
+                            query={facilityQueries[index] ?? ""}
+                            optionsQuery={facilityOptionsQuery}
+                            options={facilityOptions}
+                            selectedFacilityId={
+                              watchedMeetings[index]?.facilityId || undefined
+                            }
+                            suppressResults={
+                              Boolean(facilitiesError) && facilities.length === 0
+                            }
+                            placeholder="Search by building, code, alias, or room..."
+                            inputClassName={
+                              facilityError
+                                ? "border-destructive focus-visible:ring-destructive"
+                                : undefined
+                            }
+                            onQueryChange={(query) => {
+                              setFacilityQueries((current) => {
+                                const next = [...current];
+                                next[index] = query;
+                                return next;
+                              });
+                              onFacilityQueryChange(query);
+                            }}
+                            onSelect={(facility) => {
+                              const selected = applyFacilitySearchSelection(
+                                {
+                                  facilityId: form.getValues(
+                                    `meetings.${index}.facilityId`,
+                                  ),
+                                  facilityDetail: form.getValues(
+                                    `meetings.${index}.facilityDetail`,
+                                  ),
+                                },
+                                facility.id,
+                              );
+                              form.setValue(
+                                `meetings.${index}.facilityId`,
+                                selected.facilityId,
+                                { shouldDirty: true, shouldValidate: true },
+                              );
+                              form.clearErrors(
+                                `meetings.${index}.facilityId`,
+                              );
+                              setFacilityQueries((current) => {
+                                const next = [...current];
+                                next[index] = facility.name;
+                                return next;
+                              });
+                              onFacilityQueryChange(facility.name);
+                            }}
+                          />
                           {facilityStatus ? (
                             <p
                               id={`facility-${index}-status`}
@@ -547,7 +617,14 @@ export function CourseDialog({
                 );
               })}
               {meetings.fields.length < 8 ? (
-                <Button type="button" variant="outline" onClick={() => meetings.append(blankMeeting())}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    meetings.append(blankMeeting());
+                    setFacilityQueries((current) => [...current, ""]);
+                  }}
+                >
                   <Plus className="mr-2 h-4 w-4" />Add meeting
                 </Button>
               ) : null}

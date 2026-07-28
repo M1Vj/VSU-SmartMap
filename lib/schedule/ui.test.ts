@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ScheduleCourse } from "./types";
+import type { Facility } from "@/lib/types/facility";
 import {
+  applyFacilitySearchSelection,
   assignMeetingColumns,
   assertScheduleFileSize,
   buildFacilityLocationLabel,
+  buildScheduleFacilitySearchOptions,
   buildWeekGridModel,
   analyzeDayConflicts,
   endTimeValueToMinute,
@@ -20,6 +23,56 @@ import {
   transitionRestoreDialogs,
   timeValueToMinute,
 } from "./ui";
+
+const scheduleSearchFacility: Facility = {
+  id: "dstat",
+  name: "Department of Statistics",
+  code: "DSTAT",
+  category: "academic",
+  description: "Statistics and data science",
+  slug: "department-of-statistics",
+  coordinates: { lat: 10.7, lng: 124.8 },
+  hasRooms: true,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+test("schedule facility search uses shared map ranking for code, alias, and room queries", () => {
+  const rooms = [{
+    facility_id: "dstat",
+    room_code: "DSTAT-201",
+    name: "Statistics Lab",
+  }];
+
+  for (const query of ["DSTAT", "data science"]) {
+    assert.equal(
+      buildScheduleFacilitySearchOptions({
+        facilities: [scheduleSearchFacility],
+        rooms,
+        query,
+      })[0]?.facility.id,
+      "dstat",
+    );
+  }
+
+  const roomMatch = buildScheduleFacilitySearchOptions({
+    facilities: [scheduleSearchFacility],
+    rooms,
+    query: "DSTAT-201",
+  })[0];
+  assert.equal(roomMatch?.facility.id, "dstat");
+  assert.equal(roomMatch?.matchedRoomCode, "DSTAT-201");
+});
+
+test("facility search selection preserves the typed room detail exactly", () => {
+  assert.deepEqual(
+    applyFacilitySearchSelection(
+      { facilityId: "", facilityDetail: "Room 101" },
+      "dstat",
+    ),
+    { facilityId: "dstat", facilityDetail: "Room 101" },
+  );
+});
 
 test("converts HTML time values to integer minutes and back", () => {
   assert.equal(timeValueToMinute("09:05"), 545);
@@ -255,7 +308,7 @@ test("facility option status distinguishes loading, cached fallback, and unavail
       error: null,
       facilityCount: 2,
     }),
-    { message: "Showing saved facilities while refreshing…", tone: "muted" },
+    { message: "Showing saved campus facilities while offline.", tone: "warning" },
   );
   assert.deepEqual(
     getFacilityOptionsStatus({
@@ -264,7 +317,7 @@ test("facility option status distinguishes loading, cached fallback, and unavail
       error: "safe error",
       facilityCount: 2,
     }),
-    { message: "Showing saved facilities. Refresh unavailable.", tone: "warning" },
+    { message: "Showing saved campus facilities while offline.", tone: "warning" },
   );
   assert.deepEqual(
     getFacilityOptionsStatus({
@@ -273,7 +326,10 @@ test("facility option status distinguishes loading, cached fallback, and unavail
       error: "safe error",
       facilityCount: 0,
     }),
-    { message: "Campus facilities are unavailable right now.", tone: "warning" },
+    {
+      message: "Facility search is unavailable. Try again online or choose Other location.",
+      tone: "warning",
+    },
   );
   assert.equal(
     getFacilityOptionsStatus({

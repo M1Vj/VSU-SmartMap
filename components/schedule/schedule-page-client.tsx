@@ -17,7 +17,11 @@ import {
 } from "@/lib/schedule/types";
 import { DAY_LABELS, formatMinuteOfDay, getManilaWeekPosition, getNextClassOccurrence } from "@/lib/schedule/time";
 import type { ScheduleBackupDocument } from "@/lib/schedule/backup";
-import { reconcileKnownFacilityIds, transitionRestoreDialogs } from "@/lib/schedule/ui";
+import {
+  buildScheduleFacilitySearchOptions,
+  reconcileKnownFacilityIds,
+  transitionRestoreDialogs,
+} from "@/lib/schedule/ui";
 import { CourseDialog } from "./course-dialog";
 import { ScheduleAgenda } from "./schedule-agenda";
 import { ScheduleWeekGrid } from "./schedule-week-grid";
@@ -35,14 +39,17 @@ export function SchedulePageClient() {
   const [courses, setCourses] = useState<ScheduleCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [storageError, setStorageError] = useState("");
+  const [facilityQuery, setFacilityQuery] = useState("");
   const {
     facilities,
+    rooms,
+    optionsQuery: facilityOptionsQuery,
     source: facilitySource,
     loading: facilitiesLoading,
     error: facilitiesError,
   } = useFacilitySearchData({
     enabled: true,
-    query: "",
+    query: facilityQuery,
   });
   const [selectedDay, setSelectedDay] = useState<IsoWeekday>(() => getManilaWeekPosition(new Date()).weekday);
   const [now, setNow] = useState(() => new Date());
@@ -79,6 +86,15 @@ export function SchedulePageClient() {
       facilitySource === "remote" ? facilityIds : undefined,
     );
   }, [facilities, facilitySource]);
+  const facilitySearchOptions = useMemo(
+    () =>
+      buildScheduleFacilitySearchOptions({
+        facilities,
+        rooms,
+        query: facilityOptionsQuery,
+      }),
+    [facilities, facilityOptionsQuery, rooms],
+  );
   const atCourseLimit = courses.length >= MAX_SCHEDULE_COURSES;
   const save = useCallback(async (value: unknown) => {
     setBusy(true);
@@ -150,7 +166,23 @@ export function SchedulePageClient() {
         )}
         <aside className="flex gap-3 rounded-lg border bg-muted/40 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Your class routine stays in this browser&apos;s IndexedDB. It is not synced to an account, sent to Supabase, placed in URLs, or stored in service-worker caches. Keep a JSON backup before clearing browser data or changing devices.</p></aside>
       </div>
-      <CourseDialog open={editing !== undefined} course={editing ?? undefined} facilities={facilities} facilitySource={facilitySource} facilitiesLoading={facilitiesLoading} facilitiesError={facilitiesError} saving={busy} onClose={() => setEditing(undefined)} onSave={save} />
+      <CourseDialog
+        open={editing !== undefined}
+        course={editing ?? undefined}
+        facilities={facilities}
+        facilityOptions={facilitySearchOptions}
+        facilityOptionsQuery={facilityOptionsQuery}
+        facilitySource={facilitySource}
+        facilitiesLoading={facilitiesLoading}
+        facilitiesError={facilitiesError}
+        saving={busy}
+        onFacilityQueryChange={setFacilityQuery}
+        onClose={() => {
+          setFacilityQuery("");
+          setEditing(undefined);
+        }}
+        onSave={save}
+      />
       <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => { setTransferOpen(transitionRestoreDialogs("transfer", "restore-ready") === "transfer"); setConfirmation({ kind: "restore", backup }); }} />
       <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; setConfirmation(undefined); setTransferOpen(Boolean(reopen)); }} onConfirm={() => { void confirmAction(); }} />
     </div>

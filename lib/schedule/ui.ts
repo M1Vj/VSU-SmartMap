@@ -1,7 +1,28 @@
 import { MAX_SCHEDULE_BACKUP_BYTES } from "./backup";
+import {
+  buildFacilitySearchOptions,
+  type FacilitySearchOption,
+} from "@/lib/map/facility-search-model";
+import type { RoomSearchSource } from "@/lib/map/search-suggestions";
+import type { Facility } from "@/lib/types/facility";
 import { formatMinuteOfDay, isMeetingTba } from "./time";
 import type { IsoWeekday, ScheduleCourse, ScheduleMeeting } from "./types";
 import type { ScheduleValidationIssue } from "./validation";
+
+export function buildScheduleFacilitySearchOptions(input: {
+  facilities: readonly Facility[];
+  rooms: readonly RoomSearchSource[];
+  query: string;
+}): FacilitySearchOption[] {
+  return buildFacilitySearchOptions(input);
+}
+
+export function applyFacilitySearchSelection<T extends {
+  facilityId: string;
+  facilityDetail: string;
+}>(meeting: T, facilityId: string): T {
+  return { ...meeting, facilityId };
+}
 
 export function timeValueToMinute(value: string): number {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
@@ -227,24 +248,20 @@ export function getFacilityOptionsStatus({
   error: string | null;
   facilityCount: number;
 }): { message: string; tone: "muted" | "warning" } | null {
+  if (source === "cache" && facilityCount > 0) {
+    return {
+      message: "Showing saved campus facilities while offline.",
+      tone: "warning",
+    };
+  }
   if (error) {
-    return facilityCount > 0
-      ? {
-          message: "Showing saved facilities. Refresh unavailable.",
-          tone: "warning",
-        }
-      : {
-          message: "Campus facilities are unavailable right now.",
-          tone: "warning",
-        };
+    return {
+      message: "Facility search is unavailable. Try again online or choose Other location.",
+      tone: "warning",
+    };
   }
   if (loading) {
-    return source === "cache" && facilityCount > 0
-      ? {
-          message: "Showing saved facilities while refreshing…",
-          tone: "muted",
-        }
-      : { message: "Loading campus facilities…", tone: "muted" };
+    return { message: "Loading campus facilities…", tone: "muted" };
   }
   return null;
 }

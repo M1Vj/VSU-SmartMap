@@ -23,6 +23,7 @@ type UseFacilitySearchDataOptions = {
 type FacilitySearchData = {
   facilities: Facility[];
   rooms: RoomSearchSource[];
+  optionsQuery: string;
   loading: boolean;
   source: SearchDataSource;
   error: string | null;
@@ -39,6 +40,7 @@ export function useFacilitySearchData({
   const [state, setState] = useState<Omit<FacilitySearchData, "ensureFacilitiesLoaded">>({
     facilities: [...initialFacilities],
     rooms: [],
+    optionsQuery: "",
     loading: false,
     source: initialFacilities.length > 0 ? "cache" : "empty",
     error: null,
@@ -77,6 +79,7 @@ export function useFacilitySearchData({
       setState((current) => ({
         ...current,
         rooms: [],
+        optionsQuery: "",
         loading: false,
         source: current.facilities.length > 0 ? current.source : "empty",
         error: null,
@@ -107,9 +110,9 @@ export function useFacilitySearchData({
           error: result.error,
         };
       },
-      publish: (rooms, source) => {
+      publish: (rooms) => {
         if (!cancelled) {
-          setState((current) => ({ ...current, rooms, source }));
+          setState((current) => ({ ...current, rooms }));
         }
       },
     });
@@ -120,6 +123,7 @@ export function useFacilitySearchData({
           setState((current) => ({
             ...current,
             loading: false,
+            optionsQuery: query,
             error:
               facilityResult.failed || roomResult.failed
                 ? SAFE_LOAD_ERROR
@@ -132,6 +136,7 @@ export function useFacilitySearchData({
           setState((current) => ({
             ...current,
             loading: false,
+            optionsQuery: query,
             error: SAFE_LOAD_ERROR,
           }));
         }
