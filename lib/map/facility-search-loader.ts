@@ -89,6 +89,9 @@ export async function loadFacilitySearchRooms<T>({
 export type FacilitySearchRequest<T> = {
   available: Promise<T[]>;
   complete: Promise<SearchLoadResult<T>>;
+  getAvailable: () => Promise<T[]>;
+  getCurrent: () => { data: T[]; source: SearchDataSource } | null;
+  isComplete: () => boolean;
   subscribe: (
     listener: (data: T[], source: SearchDataSource) => void,
   ) => () => void;
@@ -115,6 +118,7 @@ export function startFacilitySearchFacilities<T>(
   let latest: { data: T[]; source: SearchDataSource } | null = null;
   let resolveAvailable!: (data: T[]) => void;
   let availableResolved = false;
+  let completed = false;
   const available = new Promise<T[]>((resolve) => {
     resolveAvailable = resolve;
   });
@@ -134,12 +138,25 @@ export function startFacilitySearchFacilities<T>(
       availableResolved = true;
       resolveAvailable(result.data);
     }
+    completed = true;
     return result;
   });
 
   return {
     available,
     complete,
+    getAvailable() {
+      if (completed || latest?.source === "remote") {
+        return Promise.resolve(latest?.data ?? []);
+      }
+      return available;
+    },
+    getCurrent() {
+      return latest;
+    },
+    isComplete() {
+      return completed;
+    },
     subscribe(listener) {
       listeners.add(listener);
       if (latest) listener(latest.data, latest.source);

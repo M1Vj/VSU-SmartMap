@@ -13,6 +13,11 @@ import type { RoomSearchSource } from "@/lib/map/search-suggestions";
 import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
 import { searchRooms } from "@/lib/supabase/queries/rooms";
 import type { Facility } from "@/lib/types/facility";
+import {
+  getFacilitySearchLoadError,
+  updateFacilitySearchFailures,
+  type FacilitySearchFailures,
+} from "./facility-search-load-state";
 
 type UseFacilitySearchDataOptions = {
   enabled: boolean;
@@ -30,20 +35,22 @@ type FacilitySearchData = {
   ensureFacilitiesLoaded: () => Promise<Facility[]>;
 };
 
-const SAFE_LOAD_ERROR = "Search suggestions could not be refreshed.";
-
 export function useFacilitySearchData({
   enabled,
   query,
   initialFacilities = [],
 }: UseFacilitySearchDataOptions): FacilitySearchData {
-  const [state, setState] = useState<Omit<FacilitySearchData, "ensureFacilitiesLoaded">>({
+  const [state, setState] = useState<
+    Omit<FacilitySearchData, "ensureFacilitiesLoaded" | "error"> &
+    FacilitySearchFailures
+  >({
     facilities: [...initialFacilities],
     rooms: [],
     optionsQuery: "",
     loading: false,
     source: initialFacilities.length > 0 ? "cache" : "empty",
-    error: null,
+    facilityFailed: false,
+    roomFailed: false,
   });
   const facilityRequestRef = useRef<FacilitySearchRequest<Facility> | null>(null);
   const getFacilityRequest = useCallback(() => {
@@ -65,7 +72,7 @@ export function useFacilitySearchData({
   }, []);
   const ensureFacilitiesLoaded = useCallback(async () => {
     try {
-      return await getFacilityRequest().available;
+      return await getFacilityRequest().getAvailable();
     } catch {
       return [];
     }
@@ -77,7 +84,7 @@ export function useFacilitySearchData({
       setState((current) => ({
         ...current,
         source: current.facilities.length > 0 ? current.source : "empty",
-        error: null,
+        ...updateFacilitySearchFailures(current, { facilityFailed: false }),
       }));
       return;
     }
@@ -91,8 +98,13 @@ export function useFacilitySearchData({
     });
 
     void facilityRequest.complete.then((result) => {
-      if (!cancelled && result.failed) {
-        setState((current) => ({ ...current, error: SAFE_LOAD_ERROR }));
+      if (!cancelled) {
+        setState((current) => ({
+          ...current,
+          ...updateFacilitySearchFailures(current, {
+            facilityFailed: result.failed,
+          }),
+        }));
       }
     });
 
@@ -109,7 +121,7 @@ export function useFacilitySearchData({
         rooms: [],
         optionsQuery: "",
         loading: false,
-        error: null,
+        ...updateFacilitySearchFailures(current, { roomFailed: false }),
       }));
       return;
     }
@@ -120,7 +132,7 @@ export function useFacilitySearchData({
       rooms: [],
       optionsQuery: "",
       loading: true,
-      error: null,
+      ...updateFacilitySearchFailures(current, { roomFailed: false }),
     }));
 
     const roomRequest = startFacilitySearchRooms<RoomSearchSource>({
@@ -153,7 +165,9 @@ export function useFacilitySearchData({
           setState((current) => ({
             ...current,
             loading: false,
-            error: roomResult.failed ? SAFE_LOAD_ERROR : current.error,
+            ...updateFacilitySearchFailures(current, {
+              roomFailed: roomResult.failed,
+            }),
           }));
         }
       })
@@ -162,7 +176,7 @@ export function useFacilitySearchData({
           setState((current) => ({
             ...current,
             loading: false,
-            error: SAFE_LOAD_ERROR,
+            ...updateFacilitySearchFailures(current, { roomFailed: true }),
           }));
         }
       });
@@ -173,5 +187,10 @@ export function useFacilitySearchData({
     };
   }, [enabled, query]);
 
-  return { ...state, ensureFacilitiesLoaded };
+  const { facilityFailed, roomFailed, ...publicState } = state;
+  return {
+    ...publicState,
+    error: getFacilitySearchLoadError({ facilityFailed, roomFailed }),
+    ensureFacilitiesLoaded,
+  };
 }

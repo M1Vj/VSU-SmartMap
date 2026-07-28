@@ -120,6 +120,27 @@ test("facility request exposes cached data before its deferred refresh settles",
   });
 });
 
+test("facility request availability advances from cache to the completed canonical remote result", async () => {
+  let resolveRemote!: (value: { data: Facility[]; error: null }) => void;
+  const remote = new Promise<{ data: Facility[]; error: null }>((resolve) => {
+    resolveRemote = resolve;
+  });
+  const request = startFacilitySearchFacilities({
+    readCache: async () => [cachedFacility],
+    writeCache: async () => {},
+    fetchRemote: async () => remote,
+  });
+
+  assert.deepEqual(await request.getAvailable(), [cachedFacility]);
+
+  resolveRemote({ data: [], error: null });
+  await request.complete;
+
+  assert.deepEqual(await request.getAvailable(), []);
+  assert.deepEqual(request.getCurrent(), { data: [], source: "remote" });
+  assert.equal(request.isComplete(), true);
+});
+
 test("thrown facility refresh failure reports failure while preserving cached data", async () => {
   const result = await loadFacilitySearchFacilities({
     readCache: async () => [cachedFacility],
