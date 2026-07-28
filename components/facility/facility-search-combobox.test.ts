@@ -116,6 +116,11 @@ test("schedule facility input owns visible validation, focus, and query reactiva
   assert.match(dialogSource, /onFacilityQueryChange\(\s*getActiveFacilityQuery/);
   assert.match(dialogSource, /focusFacilityInput\(missingFacility\)/);
   assert.match(dialogSource, /document\.getElementById\(`facility-\$\{index\}`\)\?\.focus\(\)/);
+  assert.match(
+    dialogSource,
+    /focusFacilityInput\(invalidFacility\);\s*return;/,
+  );
+  assert.match(dialogSource, /firstFacilityErrorIndex\(errors\.meetings\)/);
   assert.doesNotMatch(dialogSource, /inputRef=\{form\.register/);
 });
 

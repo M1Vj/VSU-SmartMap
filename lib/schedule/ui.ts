@@ -40,11 +40,25 @@ function normalizeFacilityQuery(value: string): string {
 
 export function shouldClearFacilitySelection(
   query: string,
+  selectedFacilityId: string,
   selectedFacilityName: string | undefined,
 ): boolean {
-  return Boolean(
-    selectedFacilityName &&
-    normalizeFacilityQuery(query) !== normalizeFacilityQuery(selectedFacilityName),
+  if (!selectedFacilityId) return false;
+  if (!selectedFacilityName) return true;
+  return normalizeFacilityQuery(query) !==
+    normalizeFacilityQuery(selectedFacilityName);
+}
+
+export function firstFacilityErrorIndex(
+  meetingErrors: unknown,
+): number {
+  if (!Array.isArray(meetingErrors)) return -1;
+  return meetingErrors.findIndex(
+    (error) =>
+      typeof error === "object" &&
+      error !== null &&
+      "facilityId" in error &&
+      Boolean(error.facilityId),
   );
 }
 

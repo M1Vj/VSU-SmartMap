@@ -26,6 +26,7 @@ import {
   buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
+  firstFacilityErrorIndex,
   getActiveFacilityQuery,
   getFacilityOptionsStatus,
   mapScheduleIssuesToFormErrors,
@@ -260,11 +261,10 @@ export function CourseDialog({
       }
     }
   }, (errors) => {
-    const invalidFacility = Array.isArray(errors.meetings)
-      ? errors.meetings.findIndex((meeting) => Boolean(meeting?.facilityId))
-      : -1;
+    const invalidFacility = firstFacilityErrorIndex(errors.meetings);
     if (invalidFacility >= 0) {
       focusFacilityInput(invalidFacility);
+      return;
     }
     focusSummary();
   });
@@ -537,6 +537,7 @@ export function CourseDialog({
                               if (
                                 shouldClearFacilitySelection(
                                   query,
+                                  selectedFacilityId,
                                   selectedFacility?.name,
                                 )
                               ) {

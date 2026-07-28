@@ -13,6 +13,7 @@ import {
   analyzeDayConflicts,
   endTimeValueToMinute,
   facilitySelectionError,
+  firstFacilityErrorIndex,
   getFacilityOptionsStatus,
   getActiveFacilityQuery,
   getMeetingGridPosition,
@@ -98,15 +99,36 @@ test("visible facility edits clear only a non-equivalent saved selection", () =>
   assert.equal(
     shouldClearFacilitySelection(
       "  department OF statistics ",
+      "dstat",
       "Department of Statistics",
     ),
     false,
   );
   assert.equal(
-    shouldClearFacilitySelection("DSTAT-201", "Department of Statistics"),
+    shouldClearFacilitySelection("DSTAT-201", "dstat", "Department of Statistics"),
     true,
   );
-  assert.equal(shouldClearFacilitySelection("anything", undefined), false);
+  assert.equal(
+    shouldClearFacilitySelection("DSTAT-201", "stale-id", undefined),
+    true,
+  );
+  assert.equal(
+    shouldClearFacilitySelection("anything", "", undefined),
+    false,
+  );
+});
+
+test("finds the first hidden facility ID error for visible focus routing", () => {
+  assert.equal(
+    firstFacilityErrorIndex([
+      { start: { message: "Required" } },
+      { facilityId: { message: "Choose a facility" } },
+      { facilityId: { message: "Choose another facility" } },
+    ]),
+    1,
+  );
+  assert.equal(firstFacilityErrorIndex([{ end: { message: "Required" } }]), -1);
+  assert.equal(firstFacilityErrorIndex(undefined), -1);
 });
 
 test("refocusing a meeting reactivates only that meeting's local query", () => {
