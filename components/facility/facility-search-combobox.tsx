@@ -148,6 +148,11 @@ export function FacilitySearchCombobox({
     const supportedKeys = ["ArrowDown", "ArrowUp", "Enter", "Escape"] as const;
     if (!supportedKeys.includes(event.key as (typeof supportedKeys)[number])) return;
 
+    if (event.key === "Escape" && shouldRenderListbox) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     const action = getFacilityComboboxKeyAction(
       event.key,
       highlightedIndex,

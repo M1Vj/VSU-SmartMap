@@ -67,6 +67,18 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
   );
 });
 
+test("Escape closes open facility results without reaching a parent dialog", async () => {
+  const source = await readFile(
+    new URL("./facility-search-combobox.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /if \(event\.key === "Escape" && shouldRenderListbox\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?\}/,
+  );
+});
+
 test("AppHeader wires selection and TBA suppression into the shared combobox", async () => {
   const source = await readFile(new URL("../app-header.tsx", import.meta.url), "utf8");
 
