@@ -604,11 +604,12 @@ async function uploadVerificationDocument({
 }): Promise<ActionResult> {
   const serviceClient = getSupabaseServiceRoleClient();
   const documentId = randomUUID();
+  const now = Date.now();
   const storagePath = buildVerificationDocumentPath({
     userId,
     applicationId,
     label,
-    timestamp: Date.now(),
+    timestamp: now,
     filename: file.name,
   });
   const { error: rowError } = await serviceClient
@@ -622,7 +623,7 @@ async function uploadVerificationDocument({
       original_filename: file.name,
       mime_type: file.type,
       size_bytes: file.size,
-      delete_after: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      delete_after: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
   if (rowError) {
@@ -639,12 +640,12 @@ async function uploadVerificationDocument({
 
   if (uploadError) {
     console.error("uploadVerificationDocument upload failed");
-    const { error: cleanupError } = await serviceClient
+    const { error: retentionError } = await serviceClient
       .from("owner_verification_documents")
-      .delete()
+      .update({ delete_after: new Date(now).toISOString() })
       .eq("id", documentId);
-    if (cleanupError) {
-      console.error("uploadVerificationDocument row cleanup failed");
+    if (retentionError) {
+      console.error("uploadVerificationDocument retention expedite failed");
     }
     return { error: "Could not upload your documents. Please try again." };
   }

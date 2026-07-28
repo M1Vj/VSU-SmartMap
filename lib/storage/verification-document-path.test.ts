@@ -60,6 +60,23 @@ test("validator accepts dotted filename shapes produced by the former sanitizer"
   }
 });
 
+test("validator accepts an empty suffix produced by former hyphen-only or spaces-only filenames", () => {
+  const formerSafeFilename = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+  for (const original of ["---", "   "]) {
+    const formerOutput = formerSafeFilename(original);
+    assert.equal(formerOutput, "");
+    assert.equal(
+      isValidVerificationDocumentLocation(
+        VERIFICATION_DOCUMENT_BUCKET,
+        `${USER_ID}/${APPLICATION_ID}/identity-1720000000000-${formerOutput}`,
+      ),
+      true,
+      original,
+    );
+  }
+});
+
 test("validator accepts representative outputs from the former sanitizer", () => {
   const formerSafeFilename = (value: string) =>
     value.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -114,7 +131,7 @@ test("validator rejects bucket drift, traversal, encoding, malformed structure, 
   }
 });
 
-test("owner upload inserts a durable row before upload and cleans the same row id on upload failure", async () => {
+test("owner upload retains its durable row and expedites exact-id retention on upload failure", async () => {
   const source = await readFile(
     new URL("../../app/owner/actions.ts", import.meta.url),
     "utf8",
@@ -131,8 +148,13 @@ test("owner upload inserts a durable row before upload and cleans the same row i
   );
   assert.match(
     functionSource,
-    /if \(uploadError\)[\s\S]*\.from\("owner_verification_documents"\)[\s\S]*\.delete\(\)[\s\S]*\.eq\("id", documentId\)/,
+    /const now = Date\.now\(\)[\s\S]*timestamp: now[\s\S]*delete_after: new Date\(now \+ 90 \* 24 \* 60 \* 60 \* 1000\)\.toISOString\(\)/,
+  );
+  assert.match(
+    functionSource,
+    /if \(uploadError\)[\s\S]*\.from\("owner_verification_documents"\)[\s\S]*\.update\(\{ delete_after: new Date\(now\)\.toISOString\(\) \}\)[\s\S]*\.eq\("id", documentId\)/,
   );
   assert.doesNotMatch(functionSource, /console\.error\([^)]*,\s*\w+Error\)/);
+  assert.doesNotMatch(functionSource, /\.delete\(\)/);
   assert.doesNotMatch(functionSource, /\.remove\(\[storagePath\]\)/);
 });

@@ -8,7 +8,7 @@ export const MAX_VERIFICATION_DOCUMENT_OBJECT_KEY_BYTES = 1024;
 const UUID_PATTERN =
   "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const PATH_PATTERN = new RegExp(
-  `^${UUID_PATTERN}/${UUID_PATTERN}/(?:identity|authority)-[0-9]{1,16}-[a-z0-9.-]+$`,
+  `^${UUID_PATTERN}/${UUID_PATTERN}/(?:identity|authority)-[0-9]{1,16}-[a-z0-9.-]*$`,
   "i",
 );
 const UUID_VALUE_PATTERN = new RegExp(`^${UUID_PATTERN}$`, "i");
