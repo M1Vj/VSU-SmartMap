@@ -216,7 +216,7 @@ export function CourseDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !saving && onClose()}>
       <DialogScaffoldContent
-        className="w-[calc(100%-1rem)] motion-reduce:animate-none motion-reduce:transition-none sm:max-w-2xl"
+        className="w-[calc(100%-1rem)] motion-reduce:animate-none motion-reduce:transition-none sm:max-w-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_select]:min-h-11"
         overlayClassName="motion-reduce:animate-none motion-reduce:transition-none"
       >
         <DialogScaffoldHeader>

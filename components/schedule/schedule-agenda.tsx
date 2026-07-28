@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { IsoWeekday, ScheduleCourse } from "@/lib/schedule/types";
 import { DAY_LABELS, formatMinuteOfDay, isMeetingTba } from "@/lib/schedule/time";
-import { selectedDayConflictNotices } from "@/lib/schedule/ui";
+import { analyzeDayConflicts, getDayAgendaData } from "@/lib/schedule/ui";
 
 export function ScheduleAgenda({
   courses,
@@ -25,9 +25,8 @@ export function ScheduleAgenda({
   isLiveFacility: (facilityId: string) => boolean;
 }) {
   const days: IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
-  const entries = courses.flatMap((course) => course.meetings.filter((meeting) => meeting.days.includes(selectedDay)).map((meeting) => ({ course, meeting }))).sort((a, b) => a.meeting.startMinute - b.meeting.startMinute || a.course.code.localeCompare(b.course.code));
-  const conflictNotices = selectedDayConflictNotices(courses, selectedDay);
-  const tba = courses.flatMap((course) => course.meetings.filter(isMeetingTba).map((meeting) => ({ course, meeting })));
+  const { entries, tbaCount } = getDayAgendaData(courses, selectedDay);
+  const conflictAnalysis = analyzeDayConflicts(courses, selectedDay);
 
   return (
     <section aria-labelledby="agenda-heading" className="space-y-4">
@@ -35,10 +34,11 @@ export function ScheduleAgenda({
       <div className="flex snap-x gap-2 overflow-x-auto pb-1" aria-label="Agenda weekday">
         {days.map((day) => <Button key={day} type="button" size="sm" variant={day === selectedDay ? "default" : "outline"} aria-pressed={day === selectedDay} onClick={() => onDayChange(day)} className="shrink-0 snap-start">{DAY_LABELS[day].slice(0, 3)}</Button>)}
       </div>
-      {conflictNotices.length > 0 ? (
+      {conflictAnalysis.totalPairCount > 0 ? (
         <section aria-labelledby="conflicts-heading" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
           <h3 id="conflicts-heading" className="flex items-center gap-2 font-semibold text-destructive"><TriangleAlert className="h-4 w-4" />Schedule conflicts</h3>
-          <ul className="mt-2 space-y-1 text-sm">{conflictNotices.map((notice) => <li key={notice.key}>{notice.label}</li>)}</ul>
+          <ul className="mt-2 space-y-1 text-sm">{conflictAnalysis.notices.map((notice) => <li key={notice.key}>{notice.label}</li>)}</ul>
+          {conflictAnalysis.remainingPairCount > 0 ? <p className="mt-2 text-sm font-medium">Plus {conflictAnalysis.remainingPairCount.toLocaleString()} more conflicts on {DAY_LABELS[selectedDay]}.</p> : null}
         </section>
       ) : null}
       {entries.length === 0 ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No scheduled meetings for {DAY_LABELS[selectedDay]}.</p> : (
@@ -47,7 +47,7 @@ export function ScheduleAgenda({
             return (
               <li key={`${course.id}-${meeting.id}`} className="rounded-lg border bg-card p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><p className="font-semibold">{course.code} <span className="font-normal text-muted-foreground">· {course.title}</span></p><p className="mt-1 text-sm">{formatMinuteOfDay(meeting.startMinute)}–{formatMinuteOfDay(meeting.endMinute)}</p><p className="text-sm text-muted-foreground">{meeting.locationLabel || "TBA"}</p></div>
+                  <div><p className="font-semibold">{course.code} <span className="font-normal text-muted-foreground">· {course.title}</span></p><p className="mt-1 text-sm">{formatMinuteOfDay(meeting.startMinute)}–{formatMinuteOfDay(meeting.endMinute)}</p><p className="text-sm text-muted-foreground">{meeting.locationLabel || "TBA"}{isMeetingTba(meeting) ? <Badge variant="secondary" className="ml-2">TBA</Badge> : null}</p></div>
                   <div className="flex gap-1">{meeting.facilityId && isLiveFacility(meeting.facilityId) ? <Button size="sm" variant="outline" onClick={() => onMap(meeting.facilityId!)}><MapPin className="mr-1 h-4 w-4" />Map</Button> : null}<Button size="icon" variant="ghost" aria-label={`Edit ${course.code}`} onClick={() => onEdit(course)}><Pencil className="h-4 w-4" /></Button><Button size="icon" variant="ghost" aria-label={`Delete ${course.code}`} onClick={() => onDelete(course)}><Trash2 className="h-4 w-4" /></Button></div>
                 </div>
               </li>
@@ -55,7 +55,7 @@ export function ScheduleAgenda({
           })}
         </ol>
       )}
-      {tba.length > 0 ? <section aria-labelledby="unscheduled-heading"><h3 id="unscheduled-heading" className="mb-2 font-semibold">Unscheduled / TBA</h3><ul className="space-y-2">{tba.map(({ course, meeting }) => <li key={`${course.id}-${meeting.id}`} className="flex items-center justify-between rounded-lg border px-4 py-3"><span>{course.code} · {course.title}</span><Badge variant="secondary">TBA</Badge></li>)}</ul></section> : null}
+      {tbaCount > 0 ? <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{tbaCount} timed {tbaCount === 1 ? "meeting has" : "meetings have"} a TBA location. The meeting remains in the agenda above.</p> : null}
     </section>
   );
 }

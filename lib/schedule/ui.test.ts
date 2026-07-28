@@ -5,12 +5,16 @@ import {
   assignMeetingColumns,
   assertScheduleFileSize,
   buildFacilityLocationLabel,
+  analyzeDayConflicts,
   endTimeValueToMinute,
   facilitySelectionError,
   getMeetingGridPosition,
   mapScheduleIssuesToFormErrors,
   minuteToTimeValue,
   selectedDayConflictNotices,
+  getDayAgendaData,
+  reconcileKnownFacilityIds,
+  transitionRestoreDialogs,
   timeValueToMinute,
 } from "./ui";
 
@@ -88,6 +92,31 @@ test("describes every selected-day multi-way conflict pair once in stable order"
   );
 });
 
+test("bounds conflict details at maximum valid schedule cardinality", () => {
+  const courses = Array.from({ length: 200 }, (_, courseIndex): ScheduleCourse => ({
+    id: `course-${courseIndex}`,
+    code: `C${courseIndex}`,
+    title: `Course ${courseIndex}`,
+    color: "blue",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    meetings: Array.from({ length: 8 }, (_, meetingIndex) => ({
+      id: `meeting-${courseIndex}-${meetingIndex}`,
+      days: [1],
+      startMinute: 540,
+      endMinute: 600,
+    })),
+  }));
+  const started = performance.now();
+  const analysis = analyzeDayConflicts(courses, 1);
+  const elapsed = performance.now() - started;
+  assert.equal(analysis.totalPairCount, 1_273_600);
+  assert.equal(analysis.notices.length, 100);
+  assert.equal(analysis.remainingPairCount, 1_273_500);
+  assert.equal(analysis.conflictMeetingIds.size, 1600);
+  assert.ok(elapsed < 250, `analysis took ${elapsed.toFixed(1)}ms`);
+});
+
 test("maps domain validation issues to visible controls for each location mode", () => {
   assert.deepEqual(mapScheduleIssuesToFormErrors([
     { field: "code", message: "This field is required." },
@@ -124,6 +153,32 @@ test("requires a selected facility to match the loaded facility options", () => 
   assert.equal(facilitySelectionError("facility", "stale", ["known"]), "Choose a valid campus facility.");
   assert.equal(facilitySelectionError("facility", "known", ["known"]), undefined);
   assert.equal(facilitySelectionError("text", "", ["known"]), undefined);
+});
+
+test("cached facility handoff survives refresh failure and live refresh replaces it", () => {
+  assert.deepEqual([...reconcileKnownFacilityIds(["cached"], undefined)], ["cached"]);
+  assert.deepEqual([...reconcileKnownFacilityIds(["cached"], ["live"])], ["live"]);
+});
+
+test("restore confirmation never overlaps the transfer dialog", () => {
+  assert.deepEqual(transitionRestoreDialogs("transfer", "restore-ready"), "confirm");
+  assert.deepEqual(transitionRestoreDialogs("confirm", "cancel"), "transfer");
+  assert.deepEqual(transitionRestoreDialogs("confirm", "confirmed"), "closed");
+});
+
+test("TBA meetings have one timed agenda row and an aggregate advisory", () => {
+  const course: ScheduleCourse = {
+    id: "course",
+    code: "TBA1",
+    title: "TBA course",
+    color: "blue",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    meetings: [{ id: "meeting", days: [1], startMinute: 540, endMinute: 600, locationLabel: "TBA" }],
+  };
+  const data = getDayAgendaData([course], 1);
+  assert.equal(data.entries.length, 1);
+  assert.equal(data.tbaCount, 1);
 });
 
 test("guards oversized restore files before reading", () => {

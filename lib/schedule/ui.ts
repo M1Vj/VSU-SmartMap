@@ -1,6 +1,5 @@
 import { MAX_SCHEDULE_BACKUP_BYTES } from "./backup";
-import { findScheduleConflicts } from "./conflicts";
-import { formatMinuteOfDay } from "./time";
+import { formatMinuteOfDay, isMeetingTba } from "./time";
 import type { IsoWeekday, ScheduleCourse, ScheduleMeeting } from "./types";
 import type { ScheduleValidationIssue } from "./validation";
 
@@ -67,30 +66,122 @@ export interface ScheduleConflictNotice {
   label: string;
 }
 
+export interface DayConflictAnalysis {
+  conflictMeetingIds: Set<string>;
+  totalPairCount: number;
+  notices: ScheduleConflictNotice[];
+  remainingPairCount: number;
+}
+
+const CONFLICT_NOTICE_LIMIT = 100;
+
+export function analyzeDayConflicts(
+  courses: readonly ScheduleCourse[],
+  day: IsoWeekday,
+): DayConflictAnalysis {
+  const entries = courses.flatMap((course) =>
+    course.meetings
+      .filter((meeting) => meeting.days.includes(day))
+      .map((meeting) => ({ course, meeting })),
+  ).sort(
+    (a, b) =>
+      a.meeting.startMinute - b.meeting.startMinute ||
+      a.meeting.endMinute - b.meeting.endMinute ||
+      a.course.id.localeCompare(b.course.id) ||
+      a.meeting.id.localeCompare(b.meeting.id),
+  );
+  const active: typeof entries = [];
+  const conflictMeetingIds = new Set<string>();
+  const conflictedEntries = new Set<(typeof entries)[number]>();
+  const notices: ScheduleConflictNotice[] = [];
+  let totalPairCount = 0;
+  for (const entry of entries) {
+    let write = 0;
+    for (const candidate of active) {
+      if (candidate.meeting.endMinute > entry.meeting.startMinute) {
+        active[write++] = candidate;
+        if (candidate.course.id === entry.course.id) continue;
+        totalPairCount += 1;
+        if (!conflictedEntries.has(candidate)) {
+          conflictedEntries.add(candidate);
+          conflictMeetingIds.add(
+            `${candidate.course.id}:${candidate.meeting.id}`,
+          );
+        }
+        if (!conflictedEntries.has(entry)) {
+          conflictedEntries.add(entry);
+          conflictMeetingIds.add(`${entry.course.id}:${entry.meeting.id}`);
+        }
+        if (notices.length < CONFLICT_NOTICE_LIMIT) {
+          const start = Math.max(
+            candidate.meeting.startMinute,
+            entry.meeting.startMinute,
+          );
+          const end = Math.min(
+            candidate.meeting.endMinute,
+            entry.meeting.endMinute,
+          );
+          notices.push({
+            key: `${candidate.course.id}:${candidate.meeting.id}:${entry.course.id}:${entry.meeting.id}`,
+            label: `${candidate.course.code} conflicts with ${entry.course.code}, ${formatMinuteOfDay(start)}–${formatMinuteOfDay(end)}.`,
+          });
+        }
+      }
+    }
+    active.length = write;
+    active.push(entry);
+  }
+  return {
+    conflictMeetingIds,
+    totalPairCount,
+    notices,
+    remainingPairCount: Math.max(0, totalPairCount - notices.length),
+  };
+}
+
 export function selectedDayConflictNotices(
   courses: readonly ScheduleCourse[],
   day: IsoWeekday,
 ): ScheduleConflictNotice[] {
-  return findScheduleConflicts(courses)
-    .filter(
-      (conflict) =>
-        conflict.meetingA.days.includes(day) &&
-        conflict.meetingB.days.includes(day),
-    )
-    .map((conflict) => {
-      const start = Math.max(
-        conflict.meetingA.startMinute,
-        conflict.meetingB.startMinute,
-      );
-      const end = Math.min(
-        conflict.meetingA.endMinute,
-        conflict.meetingB.endMinute,
-      );
-      return {
-        key: `${conflict.courseA.id}:${conflict.meetingA.id}:${conflict.courseB.id}:${conflict.meetingB.id}`,
-        label: `${conflict.courseA.code} conflicts with ${conflict.courseB.code}, ${formatMinuteOfDay(start)}–${formatMinuteOfDay(end)}.`,
-      };
-    });
+  return analyzeDayConflicts(courses, day).notices;
+}
+
+export function getDayAgendaData(
+  courses: readonly ScheduleCourse[],
+  day: IsoWeekday,
+) {
+  const entries = courses.flatMap((course) =>
+    course.meetings
+      .filter((meeting) => meeting.days.includes(day))
+      .map((meeting) => ({ course, meeting })),
+  ).sort(
+    (a, b) =>
+      a.meeting.startMinute - b.meeting.startMinute ||
+      a.course.code.localeCompare(b.course.code),
+  );
+  return {
+    entries,
+    tbaCount: entries.filter(({ meeting }) => isMeetingTba(meeting)).length,
+  };
+}
+
+export function reconcileKnownFacilityIds(
+  cachedIds: readonly string[],
+  liveIds: readonly string[] | undefined,
+): Set<string> {
+  return new Set(liveIds ?? cachedIds);
+}
+
+export type RestoreDialogState = "closed" | "transfer" | "confirm";
+export type RestoreDialogEvent = "restore-ready" | "cancel" | "confirmed";
+export function transitionRestoreDialogs(
+  state: RestoreDialogState,
+  event: RestoreDialogEvent,
+): RestoreDialogState {
+  if (state === "transfer" && event === "restore-ready") return "confirm";
+  if (state === "confirm" && event === "cancel") return "transfer";
+  if (state === "confirm" && event === "confirmed") return "closed";
+  return state;
 }
 
 export function mapScheduleIssuesToFormErrors(

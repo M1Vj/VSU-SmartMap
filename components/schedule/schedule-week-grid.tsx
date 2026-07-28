@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { IsoWeekday, ScheduleCourse } from "@/lib/schedule/types";
 import { DAY_SHORT_LABELS, formatMinuteOfDay } from "@/lib/schedule/time";
-import { assignMeetingColumns, getMeetingGridPosition } from "@/lib/schedule/ui";
+import { analyzeDayConflicts, assignMeetingColumns, getMeetingGridPosition } from "@/lib/schedule/ui";
 
 const DAYS: IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
 
@@ -17,10 +17,18 @@ export function ScheduleWeekGrid({ courses }: { courses: readonly ScheduleCourse
           <div className="relative h-[1200px] border-r">
             {Array.from({ length: 24 }, (_, index) => index * 60).map((minute) => <span key={minute} className="absolute right-2 text-xs text-muted-foreground" style={{ top: `${(minute / 1440) * 100}%` }}>{formatMinuteOfDay(minute)}</span>)}
           </div>
-          {DAYS.map((day) => (
+          {DAYS.map((day) => {
+            const conflictMeetingIds = analyzeDayConflicts(
+              courses,
+              day,
+            ).conflictMeetingIds;
+            return (
             <div key={day} className="relative h-[1200px] overflow-hidden border-l">
               {assignMeetingColumns(courses, day).map(({ course, meeting, column, columnCount }) => {
                 const position = getMeetingGridPosition(meeting.startMinute, meeting.endMinute);
+                const hasConflict = conflictMeetingIds.has(
+                  `${course.id}:${meeting.id}`,
+                );
                 const style = {
                   ...(position.anchor === "bottom"
                     ? { bottom: `${position.bottomPercent}%` }
@@ -30,10 +38,11 @@ export function ScheduleWeekGrid({ courses }: { courses: readonly ScheduleCourse
                   left: `${(column / columnCount) * 100}%`,
                   width: `${100 / columnCount}%`,
                 } satisfies CSSProperties;
-                return <article key={`${course.id}-${meeting.id}`} className="absolute overflow-hidden border border-background bg-primary p-1 text-xs text-primary-foreground motion-reduce:transition-none" style={style} title={`${course.code}, ${formatMinuteOfDay(meeting.startMinute)} to ${formatMinuteOfDay(meeting.endMinute)}`}><strong className="block truncate">{course.code}</strong><span className="block truncate">{meeting.locationLabel || "TBA"}</span></article>;
+                return <article key={`${course.id}-${meeting.id}`} className="absolute overflow-hidden border border-background bg-primary p-1 text-xs text-primary-foreground motion-reduce:transition-none" style={style} title={`${course.code}, ${formatMinuteOfDay(meeting.startMinute)} to ${formatMinuteOfDay(meeting.endMinute)}${hasConflict ? ", conflict" : ""}`}><strong className="block truncate">{course.code}</strong><span className="block truncate">{meeting.locationLabel || "TBA"}</span>{hasConflict ? <span className="sr-only">Conflict</span> : null}</article>;
               })}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>

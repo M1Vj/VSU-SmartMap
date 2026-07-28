@@ -15,6 +15,7 @@ import { ScheduleRepository } from "@/lib/schedule/repository";
 import type { IsoWeekday, ScheduleCourse } from "@/lib/schedule/types";
 import { DAY_LABELS, formatMinuteOfDay, getManilaWeekPosition, getNextClassOccurrence } from "@/lib/schedule/time";
 import type { ScheduleBackupDocument } from "@/lib/schedule/backup";
+import { reconcileKnownFacilityIds, transitionRestoreDialogs } from "@/lib/schedule/ui";
 import { CourseDialog } from "./course-dialog";
 import { ScheduleAgenda } from "./schedule-agenda";
 import { ScheduleWeekGrid } from "./schedule-week-grid";
@@ -33,7 +34,7 @@ export function SchedulePageClient() {
   const [loading, setLoading] = useState(true);
   const [storageError, setStorageError] = useState("");
   const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [liveFacilityIds, setLiveFacilityIds] = useState<Set<string>>(new Set());
+  const [knownFacilityIds, setKnownFacilityIds] = useState<Set<string>>(new Set());
   const [selectedDay, setSelectedDay] = useState<IsoWeekday>(() => getManilaWeekPosition(new Date()).weekday);
   const [now, setNow] = useState(() => new Date());
   const [editing, setEditing] = useState<ScheduleCourse | null | undefined>();
@@ -56,12 +57,22 @@ export function SchedulePageClient() {
     let mounted = true;
     void (async () => {
       const cached = await getCachedFacilities();
-      if (mounted && cached) setFacilities(cached);
+      if (mounted && cached) {
+        setFacilities(cached);
+        setKnownFacilityIds(
+          reconcileKnownFacilityIds(cached.map((facility) => facility.id), undefined),
+        );
+      }
       const result = await getFacilitiesLite();
       if (!mounted || result.error || !result.data) return;
       const refreshed = result.data as Facility[];
       setFacilities(refreshed);
-      setLiveFacilityIds(new Set(refreshed.map((facility) => facility.id)));
+      setKnownFacilityIds(
+        reconcileKnownFacilityIds(
+          cached?.map((facility) => facility.id) ?? [],
+          refreshed.map((facility) => facility.id),
+        ),
+      );
       await setCachedFacilities(refreshed);
     })();
     return () => { mounted = false; };
@@ -106,7 +117,11 @@ export function SchedulePageClient() {
         toast.success(`Restored ${confirmation.backup.courses.length} courses`);
       }
       setConfirmation(undefined);
-      setTransferOpen(false);
+      setTransferOpen(
+        confirmation.kind === "restore"
+          ? transitionRestoreDialogs("confirm", "confirmed") === "transfer"
+          : false,
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The schedule could not be changed.");
     } finally {
@@ -116,7 +131,7 @@ export function SchedulePageClient() {
 
   return (
     <div
-      className="h-full min-w-0 overflow-y-auto bg-background"
+      className="h-full min-w-0 overflow-y-auto bg-background [&_button]:min-h-11 [&_button]:min-w-11"
       aria-labelledby="schedule-page-heading"
     >
       <div className="mx-auto w-full max-w-7xl space-y-6 px-3 py-5 pb-28 sm:px-6 md:pb-8">
@@ -130,19 +145,19 @@ export function SchedulePageClient() {
             <Card>
               <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>{next ? <><p className="text-sm font-medium text-muted-foreground">{next.isActive ? "Current class" : "Next class"}</p><h2 className="text-xl font-semibold">{next.course.code} · {next.course.title}</h2><p className="text-sm">{next.dayOffset === 0 ? "Today" : next.dayOffset === 1 ? "Tomorrow" : DAY_LABELS[next.weekday]}, {formatMinuteOfDay(next.startMinute)}–{formatMinuteOfDay(next.endMinute)} · {next.meeting.locationLabel || "TBA"}</p></> : <><p className="text-sm font-medium text-muted-foreground">Next class</p><h2 className="text-xl font-semibold">Nothing scheduled yet</h2><p className="text-sm text-muted-foreground">Add a meeting with a known time to see it here.</p></>}</div>
-                {next?.meeting.facilityId && liveFacilityIds.has(next.meeting.facilityId) ? <Button variant="outline" onClick={() => router.push(`/?facility=${encodeURIComponent(next.meeting.facilityId!)}`)}>Open facility on map</Button> : null}
+                {next?.meeting.facilityId && knownFacilityIds.has(next.meeting.facilityId) ? <Button variant="outline" onClick={() => router.push(`/?facility=${encodeURIComponent(next.meeting.facilityId!)}`)}>Open facility on map</Button> : null}
               </CardContent>
             </Card>
             {courses.length === 0 ? <Card className="border-dashed"><CardContent className="flex min-h-52 flex-col items-center justify-center p-6 text-center"><CalendarDays className="mb-3 h-9 w-9 text-muted-foreground" /><h2 className="text-lg font-semibold">Build your weekly plan</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">Add courses, recurring times, campus facilities, free-text rooms, or TBA meetings.</p><Button className="mt-4" onClick={() => setEditing(null)}>Add your first course</Button></CardContent></Card> : null}
-            <ScheduleAgenda courses={courses} selectedDay={selectedDay} onDayChange={setSelectedDay} onEdit={(course) => setEditing(course)} onDelete={(course) => setConfirmation({ kind: "delete", course })} onMap={(facilityId) => router.push(`/?facility=${encodeURIComponent(facilityId)}`)} isLiveFacility={(facilityId) => liveFacilityIds.has(facilityId)} />
+            <ScheduleAgenda courses={courses} selectedDay={selectedDay} onDayChange={setSelectedDay} onEdit={(course) => setEditing(course)} onDelete={(course) => setConfirmation({ kind: "delete", course })} onMap={(facilityId) => router.push(`/?facility=${encodeURIComponent(facilityId)}`)} isLiveFacility={(facilityId) => knownFacilityIds.has(facilityId)} />
             {courses.length > 0 ? <ScheduleWeekGrid courses={courses} /> : null}
           </>
         )}
         <aside className="flex gap-3 rounded-lg border bg-muted/40 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Your class routine stays in this browser&apos;s IndexedDB. It is not synced to an account, sent to Supabase, placed in URLs, or stored in service-worker caches. Keep a JSON backup before clearing browser data or changing devices.</p></aside>
       </div>
       <CourseDialog open={editing !== undefined} course={editing ?? undefined} facilities={facilities} saving={busy} onClose={() => setEditing(undefined)} onSave={save} />
-      <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => setConfirmation({ kind: "restore", backup })} />
-      <ConfirmDialog open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : "Clear schedule"} loading={busy} onCancel={() => setConfirmation(undefined)} onConfirm={() => { void confirmAction(); }} />
+      <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => { setTransferOpen(transitionRestoreDialogs("transfer", "restore-ready") === "transfer"); setConfirmation({ kind: "restore", backup }); }} />
+      <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; setConfirmation(undefined); setTransferOpen(Boolean(reopen)); }} onConfirm={() => { void confirmAction(); }} />
     </div>
   );
 }
