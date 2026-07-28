@@ -16,6 +16,16 @@ import type { TransportMode } from "@/lib/types/graph";
 import { FACILITY_CATEGORY_META } from "@/lib/constants/facilities";
 import { useMapStyle } from "@/lib/context/map-style-context";
 import { createFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
+import {
+  DEFAULT_VISIBLE_STUDENT_DESTINATIONS,
+  readVisibleStudentDestinationsFromProvider,
+  resetVisibleStudentDestinations,
+  studentDestinationForPath,
+  studentDestinationRoute,
+  toggleVisibleStudentDestination,
+  type StudentDestinationId,
+  writeVisibleStudentDestinationsFromProvider,
+} from "@/lib/navigation/student-navigation";
 
 interface AppState {
   selectedFacility: Facility | null;
@@ -24,7 +34,9 @@ interface AppState {
   searchQuery: string;
   debouncedQuery: string;
   selectedCategories: FacilityCategory[];
-  activeTab: "map" | "boarding" | "directory" | "events" | "chat";
+  activeTab: StudentDestinationId;
+  visibleStudentDestinations: StudentDestinationId[];
+  studentNavigationHydrated: boolean;
   mapStyle: "vector" | "satellite";
   defaultTransportMode: TransportMode;
   locationPromptOpen: boolean;
@@ -42,6 +54,8 @@ interface AppContextValue extends AppState {
     tab: AppState["activeTab"],
     options?: { clearSelection?: boolean; selectFacilityAfter?: Facility }
   ) => void;
+  toggleStudentDestination: (destination: StudentDestinationId) => void;
+  resetStudentDestinations: () => void;
   setMapStyle: (style: "vector" | "satellite") => void;
   setDefaultTransportMode: (mode: TransportMode) => void;
   setLocationPromptOpen: (open: boolean) => void;
@@ -126,12 +140,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [debouncedQuery, setDebouncedQuery] = useState(initialSearch);
   const [activeTab, setActiveTabState] = useState<AppState["activeTab"]>("map");
+  const [visibleStudentDestinations, setVisibleStudentDestinations] =
+    useState<StudentDestinationId[]>(DEFAULT_VISIBLE_STUDENT_DESTINATIONS);
+  const [studentNavigationHydrated, setStudentNavigationHydrated] = useState(false);
   const [defaultTransportMode, setDefaultTransportModeState] = useState<TransportMode>("walking");
   const [locationPromptOpen, setLocationPromptOpen] = useState(false);
   const [pendingNavigationFacility, setPendingNavigationFacility] = useState<Facility | null>(null);
 
   // Hydrate from localStorage on client-side mount ONCE (not on every searchParams change)
   useEffect(() => {
+    try {
+      setVisibleStudentDestinations(
+        readVisibleStudentDestinationsFromProvider(() => window.localStorage),
+      );
+    } finally {
+      setStudentNavigationHydrated(true);
+    }
+
     // Only hydrate from localStorage if there's no URL category param on initial load
     const urlCategory = new URLSearchParams(window.location.search).get("category");
     if (!urlCategory) {
@@ -176,6 +201,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(CATEGORY_FILTER_STORAGE_KEY, JSON.stringify(selectedCategories));
     }
   }, [selectedCategories, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    writeVisibleStudentDestinationsFromProvider(
+      () => window.localStorage,
+      visibleStudentDestinations,
+    );
+  }, [visibleStudentDestinations, isHydrated]);
 
   useEffect(() => {
     lastSyncedFacilityId.current = initialFacilityId;
@@ -287,11 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [pendingFacilityId, searchParams, selectedFacility]);
 
   useEffect(() => {
-    if (pathname.startsWith("/directory")) setActiveTabState("directory");
-    else if (pathname.startsWith("/boarding-houses")) setActiveTabState("boarding");
-    else if (pathname.startsWith("/events")) setActiveTabState("events");
-    else if (pathname.startsWith("/chat")) setActiveTabState("chat");
-    else setActiveTabState("map");
+    setActiveTabState(studentDestinationForPath(pathname));
   }, [pathname]);
 
   useEffect(() => {
@@ -333,6 +362,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedCategories([]);
   }, []);
 
+  const toggleStudentDestination = useCallback((destination: StudentDestinationId) => {
+    setVisibleStudentDestinations((current) =>
+      toggleVisibleStudentDestination(current, destination),
+    );
+  }, []);
+
+  const resetStudentDestinations = useCallback(() => {
+    setVisibleStudentDestinations(resetVisibleStudentDestinations());
+  }, []);
+
   const clearPendingNavigationFacility = useCallback(() => {
     setPendingNavigationFacility(null);
   }, []);
@@ -363,14 +402,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPendingFacilityId(null);
     }
 
-    const routes = {
-      map: "/",
-      boarding: "/boarding-houses",
-      directory: "/directory",
-      events: "/events",
-      chat: "/chat",
-    } as const;
-    const targetRoute = routes[tab];
+    const targetRoute = studentDestinationRoute(tab);
 
     const params = new URLSearchParams();
     // Only map/directory use facility search + category filters.
@@ -418,6 +450,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCategories: setSelectedCategories,
     toggleCategory,
     activeTab,
+    visibleStudentDestinations,
+    studentNavigationHydrated,
     mapStyle,
     defaultTransportMode,
     locationPromptOpen,
@@ -427,6 +461,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFacilitySheetOpen,
     setSearchQuery,
     setActiveTab,
+    toggleStudentDestination,
+    resetStudentDestinations,
     setMapStyle,
     setDefaultTransportMode,
     setLocationPromptOpen,
@@ -441,6 +477,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     debouncedQuery,
     selectedCategories,
     activeTab,
+    visibleStudentDestinations,
+    studentNavigationHydrated,
     mapStyle,
     defaultTransportMode,
     locationPromptOpen,
@@ -452,6 +490,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedCategories,
     toggleCategory,
     setActiveTab,
+    toggleStudentDestination,
+    resetStudentDestinations,
     setMapStyle,
     setDefaultTransportMode,
     setLocationPromptOpen,

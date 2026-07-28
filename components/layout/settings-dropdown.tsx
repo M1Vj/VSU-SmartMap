@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Settings, Moon, Sun, Laptop, Bug, Info, Globe, Map, Footprints, Car, Navigation, Route, HelpCircle } from "lucide-react";
+import { Settings, Moon, Sun, Laptop, Bug, Info, Globe, Map, Footprints, Car, Navigation, Route, HelpCircle, PanelTop } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,9 +21,11 @@ import {
   DropdownMenuSubContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
 import { useApp } from "@/lib/context/app-context";
 import type { TransportMode } from "@/lib/types/graph";
+import { STUDENT_DESTINATIONS } from "@/lib/navigation/student-navigation";
 
 const ReportBugDialog = dynamic(
   () => import("@/components/bugs/report-bug-dialog").then((module) => module.ReportBugDialog),
@@ -43,7 +45,15 @@ const HelpGuideDialog = dynamic(
 export function SettingsDropdown() {
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
-  const { mapStyle, setMapStyle, defaultTransportMode, setDefaultTransportMode } = useApp();
+  const {
+    mapStyle,
+    setMapStyle,
+    defaultTransportMode,
+    setDefaultTransportMode,
+    visibleStudentDestinations,
+    toggleStudentDestination,
+    resetStudentDestinations,
+  } = useApp();
   const [bugDialogOpen, setBugDialogOpen] = useState(false);
   const [routeDialogOpen, setRouteDialogOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
@@ -147,6 +157,32 @@ export function SettingsDropdown() {
                     Driving
                   </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <PanelTop className="mr-2 h-4 w-4" />
+              <span>Navigation tabs</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent>
+                {STUDENT_DESTINATIONS.map((destination) => (
+                  <DropdownMenuCheckboxItem
+                    key={destination.id}
+                    checked={visibleStudentDestinations.includes(destination.id)}
+                    disabled={destination.required}
+                    onCheckedChange={() => toggleStudentDestination(destination.id)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {destination.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={resetStudentDestinations}>
+                  Reset navigation tabs
+                </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>

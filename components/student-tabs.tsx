@@ -1,16 +1,15 @@
 "use client";
 
-import { useCallback } from "react";
-import { CalendarDays, Home, ListOrdered, MapPinned, MessageSquare } from "lucide-react";
+import { CalendarClock, CalendarDays, Home, ListOrdered, MapPinned, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/context/app-context";
 import { usePathname } from "next/navigation";
+import { STUDENT_DESTINATIONS, type StudentDestinationId } from "@/lib/navigation/student-navigation";
 
-type TabId = "map" | "boarding" | "directory" | "events" | "chat";
 type Placement = "inline" | "bottom";
 
 interface StudentTab {
-  id: TabId;
+  id: StudentDestinationId;
   label: string;
   icon?: React.ComponentType<{ className?: string }>;
 }
@@ -21,38 +20,38 @@ interface StudentTabsProps {
   placement?: Placement;
 }
 
-const defaultTabs: StudentTab[] = [
-  { id: "map", label: "Map", icon: MapPinned },
-  { id: "boarding", label: "Boarding", icon: Home },
-  { id: "events", label: "Events", icon: CalendarDays },
-  { id: "directory", label: "Directory", icon: ListOrdered },
-  { id: "chat", label: "Chat", icon: MessageSquare },
-];
+const destinationIcons: Record<StudentDestinationId, StudentTab["icon"]> = {
+  map: MapPinned,
+  schedule: CalendarClock,
+  boarding: Home,
+  events: CalendarDays,
+  directory: ListOrdered,
+  chat: MessageSquare,
+};
+
+const defaultTabs: StudentTab[] = STUDENT_DESTINATIONS.map((destination) => ({
+  id: destination.id,
+  label: destination.label,
+  icon: destinationIcons[destination.id],
+}));
 
 export function StudentTabs({
   tabs = defaultTabs,
   className,
   placement = "inline",
 }: StudentTabsProps) {
-  const { activeTab, setActiveTab } = useApp();
+  const {
+    activeTab,
+    setActiveTab,
+    visibleStudentDestinations,
+    studentNavigationHydrated,
+  } = useApp();
   const pathname = usePathname();
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-      const lastIndex = tabs.length - 1;
-      let nextIndex = index;
-
-      if (event.key === "ArrowRight") nextIndex = index === lastIndex ? 0 : index + 1;
-      if (event.key === "ArrowLeft") nextIndex = index === 0 ? lastIndex : index - 1;
-      if (event.key === "Home") nextIndex = 0;
-      if (event.key === "End") nextIndex = lastIndex;
-
-      if (nextIndex !== index) {
-        event.preventDefault();
-        setActiveTab(tabs[nextIndex].id as TabId, { clearSelection: true });
-      }
-    },
-    [tabs, setActiveTab],
-  );
+  const visibleTabs = STUDENT_DESTINATIONS.flatMap((destination) => {
+    if (!visibleStudentDestinations.includes(destination.id)) return [];
+    const tab = tabs.find((candidate) => candidate.id === destination.id);
+    return tab ? [tab] : [];
+  });
 
   const isInline = placement === "inline";
 
@@ -71,26 +70,26 @@ export function StudentTabs({
 
   return (
     <nav
-      role="tablist"
       aria-label="Student navigation"
-      className={cn(wrapperClasses, className)}
+      aria-hidden={studentNavigationHydrated ? undefined : true}
+      className={cn(
+        wrapperClasses,
+        !studentNavigationHydrated && "invisible",
+        className,
+      )}
     >
       <div className={innerClasses}>
-        {tabs.map((tab, index) => {
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = tab.id === activeTab;
-          const tabIndex = isActive ? 0 : -1;
 
           return (
             <button
               key={tab.id}
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`${tab.id}-panel`}
-              tabIndex={tabIndex}
+              aria-current={isActive ? "page" : undefined}
               type="button"
+              disabled={!studentNavigationHydrated}
               onClick={() => setActiveTab(tab.id, { clearSelection: true })}
-              onKeyDown={(event) => handleKeyDown(event, index)}
               className={cn(
                 "group relative flex items-center justify-center font-medium transition-all",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
