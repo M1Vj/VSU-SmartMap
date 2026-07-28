@@ -13,6 +13,7 @@ import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-whee
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import type { LatLngBoundsExpression } from "leaflet";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
+import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 
 type MapWrapperProps = {
   children?: React.ReactNode;
@@ -26,7 +27,16 @@ function MapBoundsHandler({ bounds }: { bounds: LatLngBoundsExpression | null })
   
   useEffect(() => {
     if (bounds) {
-      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 18 });
+      const policy = getMapCameraPolicy({
+        owner: "route",
+        navigationOwnsViewport: true,
+        reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      });
+      map.fitBounds(bounds, {
+        padding: [36, 36],
+        maxZoom: 18,
+        animate: policy.animate,
+      });
     }
   }, [bounds, map]);
 
