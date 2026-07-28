@@ -18,10 +18,18 @@ export function ScheduleWeekGrid({ courses }: { courses: readonly ScheduleCourse
             {Array.from({ length: 24 }, (_, index) => index * 60).map((minute) => <span key={minute} className="absolute right-2 text-xs text-muted-foreground" style={{ top: `${(minute / 1440) * 100}%` }}>{formatMinuteOfDay(minute)}</span>)}
           </div>
           {DAYS.map((day) => (
-            <div key={day} className="relative h-[1200px] border-l">
+            <div key={day} className="relative h-[1200px] overflow-hidden border-l">
               {assignMeetingColumns(courses, day).map(({ course, meeting, column, columnCount }) => {
                 const position = getMeetingGridPosition(meeting.startMinute, meeting.endMinute);
-                const style = { top: `${position.topPercent}%`, height: `${position.heightPercent}%`, minHeight: "2rem", left: `${(column / columnCount) * 100}%`, width: `${100 / columnCount}%` } satisfies CSSProperties;
+                const style = {
+                  ...(position.anchor === "bottom"
+                    ? { bottom: `${position.bottomPercent}%` }
+                    : { top: `${position.topPercent}%` }),
+                  height: `${position.heightPercent}%`,
+                  minHeight: "2rem",
+                  left: `${(column / columnCount) * 100}%`,
+                  width: `${100 / columnCount}%`,
+                } satisfies CSSProperties;
                 return <article key={`${course.id}-${meeting.id}`} className="absolute overflow-hidden border border-background bg-primary p-1 text-xs text-primary-foreground motion-reduce:transition-none" style={style} title={`${course.code}, ${formatMinuteOfDay(meeting.startMinute)} to ${formatMinuteOfDay(meeting.endMinute)}`}><strong className="block truncate">{course.code}</strong><span className="block truncate">{meeting.locationLabel || "TBA"}</span></article>;
               })}
             </div>

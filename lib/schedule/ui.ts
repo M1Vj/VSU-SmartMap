@@ -39,7 +39,12 @@ export interface MeetingGridBlock {
 export function getMeetingGridPosition(
   startMinute: number,
   endMinute: number,
-): { topPercent: number; heightPercent: number } {
+): {
+  topPercent: number;
+  heightPercent: number;
+  anchor: "top" | "bottom";
+  bottomPercent?: number;
+} {
   if (
     !Number.isInteger(startMinute) ||
     !Number.isInteger(endMinute) ||
@@ -52,6 +57,8 @@ export function getMeetingGridPosition(
   return {
     topPercent: (startMinute / 1440) * 100,
     heightPercent: ((endMinute - startMinute) / 1440) * 100,
+    anchor: endMinute === 1440 ? "bottom" : "top",
+    ...(endMinute === 1440 ? { bottomPercent: 0 } : {}),
   };
 }
 
@@ -88,6 +95,7 @@ export function selectedDayConflictNotices(
 
 export function mapScheduleIssuesToFormErrors(
   issues: readonly ScheduleValidationIssue[],
+  locationModes: readonly string[] = [],
 ): Record<string, string> {
   const result: Record<string, string> = {};
   for (const issue of issues) {
@@ -96,10 +104,29 @@ export function mapScheduleIssuesToFormErrors(
       result[`${prefix}.start`] ??= issue.message;
       result[`${prefix}.end`] ??= issue.message;
     } else {
-      result[issue.field] ??= issue.message;
+      const locationMatch = /^meetings\.(\d+)\.locationLabel$/.exec(issue.field);
+      const field =
+        locationMatch &&
+        locationModes[Number(locationMatch[1])] === "facility"
+          ? `meetings.${locationMatch[1]}.facilityDetail`
+          : issue.field;
+      result[field] ??= issue.message;
     }
   }
   return result;
+}
+
+export function buildFacilityLocationLabel(
+  facilityName: string,
+  detail: string,
+): { label: string; error?: string } {
+  const trimmedDetail = detail.trim();
+  const label = trimmedDetail
+    ? `${facilityName} · ${trimmedDetail}`
+    : facilityName;
+  return label.length <= 160
+    ? { label }
+    : { label, error: "Facility and room details must use 160 characters or fewer." };
 }
 
 export function facilitySelectionError(

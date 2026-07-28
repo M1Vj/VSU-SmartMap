@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
   mapScheduleIssuesToFormErrors,
@@ -170,7 +171,9 @@ export function CourseDialog({
           const facility = facilities.find(
             (item) => item.id === meeting.facilityId,
           );
-          const detail = meeting.facilityDetail.trim();
+          const facilityLocation = facility
+            ? buildFacilityLocationLabel(facility.name, meeting.facilityDetail)
+            : undefined;
           const startMinute = timeValueToMinute(meeting.start);
           return {
             ...(meeting.id ? { id: meeting.id } : {}),
@@ -180,9 +183,7 @@ export function CourseDialog({
             ...(meeting.locationMode === "facility" && facility
               ? {
                   facilityId: facility.id,
-                  locationLabel: detail
-                    ? `${facility.name} · ${detail}`
-                    : facility.name,
+                  locationLabel: facilityLocation!.label,
                 }
               : meeting.locationMode === "text"
                 ? { locationLabel: meeting.locationLabel }
@@ -193,7 +194,12 @@ export function CourseDialog({
       setErrorSummary("");
     } catch (error) {
       if (error instanceof ScheduleValidationError) {
-        Object.entries(mapScheduleIssuesToFormErrors(error.issues)).forEach(
+        Object.entries(
+          mapScheduleIssuesToFormErrors(
+            error.issues,
+            value.meetings.map((meeting) => meeting.locationMode),
+          ),
+        ).forEach(
           ([field, message], index) => {
             form.setError(
               field as FieldPath<CourseForm>,
@@ -309,6 +315,9 @@ export function CourseDialog({
                 const startError = errorFor(`meetings.${index}.start`);
                 const endError = errorFor(`meetings.${index}.end`);
                 const facilityError = errorFor(`meetings.${index}.facilityId`);
+                const facilityDetailError = errorFor(
+                  `meetings.${index}.facilityDetail`,
+                );
                 const locationError = errorFor(`meetings.${index}.locationLabel`);
                 return (
                   <section
@@ -395,7 +404,15 @@ export function CourseDialog({
                       <select
                         id={`mode-${index}`}
                         className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                        {...form.register(`meetings.${index}.locationMode`)}
+                        {...form.register(`meetings.${index}.locationMode`, {
+                          onChange: () => {
+                            form.clearErrors([
+                              `meetings.${index}.facilityId`,
+                              `meetings.${index}.facilityDetail`,
+                              `meetings.${index}.locationLabel`,
+                            ]);
+                          },
+                        })}
                       >
                         <option value="facility">Campus facility</option>
                         <option value="text">Other location</option>
@@ -411,7 +428,20 @@ export function CourseDialog({
                             aria-invalid={Boolean(facilityError)}
                             aria-describedby={facilityError ? `facility-${index}-error` : undefined}
                             className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                            {...form.register(`meetings.${index}.facilityId`)}
+                            {...form.register(`meetings.${index}.facilityId`, {
+                              validate: (facilityId) =>
+                                facilitySelectionError(
+                                  "facility",
+                                  facilityId,
+                                  facilities.map((facility) => facility.id),
+                                ),
+                              onChange: () => {
+                                form.clearErrors([
+                                  `meetings.${index}.facilityId`,
+                                  `meetings.${index}.facilityDetail`,
+                                ]);
+                              },
+                            })}
                           >
                             <option value="">Choose a facility</option>
                             {facilities.map((facility) => (
@@ -425,9 +455,40 @@ export function CourseDialog({
                           <Input
                             id={`facility-detail-${index}`}
                             maxLength={160}
+                            aria-invalid={Boolean(facilityDetailError)}
+                            aria-describedby={
+                              facilityDetailError
+                                ? `facility-detail-${index}-error`
+                                : undefined
+                            }
                             {...form.register(`meetings.${index}.facilityDetail`, {
                               maxLength: { value: 160, message: "Use 160 characters or fewer." },
+                              validate: (detail) => {
+                                const facilityId = form.getValues(
+                                  `meetings.${index}.facilityId`,
+                                );
+                                const facility = facilities.find(
+                                  (item) => item.id === facilityId,
+                                );
+                                return (
+                                  !facility ||
+                                  buildFacilityLocationLabel(
+                                    facility.name,
+                                    detail,
+                                  ).error ||
+                                  true
+                                );
+                              },
+                              onChange: () => {
+                                form.clearErrors(
+                                  `meetings.${index}.facilityDetail`,
+                                );
+                              },
                             })}
+                          />
+                          <InlineError
+                            id={`facility-detail-${index}-error`}
+                            message={facilityDetailError}
                           />
                         </div>
                       </div>

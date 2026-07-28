@@ -4,6 +4,7 @@ import type { ScheduleCourse } from "./types";
 import {
   assignMeetingColumns,
   assertScheduleFileSize,
+  buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
   getMeetingGridPosition,
@@ -62,6 +63,9 @@ test("positions the full 00:00 through 24:00 meeting domain without clipping", (
   assert.ok(Math.abs(late.topPercent - 100 * 23 / 24) < 1e-10);
   const fullDay = getMeetingGridPosition(0, 1440);
   assert.equal(fullDay.topPercent + fullDay.heightPercent, 100);
+  assert.equal(getMeetingGridPosition(1425, 1440).anchor, "bottom");
+  assert.equal(getMeetingGridPosition(1439, 1440).anchor, "bottom");
+  assert.equal(getMeetingGridPosition(1439, 1440).bottomPercent, 0);
 });
 
 test("describes every selected-day multi-way conflict pair once in stable order", () => {
@@ -84,7 +88,7 @@ test("describes every selected-day multi-way conflict pair once in stable order"
   );
 });
 
-test("maps domain validation issues to actionable form controls", () => {
+test("maps domain validation issues to visible controls for each location mode", () => {
   assert.deepEqual(mapScheduleIssuesToFormErrors([
     { field: "code", message: "This field is required." },
     { field: "title", message: "Use 120 characters or fewer." },
@@ -92,15 +96,27 @@ test("maps domain validation issues to actionable form controls", () => {
     { field: "meetings.0.time", message: "Choose a valid start and end time." },
     { field: "meetings.0.locationLabel", message: "Enter a location." },
     { field: "meetings.1.facilityId", message: "Select a valid facility." },
-  ]), {
+  ], ["facility", "text"]), {
     code: "This field is required.",
     title: "Use 120 characters or fewer.",
     "meetings.0.days": "Choose at least one weekday.",
     "meetings.0.start": "Choose a valid start and end time.",
     "meetings.0.end": "Choose a valid start and end time.",
-    "meetings.0.locationLabel": "Enter a location.",
+    "meetings.0.facilityDetail": "Enter a location.",
     "meetings.1.facilityId": "Select a valid facility.",
   });
+});
+
+test("validates the combined facility label at the domain UTF-16 length boundary", () => {
+  const exact = buildFacilityLocationLabel("A".repeat(157), "");
+  assert.equal(exact.label.length, 157);
+  assert.equal(exact.error, undefined);
+  const exactWithDetail = buildFacilityLocationLabel("A".repeat(155), "BC");
+  assert.equal(exactWithDetail.label.length, 160);
+  assert.equal(exactWithDetail.error, undefined);
+  assert.match(buildFacilityLocationLabel("A".repeat(156), "BC").error ?? "", /160/);
+  assert.equal(buildFacilityLocationLabel("A".repeat(155), "😀").label.length, 160);
+  assert.match(buildFacilityLocationLabel("A".repeat(156), "😀").error ?? "", /160/);
 });
 
 test("requires a selected facility to match the loaded facility options", () => {
