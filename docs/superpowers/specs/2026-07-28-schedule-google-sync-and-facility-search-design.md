@@ -312,7 +312,9 @@ Storage failures release their exact claims, while completion failures retain
 the claim for stale-lease recovery. New upload names are sanitized and capped,
 while cleanup still accepts valid historical object segments and rejects
 traversal, encoded separators, malformed labels, and overlong keys. Uploads
-whose metadata insert fails immediately remove the exact object they created.
+insert their durable retention row before writing Storage; failed uploads
+best-effort delete that exact row, leaving it recoverable by retention if row
+cleanup also fails.
 Claim calls reject null bounds without changing the row. The legacy
 metadata-only SQL cleanup is
 disabled and uncallable, because direct deletion from `storage.objects` can

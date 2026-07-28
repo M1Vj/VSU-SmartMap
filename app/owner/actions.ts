@@ -603,6 +603,7 @@ async function uploadVerificationDocument({
   file: File;
 }): Promise<ActionResult> {
   const serviceClient = getSupabaseServiceRoleClient();
+  const documentId = randomUUID();
   const storagePath = buildVerificationDocumentPath({
     userId,
     applicationId,
@@ -610,21 +611,10 @@ async function uploadVerificationDocument({
     timestamp: Date.now(),
     filename: file.name,
   });
-  const { error: uploadError } = await serviceClient.storage
-    .from(VERIFICATION_DOCUMENT_BUCKET)
-    .upload(storagePath, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (uploadError) {
-    console.error("uploadVerificationDocument upload failed", uploadError);
-    return { error: "Could not upload your documents. Please try again." };
-  }
-
   const { error: rowError } = await serviceClient
     .from("owner_verification_documents")
     .insert({
+      id: documentId,
       application_id: applicationId,
       user_id: userId,
       storage_bucket: VERIFICATION_DOCUMENT_BUCKET,
@@ -636,11 +626,27 @@ async function uploadVerificationDocument({
     });
 
   if (rowError) {
-    console.error("uploadVerificationDocument row insert failed", rowError);
-    await serviceClient.storage
-      .from(VERIFICATION_DOCUMENT_BUCKET)
-      .remove([storagePath]);
+    console.error("uploadVerificationDocument row insert failed");
     return { error: "Could not save your documents. Please try again." };
+  }
+
+  const { error: uploadError } = await serviceClient.storage
+    .from(VERIFICATION_DOCUMENT_BUCKET)
+    .upload(storagePath, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    console.error("uploadVerificationDocument upload failed");
+    const { error: cleanupError } = await serviceClient
+      .from("owner_verification_documents")
+      .delete()
+      .eq("id", documentId);
+    if (cleanupError) {
+      console.error("uploadVerificationDocument row cleanup failed");
+    }
+    return { error: "Could not upload your documents. Please try again." };
   }
   return {};
 }

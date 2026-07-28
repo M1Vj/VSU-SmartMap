@@ -44,6 +44,42 @@ test("validator accepts historical uploader paths with a 217-character final seg
   );
 });
 
+test("validator accepts dotted filename shapes produced by the former sanitizer", () => {
+  for (const filename of [
+    ".passport.pdf",
+    "pass..port.pdf",
+    "passport.",
+    "...",
+  ]) {
+    const path = `${USER_ID}/${APPLICATION_ID}/identity-1720000000000-${filename}`;
+    assert.equal(
+      isValidVerificationDocumentLocation(VERIFICATION_DOCUMENT_BUCKET, path),
+      true,
+      filename,
+    );
+  }
+});
+
+test("validator accepts representative outputs from the former sanitizer", () => {
+  const formerSafeFilename = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+  for (const original of [
+    ".Passport.PDF",
+    "pass..port.pdf",
+    "passport...",
+    "...",
+    "front + back.JPG",
+  ]) {
+    const formerOutput = formerSafeFilename(original);
+    const path = `${USER_ID}/${APPLICATION_ID}/authority-1720000000000-${formerOutput}`;
+    assert.equal(
+      isValidVerificationDocumentLocation(VERIFICATION_DOCUMENT_BUCKET, path),
+      true,
+      `${original} -> ${formerOutput}`,
+    );
+  }
+});
+
 test("generator normalizes leading punctuation to a validator-safe fallback", () => {
   const path = buildVerificationDocumentPath({
     userId: USER_ID,
@@ -78,15 +114,25 @@ test("validator rejects bucket drift, traversal, encoding, malformed structure, 
   }
 });
 
-test("owner upload uses the shared path builder and rolls storage back after row failure", async () => {
+test("owner upload inserts a durable row before upload and cleans the same row id on upload failure", async () => {
   const source = await readFile(
     new URL("../../app/owner/actions.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /buildVerificationDocumentPath\(\{/);
+  const functionSource = source.slice(
+    source.indexOf("async function uploadVerificationDocument"),
+    source.indexOf("type OwnedListing"),
+  );
+  assert.match(functionSource, /buildVerificationDocumentPath\(\{/);
   assert.doesNotMatch(source, /function safeFilename\(/);
   assert.match(
-    source,
-    /if \(rowError\)[\s\S]*storage[\s\S]*\.from\(VERIFICATION_DOCUMENT_BUCKET\)[\s\S]*\.remove\(\[storagePath\]\)/,
+    functionSource,
+    /const documentId = randomUUID\(\)[\s\S]*\.from\("owner_verification_documents"\)[\s\S]*\.insert\(\{[\s\S]*id: documentId[\s\S]*\.upload\(storagePath, file/,
   );
+  assert.match(
+    functionSource,
+    /if \(uploadError\)[\s\S]*\.from\("owner_verification_documents"\)[\s\S]*\.delete\(\)[\s\S]*\.eq\("id", documentId\)/,
+  );
+  assert.doesNotMatch(functionSource, /console\.error\([^)]*,\s*\w+Error\)/);
+  assert.doesNotMatch(functionSource, /\.remove\(\[storagePath\]\)/);
 });
