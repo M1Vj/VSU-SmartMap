@@ -2,6 +2,7 @@
 
 ## v1.6.0
 - Add a private, offline-first student schedule with recurring meetings, next-class guidance, conflict warnings, and campus map handoff
+- Share ranked facility name, code, alias, and room search between the campus map and schedule
 - Add local JSON backup/restore and standards-compliant ICS calendar export
 - Add Settings controls for student navigation visibility; Map, Schedule, Directory, and Chat are enabled by default
 - Prevent stale route requests and competing map camera transitions during rapid navigation handoffs

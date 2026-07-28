@@ -133,6 +133,7 @@ through whichever gate minimizes total detour.
 ## Offline & PWA
 - Service worker caches static assets, map tiles (OpenFreeMap/OSM/CARTO/Esri hosts), and public Supabase facility/room endpoints
 - The `/schedule` shell works offline, while personal courses remain only in IndexedDB and are never copied into service-worker caches or Supabase
+- Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
 - Schedule data does not sync between devices; use the in-app JSON backup/restore controls before clearing browser data, and use ICS export for a calendar copy
 - Offline page at `/offline` with retry/back-to-map actions
 - Facilities and chat history cached locally (with TTL/quotas)
