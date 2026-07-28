@@ -77,11 +77,18 @@ async function main() {
   const anon = client(url, anonKey);
   const student = await signedInClient(url, anonKey, "student@smartmap.example");
   const admin = await signedInClient(url, anonKey, "admin@smartmap.example");
+  const owner = await signedInClient(url, anonKey, "owner@smartmap.example");
   const service = client(url, serviceKey);
   const suffix = randomUUID();
+  let seededSuggestionId = null;
+  let triggerListingId = null;
+  let triggerReviewId = null;
+  let triggerOwnerProfileId = null;
+  let originalOwnerDisplayName = null;
 
   console.log("Authenticated student database-hardening matrix (loopback Supabase only)\n");
 
+  try {
   const dangerousPolicyCount = Number(catalogRows(`
     SELECT count(*)
     FROM pg_catalog.pg_policies
@@ -241,15 +248,47 @@ async function main() {
     changedNothing(await student.from("rooms").delete().neq("id", suffix).select("id")),
   );
 
-  const suggestionRead = await student.from("suggestions").select("id").limit(1);
+  const seededSuggestion = await service
+    .from("suggestions")
+    .insert({
+      type: "ADD_FACILITY",
+      status: "PENDING",
+      payload: { name: `Trusted pending ${suffix}` },
+    })
+    .select("id")
+    .single();
+  if (seededSuggestion.error || !seededSuggestion.data?.id) {
+    throw new Error("Unable to seed the trusted suggestion disclosure fixture.");
+  }
+  seededSuggestionId = seededSuggestion.data.id;
+
+  const suggestionRead = await student
+    .from("suggestions")
+    .select("id")
+    .eq("id", seededSuggestionId);
   check(
-    "student cannot read arbitrary suggestions",
+    "student cannot read a known trusted pending suggestion",
     denied(suggestionRead) || (!suggestionRead.error && suggestionRead.data?.length === 0),
     suggestionRead.error?.message,
   );
+  const suggestionDelete = await student
+    .from("suggestions")
+    .delete()
+    .eq("id", seededSuggestionId)
+    .select("id");
   check(
-    "student cannot delete arbitrary suggestions",
-    changedNothing(await student.from("suggestions").delete().neq("id", suffix).select("id")),
+    "student cannot delete a known trusted pending suggestion",
+    changedNothing(suggestionDelete),
+  );
+  const suggestionSurvives = await service
+    .from("suggestions")
+    .select("id")
+    .eq("id", seededSuggestionId)
+    .single();
+  check(
+    "trusted pending suggestion survives the student's read/delete attempts",
+    !suggestionSurvives.error && suggestionSurvives.data?.id === seededSuggestionId,
+    suggestionSurvives.error?.message,
   );
   check(
     "student cannot bypass server-controlled pending suggestion submission",
@@ -339,6 +378,128 @@ async function main() {
   const serviceCleanup = await service.rpc("delete_expired_verification_documents");
   check("service can invoke cleanup explicitly", !serviceCleanup.error, serviceCleanup.error?.message);
 
+  const ownerIdentity = await owner.auth.getUser();
+  const ownerProfile = await service
+    .from("owner_profiles")
+    .select("id,display_name")
+    .eq("user_id", ownerIdentity.data.user?.id)
+    .single();
+  if (ownerProfile.error || !ownerProfile.data) {
+    throw new Error("Unable to load the trigger owner fixture.");
+  }
+  triggerOwnerProfileId = ownerProfile.data.id;
+  originalOwnerDisplayName = ownerProfile.data.display_name;
+
+  const triggerListing = await service
+    .from("boarding_house_listings")
+    .insert({
+      owner_id: triggerOwnerProfileId,
+      slug: `hardening-trigger-${suffix}`,
+      name: `Hardening trigger ${suffix}`,
+      description: "",
+      address_line: "Local trigger test address",
+      latitude: 10.74,
+      longitude: 124.79,
+      status: "draft",
+      verification_status: "unverified",
+      owner_display_name: "Caller supplied value",
+    })
+    .select("id,owner_display_name,status,verification_status")
+    .single();
+  if (triggerListing.error || !triggerListing.data) {
+    throw new Error(`Unable to create trigger listing fixture: ${triggerListing.error?.message ?? ""}`);
+  }
+  triggerListingId = triggerListing.data.id;
+  check(
+    "owner-name trigger replaces caller input with the profile display name",
+    triggerListing.data.owner_display_name === originalOwnerDisplayName,
+    triggerListing.data.owner_display_name,
+  );
+
+  const propagatedName = `Trigger Owner ${suffix.slice(0, 8)}`;
+  const propagate = await service
+    .from("owner_profiles")
+    .update({ display_name: propagatedName })
+    .eq("id", triggerOwnerProfileId);
+  const propagatedListing = await service
+    .from("boarding_house_listings")
+    .select("owner_display_name")
+    .eq("id", triggerListingId)
+    .single();
+  check(
+    "owner-name propagation trigger updates existing listing snapshots",
+    !propagate.error
+      && !propagatedListing.error
+      && propagatedListing.data?.owner_display_name === propagatedName,
+    propagate.error?.message ?? propagatedListing.error?.message,
+  );
+
+  const forbiddenTransition = await owner
+    .from("boarding_house_listings")
+    .update({ status: "published", verification_status: "verified" })
+    .eq("id", triggerListingId)
+    .select("id");
+  const unchangedTransition = await service
+    .from("boarding_house_listings")
+    .select("status,verification_status")
+    .eq("id", triggerListingId)
+    .single();
+  check(
+    "listing-transition trigger prevents an owner from self-publishing",
+    (Boolean(forbiddenTransition.error) || forbiddenTransition.data?.length === 0)
+      && unchangedTransition.data?.status === "draft"
+      && unchangedTransition.data?.verification_status === "unverified",
+    forbiddenTransition.error?.message ?? unchangedTransition.error?.message,
+  );
+
+  const studentIdentity = await student.auth.getUser();
+  const triggerReview = await service
+    .from("boarding_house_reviews")
+    .insert({
+      listing_id: triggerListingId,
+      author_id: studentIdentity.data.user?.id,
+      author_display_name: "Local Student",
+      rating: 4,
+      body: "Trigger aggregation fixture",
+      status: "approved",
+    })
+    .select("id")
+    .single();
+  if (triggerReview.error || !triggerReview.data?.id) {
+    throw new Error(`Unable to create trigger review fixture: ${triggerReview.error?.message ?? ""}`);
+  }
+  triggerReviewId = triggerReview.data.id;
+  const ratedListing = await service
+    .from("boarding_house_listings")
+    .select("avg_rating,rating_count")
+    .eq("id", triggerListingId)
+    .single();
+  check(
+    "rating trigger recomputes the listing aggregate after insert",
+    !ratedListing.error
+      && Number(ratedListing.data?.avg_rating) === 4
+      && ratedListing.data?.rating_count === 1,
+    ratedListing.error?.message,
+  );
+  const deleteTriggerReview = await service
+    .from("boarding_house_reviews")
+    .delete()
+    .eq("id", triggerReviewId);
+  if (!deleteTriggerReview.error) triggerReviewId = null;
+  const unratedListing = await service
+    .from("boarding_house_listings")
+    .select("avg_rating,rating_count")
+    .eq("id", triggerListingId)
+    .single();
+  check(
+    "rating trigger recomputes the listing aggregate after delete",
+    !deleteTriggerReview.error
+      && !unratedListing.error
+      && Number(unratedListing.data?.avg_rating) === 0
+      && unratedListing.data?.rating_count === 0,
+    deleteTriggerReview.error?.message ?? unratedListing.error?.message,
+  );
+
   const eventWrite = await student.storage
     .from("event-images")
     .upload(`hardening/${suffix}.txt`, new Blob(["blocked"], { type: "text/plain" }));
@@ -356,6 +517,28 @@ async function main() {
       && publicSearch.data.every((row) => typeof row.search_rank === "number"),
     publicSearch.error?.message,
   );
+
+  } finally {
+    if (triggerReviewId) {
+      const cleanup = await service.from("boarding_house_reviews").delete().eq("id", triggerReviewId);
+      check("cleanup removes trigger review fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (triggerListingId) {
+      const cleanup = await service.from("boarding_house_listings").delete().eq("id", triggerListingId);
+      check("cleanup removes trigger listing fixture", !cleanup.error, cleanup.error?.message);
+    }
+    if (triggerOwnerProfileId && originalOwnerDisplayName) {
+      const cleanup = await service
+        .from("owner_profiles")
+        .update({ display_name: originalOwnerDisplayName })
+        .eq("id", triggerOwnerProfileId);
+      check("cleanup restores the owner display name", !cleanup.error, cleanup.error?.message);
+    }
+    if (seededSuggestionId) {
+      const cleanup = await service.from("suggestions").delete().eq("id", seededSuggestionId);
+      check("cleanup removes the trusted suggestion fixture", !cleanup.error, cleanup.error?.message);
+    }
+  }
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed > 0 ? 1 : 0;

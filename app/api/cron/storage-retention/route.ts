@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 
 import { reclaimExpiredEventProofs } from "@/lib/storage/event-proofs";
 import { reclaimExpiredPendingUploads } from "@/lib/storage/pending-uploads";
+import { reclaimExpiredVerificationDocuments } from "@/lib/storage/verification-documents";
 
 function response(body: unknown, status: number) {
   return NextResponse.json(body, {
@@ -32,7 +33,8 @@ export async function GET(request: Request) {
   try {
     const pendingUploads = await reclaimExpiredPendingUploads();
     const eventProofs = await reclaimExpiredEventProofs();
-    return response({ pendingUploads, eventProofs }, 200);
+    const verificationDocuments = await reclaimExpiredVerificationDocuments();
+    return response({ pendingUploads, eventProofs, verificationDocuments }, 200);
   } catch {
     return response({ error: "Unable to reclaim storage." }, 500);
   }

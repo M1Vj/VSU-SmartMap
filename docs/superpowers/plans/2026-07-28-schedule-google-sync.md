@@ -569,9 +569,11 @@ rtk git commit -m "feat(schedule): add private sync schema and RLS"
   service operations, postgres-owner cleanup invocation, and public AI search
   remain valid.
 - [ ] Run the database lint warning gate and all proportional quality gates.
-- [ ] Before provider enablement, establish and monitor an owner-controlled
-  expired-verification-document cleanup schedule. Hosted `pg_cron` is currently
-  absent; do not compensate by exposing the cleanup RPC to browser roles.
+- [ ] Before provider enablement, deploy and invoke the existing daily
+  `/api/cron/storage-retention` job with `CRON_SECRET` plus service-role
+  credentials, confirm its verification-document completion marker, and
+  monitor non-2xx Vercel cron executions. Hosted `pg_cron` remains absent; the
+  cleanup RPC must remain unavailable to browser roles.
 
 This task is a blocking OAuth rollout gate and requires security review before
 the provider or schedule-sync flag is enabled.

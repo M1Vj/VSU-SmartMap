@@ -299,11 +299,15 @@ Before student OAuth is enabled:
 This prevents a missing role table or editable user metadata from promoting an
 ordinary authenticated student.
 
-The hosted project currently has no `pg_cron` extension, so the historical
-conditional schedule for expired boarding-house verification documents did not
-create a cleanup job. This is a privacy/operations rollout gap, not a reason to
-expose cleanup as an API RPC. OAuth enablement requires a separately owned,
-monitored cleanup schedule or an explicit retention-risk acceptance.
+The hosted project has no `pg_cron` extension, so the historical conditional
+database schedule does not create a cleanup job. The existing daily Vercel
+`/api/cron/storage-retention` job is the owner-controlled cleanup mechanism: it
+keeps the exact `CRON_SECRET` bearer boundary, uses the server-only service-role
+client to invoke `delete_expired_verification_documents`, returns only a
+non-sensitive completion marker, and converts database details to a generic
+non-2xx response. Production requires `CRON_SECRET`,
+`NEXT_PUBLIC_SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`; after deployment,
+invoke the job and monitor its Vercel execution logs for a successful daily run.
 
 The browser client uses the existing Supabase SSR integration and PKCE callback.
 Cloud authorization always relies on Supabase's verified access token and RLS.
@@ -434,8 +438,9 @@ production verification against the merged SHA.
    schema plus the enabled UI to preview/staging.
 4. Verify Google provider configuration, exact redirect allowlists, removed
    fallback flags, the authenticated-student database-hardening catalog/runtime
-   gates, a working owner-controlled verification-document cleanup schedule,
-   RLS advisors, and preview browser flows.
+   gates, the secured daily storage-retention job and its monitored
+   verification-document cleanup result, RLS advisors, and preview browser
+   flows.
 5. Enable sync in preview and complete two-account/offline/conflict tests.
 6. Merge through protected `main`.
 7. Apply the production migration and verify it while the production flag

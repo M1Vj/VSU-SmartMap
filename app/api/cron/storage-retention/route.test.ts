@@ -8,6 +8,9 @@ let cleanupResult = { scanned: 3, reclaimed: 2, retry: 1 };
 let proofCleanupCalls = 0;
 let proofCleanupError: Error | null = null;
 let proofCleanupResult = { scanned: 4, reclaimed: 3, retry: 1 };
+let verificationCleanupCalls = 0;
+let verificationCleanupError: Error | null = null;
+let verificationCleanupResult = { completed: true };
 
 mock.module("@/lib/storage/pending-uploads", {
   namedExports: {
@@ -29,6 +32,16 @@ mock.module("@/lib/storage/event-proofs", {
   },
 });
 
+mock.module("@/lib/storage/verification-documents", {
+  namedExports: {
+    async reclaimExpiredVerificationDocuments() {
+      verificationCleanupCalls += 1;
+      if (verificationCleanupError) throw verificationCleanupError;
+      return verificationCleanupResult;
+    },
+  },
+});
+
 const routeModule = import("./route.ts");
 
 function request(authorization?: string) {
@@ -45,6 +58,9 @@ function reset() {
   proofCleanupCalls = 0;
   proofCleanupError = null;
   proofCleanupResult = { scanned: 4, reclaimed: 3, retry: 1 };
+  verificationCleanupCalls = 0;
+  verificationCleanupError = null;
+  verificationCleanupResult = { completed: true };
 }
 
 test.beforeEach(reset);
@@ -56,6 +72,8 @@ test("fails closed without CRON_SECRET", async () => {
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "Storage retention unavailable." });
   assert.equal(cleanupCalls, 0);
+  assert.equal(proofCleanupCalls, 0);
+  assert.equal(verificationCleanupCalls, 0);
 });
 
 test("requires the exact bearer authorization value", async () => {
@@ -65,6 +83,8 @@ test("requires the exact bearer authorization value", async () => {
     assert.equal(response.status, 401);
   }
   assert.equal(cleanupCalls, 0);
+  assert.equal(proofCleanupCalls, 0);
+  assert.equal(verificationCleanupCalls, 0);
 });
 
 test("runs bounded reclamation for an authorized cron request without caching", async () => {
@@ -75,9 +95,11 @@ test("runs bounded reclamation for an authorized cron request without caching", 
   assert.deepEqual(await response.json(), {
     pendingUploads: cleanupResult,
     eventProofs: proofCleanupResult,
+    verificationDocuments: verificationCleanupResult,
   });
   assert.equal(cleanupCalls, 1);
   assert.equal(proofCleanupCalls, 1);
+  assert.equal(verificationCleanupCalls, 1);
 });
 
 test("returns a generic no-cache error when cleanup fails", async () => {
@@ -97,6 +119,18 @@ test("keeps cleanup failures generic when event-proof retention cannot run", asy
   const response = await GET(request("Bearer test-cron-secret"));
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: "Unable to reclaim storage." });
+});
+
+test("returns an observable generic failure when verification-document retention fails", async () => {
+  verificationCleanupError = new Error("private verification document path");
+  const { GET } = await routeModule;
+  const response = await GET(request("Bearer test-cron-secret"));
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json();
+  assert.deepEqual(body, { error: "Unable to reclaim storage." });
+  assert.equal(JSON.stringify(body).includes("verification document"), false);
+  assert.equal(verificationCleanupCalls, 1);
 });
 
 test("documents the secret and schedules one daily Vercel cleanup", async () => {
