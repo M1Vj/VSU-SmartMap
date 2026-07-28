@@ -1,14 +1,17 @@
 import type {
   ScheduleOutboxMutation,
+  StoredScopedScheduleCourse,
 } from "../local-types";
 import { GUEST_SCHEDULE_SCOPE, type ScheduleScope } from "../scope";
+import { parseStoredScheduleCourse } from "../validation";
 import type { CloudMutationResult, CloudScheduleRow } from "./types";
 import type { ScheduleCloudGateway } from "./cloud-gateway";
 import { resolvePulledRow } from "./reconcile";
 
 export type SyncRunResult =
   | { kind: "synced"; scope: ScheduleScope; runToken: number; pending: number; conflicts: number }
-  | { kind: "needs-review"; scope: ScheduleScope; runToken: number; pending: number; conflicts: number }
+  | { kind: "pending"; scope: ScheduleScope; runToken: number; pending: number }
+  | { kind: "needs-review"; scope: ScheduleScope; runToken: number; pending: number; conflicts: number; quarantined: number }
   | { kind: "skipped"; scope: ScheduleScope }
   | { kind: "offline"; scope: ScheduleScope }
   | { kind: "auth-required"; scope: ScheduleScope; runToken?: number; pending: number }
@@ -29,8 +32,9 @@ export interface ScheduleSyncLocalStore {
   recordPushConflict(
     scope: ScheduleScope,
     mutation: ScheduleOutboxMutation,
-    result: Extract<CloudMutationResult, { kind: "conflict" }>,
+    result?: Extract<CloudMutationResult, { kind: "conflict" }>,
   ): Promise<void>;
+  reviewCounts(scope: ScheduleScope): Promise<{ conflicts: number; quarantined: number }>;
   cursorFor(scope: ScheduleScope): Promise<number | undefined>;
   /**
    * One transaction: resolve/apply or quarantine every row and write cursor.
@@ -52,6 +56,57 @@ type CoordinatorOptions = {
   online?: () => boolean;
   cloudVerified?: (scope: ScheduleScope) => boolean;
 };
+
+type AcknowledgementInput = {
+  scope: ScheduleScope;
+  sent: ScheduleOutboxMutation;
+  result: Exclude<CloudMutationResult, { kind: "conflict" }>;
+  currentRow?: StoredScopedScheduleCourse;
+  currentMutation?: ScheduleOutboxMutation;
+  createMutation(input: { expectedRevision: number }): ScheduleOutboxMutation;
+};
+
+export function decideScheduleAcknowledgement(
+  input: AcknowledgementInput,
+): { row?: StoredScopedScheduleCourse; mutation?: ScheduleOutboxMutation } {
+  const revision = input.result.kind === "accepted"
+    ? input.result.row.revision
+    : 0;
+  const exact = input.currentMutation?.mutationId === input.sent.mutationId;
+  if (input.currentMutation && !exact) {
+    return {
+      ...(input.currentRow ? {
+        row: { ...input.currentRow, serverRevision: revision },
+      } : {}),
+      mutation: { ...input.currentMutation, expectedRevision: revision },
+    };
+  }
+  if (
+    !input.currentMutation &&
+    !input.currentRow &&
+    input.sent.operation === "upsert" &&
+    input.result.kind === "accepted" &&
+    input.result.row.payload !== null
+  ) {
+    return { mutation: input.createMutation({ expectedRevision: revision }) };
+  }
+  if (input.result.kind === "accepted" && input.result.row.payload !== null) {
+    return {
+      row: {
+        key: `${input.scope}|${input.sent.courseId}`,
+        scope: input.scope,
+        id: input.sent.courseId,
+        course: parseCanonicalCourse(input.result.row.payload),
+        serverRevision: revision,
+      },
+    };
+  }
+  return {};
+}
+
+function parseCanonicalCourse(payload: unknown) {
+  return parseStoredScheduleCourse(payload);
+}
 
 function category(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "category" in error
@@ -77,12 +132,16 @@ export class ScheduleSyncCoordinator {
     if (this.options.online?.() === false) {
       return Promise.resolve({ kind: "offline", scope });
     }
-    if (this.options.cloudVerified?.(scope) === false) {
-      return this.options.store.pendingCount(scope).then((pending) => ({
-        kind: "auth-required" as const, scope, pending,
-      }));
-    }
     const runToken = this.nextRunToken++;
+    if (this.options.cloudVerified?.(scope) === false) {
+      return this.options.store.pendingCount(scope)
+        .then((pending) => ({
+          kind: "auth-required" as const, scope, runToken, pending,
+        }))
+        .catch(() => ({
+          kind: "failed" as const, scope, runToken, pending: 0,
+        }));
+    }
     const promise = this.run(scope, runToken).finally(() => {
       if (this.active?.promise === promise) this.active = undefined;
     });
@@ -104,6 +163,13 @@ export class ScheduleSyncCoordinator {
           const pendingCount = await this.options.store.pendingCount(scope);
           if (category(error) === "auth") {
             return { kind: "auth-required", scope, runToken, pending: pendingCount };
+          }
+          if (category(error) === "offline") {
+            return { kind: "offline", scope };
+          }
+          if (category(error) === "conflict") {
+            await this.options.store.recordPushConflict(scope, mutation);
+            continue;
           }
           return { kind: "failed", scope, runToken, pending: pendingCount };
         }
@@ -128,16 +194,27 @@ export class ScheduleSyncCoordinator {
         (maximum, row) => Math.max(maximum, row.serverVersion),
         cursor,
       );
-      const applied = await this.options.store.applyPull(
+      await this.options.store.applyPull(
         scope,
         rows,
         nextCursor,
         resolvePulledRow,
       );
       const remaining = await this.options.store.pendingCount(scope);
-      return applied.conflicts > 0 || applied.quarantined > 0
-        ? { kind: "needs-review", scope, runToken, pending: remaining, conflicts: applied.conflicts }
-        : { kind: "synced", scope, runToken, pending: remaining, conflicts: 0 };
+      const review = await this.options.store.reviewCounts(scope);
+      if (review.conflicts > 0 || review.quarantined > 0) {
+        return {
+          kind: "needs-review",
+          scope,
+          runToken,
+          pending: remaining,
+          conflicts: review.conflicts,
+          quarantined: review.quarantined,
+        };
+      }
+      return remaining > 0
+        ? { kind: "pending", scope, runToken, pending: remaining }
+        : { kind: "synced", scope, runToken, pending: 0, conflicts: 0 };
     } catch {
       return {
         kind: "failed",

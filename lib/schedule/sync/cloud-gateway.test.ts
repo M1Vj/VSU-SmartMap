@@ -102,3 +102,72 @@ test("invalid responses and raw database errors are sanitized", async () => {
       !error.message.includes("secret"),
   );
 });
+
+test("RPC results must exactly match the sent canonical course id", async () => {
+  const client = new FakeClient();
+  for (const result of [
+    { status: "deleted", id: "99999999-9999-4999-8999-999999999999", payload: null, revision: 0, server_version: null, created_at: null, updated_at: null, deleted_at: null },
+    { status: "conflict", id: courseIdUpper(), payload: null, revision: null, server_version: null, created_at: null, updated_at: null, deleted_at: null },
+  ]) {
+    client.rpcResult = { data: [result], error: null };
+    await assert.rejects(
+      () => new SupabaseScheduleGateway(client as never).push(mutation),
+      (error: unknown) => error instanceof ScheduleSyncError && error.category === "invalid-remote",
+    );
+  }
+});
+
+test("null conflict and delete-noop variants require every null field", async () => {
+  const client = new FakeClient();
+  for (const result of [
+    { status: "conflict", id, payload: null, revision: null, server_version: null, created_at: null, updated_at: null },
+    { status: "deleted", id, payload: null, revision: 0, server_version: null, created_at: null, updated_at: null, deleted_at: "2026-07-28T00:00:00.000Z" },
+  ]) {
+    client.rpcResult = { data: [result], error: null };
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never).push(mutation));
+  }
+});
+
+test("pull keeps semantically invalid payloads for coordinator quarantine", async () => {
+  const client = new FakeClient();
+  client.rows = [{
+    id, payload: { id, meetings: [] }, revision: 1, server_version: 1,
+    created_at: "2026-07-28T00:00:00.000Z",
+    updated_at: "2026-07-28T00:00:00.000Z", deleted_at: null,
+  }];
+  const rows = await new SupabaseScheduleGateway(client as never).pull(0);
+  assert.equal(rows.length, 1);
+});
+
+test("pull rejects an equal cursor and unsafe BIGINT values", async () => {
+  const client = new FakeClient();
+  client.rows = [{
+    id, payload: null, revision: 1, server_version: 42,
+    created_at: "2026-07-28T00:00:00.000Z",
+    updated_at: "2026-07-28T00:00:00.000Z",
+    deleted_at: "2026-07-28T00:00:00.000Z",
+  }];
+  await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(42));
+  await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(Number.MAX_SAFE_INTEGER + 1));
+});
+
+test("quota and representative PostgREST network failures are generic", async () => {
+  const client = new FakeClient();
+  client.rpcResult = { data: null, error: { code: "P0001", message: "active student schedule quota exceeded" } };
+  await assert.rejects(
+    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    (error: unknown) => error instanceof ScheduleSyncError && error.category === "conflict",
+  );
+  client.rpcResult = { data: null, error: { code: "", message: "TypeError: Failed to fetch", details: "secret endpoint" } };
+  await assert.rejects(
+    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    (error: unknown) =>
+      error instanceof ScheduleSyncError &&
+      error.category === "offline" &&
+      !error.message.includes("secret"),
+  );
+});
+
+function courseIdUpper(): string {
+  return "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+}

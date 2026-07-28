@@ -3,7 +3,9 @@ import test from "node:test";
 import type { ScheduleOutboxMutation, StoredScopedScheduleCourse } from "../local-types";
 import type { ScheduleScope } from "../scope";
 import type { CloudMutationResult, CloudScheduleRow, PullRowResolution } from "./types";
+import { SupabaseScheduleGateway } from "./cloud-gateway";
 import {
+  decideScheduleAcknowledgement,
   ScheduleSyncCoordinator,
   type ScheduleSyncLocalStore,
 } from "./coordinator";
@@ -31,24 +33,31 @@ class Store implements ScheduleSyncLocalStore {
   conflicts: PullRowResolution[] = [];
   quarantined: CloudScheduleRow[] = [];
   failPull = false;
+  failPending = false;
   async listOutbox(requested: ScheduleScope) {
     return this.outbox.filter((item) => item.scope === requested);
   }
   async acknowledge(requested: ScheduleScope, sent: ScheduleOutboxMutation, remote: CloudMutationResult) {
     assert.equal(requested, scope);
     const current = this.outbox.find((item) => item.scope === requested && item.courseId === sent.courseId);
-    const revision = remote.kind === "accepted" ? remote.row.revision : remote.kind === "deleted-noop" ? 0 : undefined;
-    if (revision === undefined) return;
-    if (remote.kind === "accepted" && remote.row.payload !== null) {
-      this.rows.set(courseId, { key: `${scope}|${courseId}`, scope, id: courseId, course, serverRevision: revision });
-    }
-    if (current?.mutationId === sent.mutationId) {
-      this.outbox = this.outbox.filter((item) => item !== current);
-    } else if (current) current.expectedRevision = revision;
+    const decision = decideScheduleAcknowledgement({
+      scope: requested, sent, result: remote as Exclude<CloudMutationResult, { kind: "conflict" }>,
+      currentRow: this.rows.get(sent.courseId), currentMutation: current,
+      createMutation: ({ expectedRevision }) => ({
+        sequence: 99, mutationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        scope: requested, courseId: sent.courseId, expectedRevision,
+        operation: "delete", createdAt: "2026-07-29T00:00:00.000Z",
+      }),
+    });
+    if (decision.row) this.rows.set(sent.courseId, decision.row);
+    else this.rows.delete(sent.courseId);
+    this.outbox = this.outbox.filter((item) => item !== current);
+    if (decision.mutation) this.outbox.push(decision.mutation);
   }
-  async recordPushConflict(_scope: ScheduleScope, _mutation: ScheduleOutboxMutation, result: CloudMutationResult) {
-    this.conflicts.push({ kind: "no-change", serverRevision: result.kind === "conflict" && result.remote ? result.remote.revision : 0 });
+  async recordPushConflict(_scope: ScheduleScope, _mutation: ScheduleOutboxMutation, result?: CloudMutationResult) {
+    this.conflicts.push({ kind: "no-change", serverRevision: result?.kind === "conflict" && result.remote ? result.remote.revision : 0 });
   }
+  async reviewCounts() { return { conflicts: this.conflicts.length, quarantined: this.quarantined.length }; }
   async cursorFor() { return this.cursor; }
   async applyPull(
     _scope: ScheduleScope,
@@ -81,7 +90,7 @@ class Store implements ScheduleSyncLocalStore {
     this.cursor = nextCursor;
     return { conflicts: this.quarantined.length, quarantined: this.quarantined.length };
   }
-  async pendingCount() { return this.outbox.length; }
+  async pendingCount() { if (this.failPending) throw new Error("storage"); return this.outbox.length; }
 }
 
 test("pushes sequentially, acknowledges replay, then pulls", async () => {
@@ -108,7 +117,9 @@ test("a newer edit arriving during push survives and is rebased", async () => {
   store.outbox = [sent];
   const gateway = {
     async push() {
-      store.outbox = [{ ...mutation("55555555-5555-4555-8555-555555555555"), sequence: 2 }];
+      const edited = { ...course, title: "Edited" };
+      store.rows.set(courseId, { key: `${scope}|${courseId}`, scope, id: courseId, course: edited });
+      store.outbox = [{ ...mutation("55555555-5555-4555-8555-555555555555"), course: edited, sequence: 2 }];
       return { kind: "accepted", status: "upserted", row: row(1) } as const;
     },
     async pull() { return []; },
@@ -116,6 +127,42 @@ test("a newer edit arriving during push survives and is rebased", async () => {
   await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
   assert.equal(store.outbox[0]?.mutationId, "55555555-5555-4555-8555-555555555555");
   assert.equal(store.outbox[0]?.expectedRevision, 1);
+  assert.equal(store.rows.get(courseId)?.course.title, "Edited");
+});
+
+test("accepted create cancelled in flight enqueues a compensating delete without resurrection", async () => {
+  const store = new Store();
+  store.outbox = [mutation("22222222-2222-4222-8222-222222222222")];
+  const gateway = {
+    async push() {
+      store.rows.delete(courseId);
+      store.outbox = [];
+      return { kind: "accepted", status: "upserted", row: row(1) } as const;
+    },
+    async pull() { return []; },
+  };
+  await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  assert.equal(store.rows.has(courseId), false);
+  assert.equal(store.outbox[0]?.operation, "delete");
+  assert.equal(store.outbox[0]?.expectedRevision, 1);
+});
+
+test("newer delete during old upsert remains absent and rebases", async () => {
+  const store = new Store();
+  store.rows.set(courseId, { key: `${scope}|${courseId}`, scope, id: courseId, course, serverRevision: 2 });
+  store.outbox = [mutation("22222222-2222-4222-8222-222222222222", 2)];
+  const gateway = {
+    async push() {
+      store.rows.delete(courseId);
+      store.outbox = [{ ...mutation("55555555-5555-4555-8555-555555555555", 2), operation: "delete", course: undefined, sequence: 2 }];
+      return { kind: "accepted", status: "upserted", row: row(3) } as const;
+    },
+    async pull() { return []; },
+  };
+  await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  assert.equal(store.rows.has(courseId), false);
+  assert.equal(store.outbox[0]?.operation, "delete");
+  assert.equal(store.outbox[0]?.expectedRevision, 3);
 });
 
 test("conflict preserves mutation and continues later courses", async () => {
@@ -132,10 +179,15 @@ test("conflict preserves mutation and continues later courses", async () => {
     },
     async pull() { return []; },
   };
-  await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
   assert.equal(pushes, 2);
   assert.equal(store.outbox.length, 1);
   assert.equal(store.outbox[0]?.courseId, courseId);
+  assert.equal(result.kind, "needs-review");
+  if (result.kind === "needs-review") assert.deepEqual(
+    { conflicts: result.conflicts, quarantined: result.quarantined },
+    { conflicts: 1, quarantined: 0 },
+  );
 });
 
 test("auth expiry stops the batch without deleting pending work", async () => {
@@ -160,7 +212,21 @@ test("invalid remote rows are quarantined atomically and require review", async 
   const gateway = { async push() { throw new Error("unused"); }, async pull() { return [{ ...row(2, 9), payload: { ...course, meetings: [] } }]; } };
   const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
   assert.equal(result.kind, "needs-review");
+  if (result.kind === "needs-review") assert.deepEqual(
+    { conflicts: result.conflicts, quarantined: result.quarantined },
+    { conflicts: 0, quarantined: 1 },
+  );
   assert.equal(store.cursor, 9);
+  assert.equal(store.quarantined.length, 1);
+});
+
+test("gateway poison payload reaches coordinator quarantine and advances atomically", async () => {
+  const client = new FakeGatewayClient();
+  const gateway = new SupabaseScheduleGateway(client as never);
+  const store = new Store();
+  const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  assert.equal(result.kind, "needs-review");
+  assert.equal(store.cursor, 7);
   assert.equal(store.quarantined.length, 1);
 });
 
@@ -179,7 +245,7 @@ test("a lost response retries the same mutation and accepts server replay", asyn
     async pull() { return []; },
   };
   const coordinator = new ScheduleSyncCoordinator({ store, gateway });
-  assert.equal((await coordinator.sync(scope)).kind, "failed");
+  assert.equal((await coordinator.sync(scope)).kind, "offline");
   assert.equal(store.outbox.length, 1);
   assert.equal((await coordinator.sync(scope)).kind, "synced");
   assert.equal(store.outbox.length, 0);
@@ -224,3 +290,51 @@ test("guest, disabled consent, offline, and unverified auth exit safely", async 
   assert.equal((await new ScheduleSyncCoordinator({ store, gateway, online: () => false }).sync(scope)).kind, "offline");
   assert.equal((await new ScheduleSyncCoordinator({ store, gateway, cloudVerified: () => false }).sync(scope)).kind, "auth-required");
 });
+
+test("mid-request offline preserves pending and returns offline", async () => {
+  const store = new Store();
+  store.outbox = [mutation("22222222-2222-4222-8222-222222222222")];
+  const gateway = { async push() { throw Object.assign(new Error("safe"), { category: "offline" }); }, async pull() { return []; } };
+  const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  assert.equal(result.kind, "offline");
+  assert.equal(store.outbox.length, 1);
+});
+
+test("quota enters review, preserves mutation, and still pulls", async () => {
+  const store = new Store();
+  store.outbox = [mutation("22222222-2222-4222-8222-222222222222")];
+  let pulled = false;
+  const gateway = {
+    async push() { throw Object.assign(new Error("safe"), { category: "conflict" }); },
+    async pull() { pulled = true; return []; },
+  };
+  const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
+  assert.equal(pulled, true);
+  assert.equal(result.kind, "needs-review");
+  assert.equal(store.outbox.length, 1);
+});
+
+test("unverified auth preflight storage failure resolves deterministically", async () => {
+  const store = new Store(); store.failPending = true;
+  const gateway = { async push() { throw new Error("unused"); }, async pull() { return []; } };
+  const result = await new ScheduleSyncCoordinator({ store, gateway, cloudVerified: () => false }).sync(scope);
+  assert.equal(result.kind, "failed");
+});
+
+class FakeGatewayClient {
+  rpc() { throw new Error("unused"); }
+  from() {
+    const query = {
+      select: () => query, gt: () => query, order: () => query,
+      then: (resolve: (value: unknown) => void) => resolve({
+        data: [{
+          id: courseId, payload: { ...course, meetings: [] }, revision: 1,
+          server_version: 7, created_at: course.createdAt,
+          updated_at: course.updatedAt, deleted_at: null,
+        }],
+        error: null,
+      }),
+    };
+    return query;
+  }
+}

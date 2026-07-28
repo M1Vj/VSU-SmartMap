@@ -37,14 +37,16 @@ function record(value: unknown): value is RawRow {
 }
 
 function timestamp(value: unknown): value is string {
-  return typeof value === "string" && Number.isFinite(new Date(value).getTime());
+  if (typeof value !== "string") return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
 function positive(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
-function parseRow(value: unknown): CloudScheduleRow {
+function parseRow(value: unknown, validatePayload: boolean): CloudScheduleRow {
   if (
     !record(value) ||
     !isValidScheduleId(value.id) ||
@@ -63,7 +65,7 @@ function parseRow(value: unknown): CloudScheduleRow {
   ) {
     throw new ScheduleSyncError("invalid-remote");
   }
-  if (value.payload !== null) {
+  if (validatePayload && value.payload !== null) {
     try {
       if (parseStoredScheduleCourse(value.payload).id !== value.id) {
         throw new ScheduleSyncError("invalid-remote");
@@ -83,34 +85,57 @@ function parseRow(value: unknown): CloudScheduleRow {
   };
 }
 
-function parseMutationResult(value: unknown): CloudMutationResult {
+function allNull(result: RawRow): boolean {
+  return result.payload === null &&
+    result.server_version === null &&
+    result.created_at === null &&
+    result.updated_at === null &&
+    result.deleted_at === null;
+}
+
+function parseMutationResult(value: unknown, courseId: string): CloudMutationResult {
   if (!Array.isArray(value) || value.length !== 1 || !record(value[0])) {
     throw new ScheduleSyncError("invalid-remote");
   }
   const result = value[0];
   if (
     result.status === "deleted" &&
-    isValidScheduleId(result.id) &&
+    result.id === courseId &&
+    result.id === result.id.toLowerCase() &&
     result.revision === 0 &&
-    result.server_version === null &&
-    result.payload === null
+    allNull(result)
   ) {
     return { kind: "deleted-noop", courseId: result.id, revision: 0 };
   }
   if (result.status === "conflict") {
-    if (!isValidScheduleId(result.id)) throw new ScheduleSyncError("invalid-remote");
+    if (result.id !== courseId || result.id !== result.id.toLowerCase()) {
+      throw new ScheduleSyncError("invalid-remote");
+    }
     if (result.revision === null) {
+      if (!allNull(result)) throw new ScheduleSyncError("invalid-remote");
       return { kind: "conflict", courseId: result.id };
     }
-    return { kind: "conflict", courseId: result.id, remote: parseRow(result) };
+    return {
+      kind: "conflict",
+      courseId: result.id,
+      remote: parseRow(result, true),
+    };
   }
   if (!["upserted", "deleted", "replayed"].includes(String(result.status))) {
+    throw new ScheduleSyncError("invalid-remote");
+  }
+  const row = parseRow(result, true);
+  if (
+    row.id !== courseId ||
+    (result.status === "upserted" && row.payload === null) ||
+    (result.status === "deleted" && row.payload !== null)
+  ) {
     throw new ScheduleSyncError("invalid-remote");
   }
   return {
     kind: "accepted",
     status: result.status as "upserted" | "deleted" | "replayed",
-    row: parseRow(result),
+    row,
   };
 }
 
@@ -119,8 +144,19 @@ function classify(error: unknown): ScheduleSyncError {
   if (code === "42501" || code === "PGRST301" || code === "401") {
     return new ScheduleSyncError("auth");
   }
-  if (code === "409" || code === "23505") return new ScheduleSyncError("conflict");
-  if (record(error) && error.name === "TypeError") return new ScheduleSyncError("offline");
+  if (code === "409" || code === "23505" || code === "P0001") {
+    return new ScheduleSyncError("conflict");
+  }
+  const message = record(error) && typeof error.message === "string"
+    ? error.message.toLowerCase()
+    : "";
+  if (
+    (record(error) && error.name === "TypeError") ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror")
+  ) {
+    return new ScheduleSyncError("offline");
+  }
   return new ScheduleSyncError("unavailable");
 }
 
@@ -139,7 +175,7 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
       },
     );
     if (error) throw classify(error);
-    return parseMutationResult(data);
+    return parseMutationResult(data, mutation.courseId);
   }
 
   async pull(afterServerVersion: number): Promise<CloudScheduleRow[]> {
@@ -154,11 +190,12 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
       .order("id", { ascending: true });
     if (error) throw classify(error);
     if (!Array.isArray(data)) throw new ScheduleSyncError("invalid-remote");
-    const rows = data.map(parseRow);
+    const rows = data.map((row) => parseRow(row, false));
     let priorVersion = afterServerVersion;
     let priorId = "";
     for (const row of rows) {
       if (
+        row.serverVersion <= afterServerVersion ||
         row.serverVersion < priorVersion ||
         (row.serverVersion === priorVersion && row.id <= priorId)
       ) {
