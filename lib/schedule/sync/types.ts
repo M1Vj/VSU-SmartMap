@@ -61,6 +61,16 @@ export type ReconciliationIssue =
       kind: "invalid-cloud-payload";
       source: "cloud";
       courseId: string;
+    }
+  | {
+      kind: "invalid-cloud-row";
+      source: "cloud";
+      courseId: string;
+    }
+  | {
+      kind: "course-limit-exceeded";
+      source: "merged";
+      courseId: "schedule";
     };
 
 export type ScheduleSourceReconciliation =
@@ -78,6 +88,11 @@ export type ScheduleSourceReconciliation =
     }
   | {
       kind: "invalid";
+      courses: ReconciliationVersion[];
+      conflicts: Array<{
+        courseId: string;
+        versions: ReconciliationCandidate[];
+      }>;
       issues: ReconciliationIssue[];
     };
 
@@ -110,6 +125,10 @@ export type PullRowResolution =
   | {
       kind: "invalid-cloud-payload";
       courseId: string;
+    }
+  | {
+      kind: "invalid-cloud-row";
+      courseId: string;
     };
 
 export type SyncStatus =
@@ -130,7 +149,16 @@ export type ScheduleSyncReducerState = {
   failed: boolean;
   pending: number;
   conflicts: number;
+  generation: number;
+  lastRunToken: number;
+  activeRunToken?: number;
   lastSyncedAt?: string;
+};
+
+type ScopedSyncRunEvent = {
+  accountId: string;
+  generation: number;
+  runToken: number;
 };
 
 export type ScheduleSyncEvent =
@@ -143,18 +171,18 @@ export type ScheduleSyncEvent =
     }
   | { type: "ONLINE" }
   | { type: "OFFLINE"; pending?: number }
-  | { type: "PUSH_STARTED" }
-  | {
+  | ({ type: "PUSH_STARTED" } & ScopedSyncRunEvent)
+  | ({
       type: "PUSH_ACKNOWLEDGED";
       pending: number;
       lastSyncedAt: string;
-    }
-  | {
+    } & ScopedSyncRunEvent)
+  | ({
       type: "PULL_APPLIED";
       pending: number;
       conflicts: number;
       lastSyncedAt: string;
-    }
-  | { type: "CONFLICT"; conflicts: number }
+    } & ScopedSyncRunEvent)
+  | ({ type: "CONFLICT"; conflicts: number } & ScopedSyncRunEvent)
   | { type: "AUTH_EXPIRED" }
-  | { type: "FAILED" };
+  | ({ type: "FAILED" } & ScopedSyncRunEvent);

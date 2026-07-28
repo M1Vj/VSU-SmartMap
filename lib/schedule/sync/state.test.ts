@@ -5,9 +5,15 @@ import {
   reduceScheduleSyncState,
   scheduleSyncStatus,
 } from "./state";
+import type { ScheduleSyncReducerState } from "./types";
 
 const accountA = "00000000-0000-4000-8000-000000000001";
 const accountB = "00000000-0000-4000-8000-000000000002";
+const runContext = (state: ScheduleSyncReducerState, runToken = 1) => ({
+  accountId: state.accountId!,
+  generation: state.generation,
+  runToken,
+});
 
 test("offline edits, reconnect, push, pull, and acknowledgement preserve exact counts", () => {
   let state = initialScheduleSyncState;
@@ -21,15 +27,20 @@ test("offline edits, reconnect, push, pull, and acknowledgement preserve exact c
   assert.deepEqual(scheduleSyncStatus(state), { kind: "offline", pending: 2 });
   state = reduceScheduleSyncState(state, { type: "ONLINE" });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "pending", pending: 2 });
-  state = reduceScheduleSyncState(state, { type: "PUSH_STARTED" });
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state),
+  });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "syncing", pending: 2 });
   state = reduceScheduleSyncState(state, {
     type: "PUSH_ACKNOWLEDGED",
+    ...runContext(state),
     pending: 1,
     lastSyncedAt: "2026-01-01T00:00:00.000Z",
   });
   state = reduceScheduleSyncState(state, {
     type: "PULL_APPLIED",
+    ...runContext(state),
     pending: 1,
     conflicts: 0,
     lastSyncedAt: "2026-01-02T00:00:00.000Z",
@@ -45,7 +56,12 @@ test("conflicts outrank saved and remain after a push acknowledgement", () => {
     conflicts: 1,
   });
   state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state),
+  });
+  state = reduceScheduleSyncState(state, {
     type: "PUSH_ACKNOWLEDGED",
+    ...runContext(state),
     pending: 0,
     lastSyncedAt: "2026-01-01T00:00:00.000Z",
   });
@@ -53,7 +69,11 @@ test("conflicts outrank saved and remain after a push acknowledgement", () => {
     kind: "needs-review",
     conflicts: 1,
   });
-  state = reduceScheduleSyncState(state, { type: "CONFLICT", conflicts: 0 });
+  state = reduceScheduleSyncState(state, {
+    type: "CONFLICT",
+    ...runContext(state),
+    conflicts: 0,
+  });
   assert.deepEqual(scheduleSyncStatus(state), {
     kind: "saved",
     lastSyncedAt: "2026-01-01T00:00:00.000Z",
@@ -84,13 +104,23 @@ test("failed retry uses generic text and can resume syncing", () => {
     pending: 1,
     conflicts: 0,
   });
-  state = reduceScheduleSyncState(state, { type: "FAILED" });
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state),
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "FAILED",
+    ...runContext(state),
+  });
   assert.deepEqual(scheduleSyncStatus(state), {
     kind: "error",
     message: "Schedule sync failed. Try again.",
     pending: 1,
   });
-  state = reduceScheduleSyncState(state, { type: "PUSH_STARTED" });
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state, 2),
+  });
   assert.deepEqual(scheduleSyncStatus(state), { kind: "syncing", pending: 1 });
 });
 
@@ -146,12 +176,79 @@ test("negative or non-integer counts are rejected", () => {
       }),
     /count/i,
   );
-  assert.throws(
-    () =>
-      reduceScheduleSyncState(initialScheduleSyncState, {
-        type: "CONFLICT",
-        conflicts: 1.5,
-      }),
-    /count/i,
-  );
+  let state = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId: accountA,
+    pending: 0,
+    conflicts: 0,
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    ...runContext(state),
+  });
+  assert.throws(() => {
+    reduceScheduleSyncState(state, {
+      type: "CONFLICT",
+      ...runContext(state),
+      conflicts: 1.5,
+    });
+  }, /count/i);
+});
+
+test("late account A async events cannot mutate account B state", () => {
+  let state = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId: accountA,
+    pending: 2,
+    conflicts: 0,
+  });
+  const accountAGeneration = state.generation;
+  state = reduceScheduleSyncState(state, {
+    type: "PUSH_STARTED",
+    accountId: accountA,
+    generation: accountAGeneration,
+    runToken: 1,
+  });
+  state = reduceScheduleSyncState(state, {
+    type: "AUTH_CHANGED",
+    accountId: accountB,
+    pending: 1,
+    conflicts: 0,
+  });
+  const accountBState = state;
+  const lateEvents = [
+    {
+      type: "PUSH_ACKNOWLEDGED" as const,
+      accountId: accountA,
+      generation: accountAGeneration,
+      runToken: 1,
+      pending: 0,
+      lastSyncedAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      type: "PULL_APPLIED" as const,
+      accountId: accountA,
+      generation: accountAGeneration,
+      runToken: 1,
+      pending: 0,
+      conflicts: 0,
+      lastSyncedAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      type: "CONFLICT" as const,
+      accountId: accountA,
+      generation: accountAGeneration,
+      runToken: 1,
+      conflicts: 3,
+    },
+    {
+      type: "FAILED" as const,
+      accountId: accountA,
+      generation: accountAGeneration,
+      runToken: 1,
+    },
+  ];
+  for (const event of lateEvents) {
+    assert.deepEqual(reduceScheduleSyncState(state, event), accountBState);
+  }
 });

@@ -65,6 +65,10 @@ function mutation(
   };
 }
 
+function numberedId(value: number): string {
+  return `00000000-0000-4000-8000-${value.toString(16).padStart(12, "0")}`;
+}
+
 test("distinct IDs merge with provenance in stable ID order", () => {
   const result = reconcileScheduleSources({
     guest: [course(IDS.guest)],
@@ -184,8 +188,8 @@ test("duplicate source IDs and corrupt or mismatched cloud payloads are surfaced
   assert.equal(result.kind, "invalid");
   if (result.kind === "invalid") {
     assert.deepEqual(result.issues.map((issue) => issue.kind), [
-      "invalid-cloud-payload",
       "duplicate-id",
+      "invalid-cloud-payload",
     ]);
   }
 });
@@ -314,4 +318,157 @@ test("active remote matrix replaces, keeps, or conflicts by expected revision", 
     }).kind,
     "conflict",
   );
+});
+
+test("stale active and tombstone pulls never mutate newer account-local state", () => {
+  const local = { course: course(IDS.local, "Local"), serverRevision: 3 };
+  for (const remote of [cloudRow(course(IDS.local, "Cloud"), 2), cloudRow(null, 2)]) {
+    assert.deepEqual(resolvePulledRow({ accountLocal: local, cloud: remote }), {
+      kind: "no-change",
+      serverRevision: 2,
+    });
+    assert.deepEqual(
+      resolvePulledRow({
+        accountLocal: local,
+        cloud: remote,
+        pendingMutation: mutation("upsert", 2),
+      }),
+      { kind: "no-change", serverRevision: 2 },
+    );
+  }
+});
+
+test("equal and newer active pulls apply without pending while tombstones delete", () => {
+  const local = { course: course(IDS.local, "Local"), serverRevision: 2 };
+  for (const revision of [2, 3]) {
+    assert.equal(
+      resolvePulledRow({
+        accountLocal: local,
+        cloud: cloudRow(course(IDS.local, "Cloud"), revision),
+      }).kind,
+      "replace-local",
+    );
+    assert.equal(
+      resolvePulledRow({
+        accountLocal: local,
+        cloud: cloudRow(null, revision),
+      }).kind,
+      "delete-local",
+    );
+  }
+  assert.equal(
+    resolvePulledRow({
+      accountLocal: local,
+      cloud: cloudRow(course(IDS.local, "Cloud"), 2),
+      pendingMutation: mutation("upsert", 2),
+    }).kind,
+    "keep-local",
+  );
+  assert.equal(
+    resolvePulledRow({
+      accountLocal: local,
+      cloud: cloudRow(null, 2),
+      pendingMutation: mutation("upsert", 2),
+    }).kind,
+    "keep-local",
+  );
+});
+
+test("invalid cloud metadata is quarantined per course while valid output is retained", () => {
+  const valid = cloudRow(course(IDS.cloud), 2);
+  const invalidCourses = Array.from({ length: 5 }, (_, index) =>
+    course(numberedId(index + 20)),
+  );
+  const invalidRows: CloudScheduleRow[] = [
+    { ...cloudRow(course(IDS.local)), id: "NOT-A-UUID" },
+    { ...cloudRow(invalidCourses[0]!), revision: 0 },
+    { ...cloudRow(invalidCourses[1]!), serverVersion: 1.5 },
+    { ...cloudRow(invalidCourses[2]!), createdAt: "not-a-date" },
+    {
+      ...cloudRow(invalidCourses[3]!),
+      deletedAt: "2026-01-03T00:00:00.000Z",
+    },
+    {
+      ...cloudRow(null),
+      id: invalidCourses[4]!.id,
+      deletedAt: undefined,
+    },
+  ];
+  const result = reconcileScheduleSources({
+    guest: [course(IDS.guest)],
+    accountLocal: [],
+    cloud: [valid, ...invalidRows],
+  });
+  assert.equal(result.kind, "invalid");
+  if (result.kind === "invalid") {
+    assert.deepEqual(result.courses.map((item) => item.course.id), [
+      IDS.guest,
+      IDS.cloud,
+    ]);
+    assert.equal(result.issues.length, invalidRows.length);
+    assert.equal(
+      result.issues.every((issue) => issue.kind === "invalid-cloud-row"),
+      true,
+    );
+  }
+  assert.equal(
+    resolvePulledRow({
+      accountLocal: undefined,
+      cloud: invalidRows[1]!,
+    }).kind,
+    "invalid-cloud-row",
+  );
+});
+
+test("issues are sorted stably by course ID then source", () => {
+  const result = reconcileScheduleSources({
+    guest: [course(IDS.cloud), course(IDS.cloud)],
+    accountLocal: [
+      { course: course(IDS.guest) },
+      { course: course(IDS.guest) },
+    ],
+    cloud: [
+      { ...cloudRow(course(IDS.local)), revision: 0 },
+      { ...cloudRow(course(IDS.guest)), revision: 0 },
+    ],
+  });
+  assert.equal(result.kind, "invalid");
+  if (result.kind === "invalid") {
+    assert.deepEqual(
+      result.issues.map(({ courseId, source }) => [courseId, source]),
+      [
+        [IDS.guest, "account-local"],
+        [IDS.guest, "cloud"],
+        [IDS.local, "cloud"],
+        [IDS.cloud, "guest"],
+      ],
+    );
+  }
+});
+
+test("merged unique active course limit accepts 200 and rejects 201 across sources", () => {
+  const courses = Array.from({ length: 201 }, (_, index) =>
+    course(numberedId(index + 100), `Course ${index}`),
+  );
+  const atLimit = reconcileScheduleSources({
+    guest: courses.slice(0, 67),
+    accountLocal: courses.slice(67, 134).map((item) => ({ course: item })),
+    cloud: courses.slice(134, 200).map((item) => cloudRow(item)),
+  });
+  assert.equal(atLimit.kind, "merge-ready");
+  if (atLimit.kind === "merge-ready") assert.equal(atLimit.courses.length, 200);
+
+  const overLimit = reconcileScheduleSources({
+    guest: courses.slice(0, 67),
+    accountLocal: courses.slice(67, 134).map((item) => ({ course: item })),
+    cloud: courses.slice(134).map((item) => cloudRow(item)),
+  });
+  assert.equal(overLimit.kind, "invalid");
+  if (overLimit.kind === "invalid") {
+    assert.equal(
+      overLimit.issues.some((issue) => issue.kind === "course-limit-exceeded"),
+      true,
+    );
+    assert.equal(overLimit.courses.length, 201);
+  }
 });

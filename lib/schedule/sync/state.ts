@@ -13,6 +13,8 @@ export const initialScheduleSyncState: ScheduleSyncReducerState = {
   failed: false,
   pending: 0,
   conflicts: 0,
+  generation: 0,
+  lastRunToken: 0,
 };
 
 function count(value: number): number {
@@ -36,6 +38,8 @@ export function reduceScheduleSyncState(
         failed: false,
         pending: count(event.pending),
         conflicts: count(event.conflicts),
+        generation: state.generation + 1,
+        lastRunToken: 0,
         ...(event.lastSyncedAt ? { lastSyncedAt: event.lastSyncedAt } : {}),
       };
     case "ONLINE":
@@ -48,8 +52,22 @@ export function reduceScheduleSyncState(
         ...(event.pending === undefined ? {} : { pending: count(event.pending) }),
       };
     case "PUSH_STARTED":
-      return { ...state, pushing: true, failed: false };
+      if (
+        !matchesAccountGeneration(state, event) ||
+        !Number.isSafeInteger(event.runToken) ||
+        event.runToken <= state.lastRunToken
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        pushing: true,
+        failed: false,
+        lastRunToken: event.runToken,
+        activeRunToken: event.runToken,
+      };
     case "PUSH_ACKNOWLEDGED":
+      if (!matchesActiveRun(state, event)) return state;
       return {
         ...state,
         pushing: false,
@@ -58,6 +76,7 @@ export function reduceScheduleSyncState(
         lastSyncedAt: event.lastSyncedAt,
       };
     case "PULL_APPLIED":
+      if (!matchesActiveRun(state, event)) return state;
       return {
         ...state,
         pushing: false,
@@ -65,18 +84,46 @@ export function reduceScheduleSyncState(
         pending: count(event.pending),
         conflicts: count(event.conflicts),
         lastSyncedAt: event.lastSyncedAt,
+        activeRunToken: undefined,
       };
     case "CONFLICT":
+      if (!matchesActiveRun(state, event)) return state;
       return {
         ...state,
         pushing: false,
         conflicts: count(event.conflicts),
+        activeRunToken: undefined,
       };
     case "AUTH_EXPIRED":
       return { ...state, authExpired: true, pushing: false };
     case "FAILED":
-      return { ...state, pushing: false, failed: true };
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        pushing: false,
+        failed: true,
+        activeRunToken: undefined,
+      };
   }
+}
+
+function matchesAccountGeneration(
+  state: ScheduleSyncReducerState,
+  event: { accountId: string; generation: number },
+): boolean {
+  return (
+    state.accountId === event.accountId && state.generation === event.generation
+  );
+}
+
+function matchesActiveRun(
+  state: ScheduleSyncReducerState,
+  event: { accountId: string; generation: number; runToken: number },
+): boolean {
+  return (
+    matchesAccountGeneration(state, event) &&
+    state.activeRunToken === event.runToken
+  );
 }
 
 export function scheduleSyncStatus(state: ScheduleSyncReducerState): SyncStatus {

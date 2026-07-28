@@ -1,6 +1,9 @@
 import type { ScheduleOutboxMutation } from "../local-types";
-import type { ScheduleCourse } from "../types";
-import { parseStoredScheduleCourse } from "../validation";
+import { MAX_SCHEDULE_COURSES, type ScheduleCourse } from "../types";
+import {
+  isValidScheduleId,
+  parseStoredScheduleCourse,
+} from "../validation";
 import type {
   AccountLocalScheduleVersion,
   CloudScheduleRow,
@@ -20,6 +23,49 @@ const SOURCE_ORDER: readonly ReconciliationSource[] = [
 
 function compareIds(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function isTimestamp(value: string | undefined): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    Number.isFinite(new Date(value).getTime())
+  );
+}
+
+type ParsedCloudRow =
+  | { kind: "active"; course: ScheduleCourse }
+  | { kind: "tombstone" }
+  | { kind: "invalid-row" }
+  | { kind: "invalid-payload" };
+
+function parseCloudRow(row: CloudScheduleRow): ParsedCloudRow {
+  if (
+    !isValidScheduleId(row.id) ||
+    row.id !== row.id.trim().toLowerCase() ||
+    !isPositiveInteger(row.revision) ||
+    !isPositiveInteger(row.serverVersion) ||
+    !isTimestamp(row.createdAt) ||
+    !isTimestamp(row.updatedAt) ||
+    (row.payload === null
+      ? !isTimestamp(row.deletedAt)
+      : row.deletedAt !== undefined)
+  ) {
+    return { kind: "invalid-row" };
+  }
+  if (row.payload === null) return { kind: "tombstone" };
+  try {
+    const course = parseStoredScheduleCourse(row.payload);
+    return course.id === row.id
+      ? { kind: "active", course }
+      : { kind: "invalid-payload" };
+  } catch {
+    return { kind: "invalid-payload" };
+  }
 }
 
 function semanticCourse(course: ScheduleCourse): string {
@@ -105,8 +151,17 @@ export function reconcileScheduleSources(input: {
       continue;
     }
     seenCloud.add(row.id);
-    let parsed: ScheduleCourse | undefined;
-    if (row.payload === null) {
+    const parsed = parseCloudRow(row);
+    if (parsed.kind === "invalid-row" || parsed.kind === "invalid-payload") {
+      issues.push({
+        kind:
+          parsed.kind === "invalid-row"
+            ? "invalid-cloud-row"
+            : "invalid-cloud-payload",
+        source: "cloud",
+        courseId: row.id,
+      });
+    } else if (parsed.kind === "tombstone") {
       cloudTombstones.set(row.id, {
         kind: "tombstone",
         source: "cloud",
@@ -115,27 +170,14 @@ export function reconcileScheduleSources(input: {
         ...(row.deletedAt === undefined ? {} : { deletedAt: row.deletedAt }),
       });
     } else {
-      try {
-        parsed = parseStoredScheduleCourse(row.payload);
-        if (parsed.id !== row.id) throw new Error("Cloud row ID mismatch.");
-      } catch {
-        issues.push({
-          kind: "invalid-cloud-payload",
-          source: "cloud",
-          courseId: row.id,
-        });
-      }
-    }
-    if (parsed) {
       cloudVersions.push({
         source: "cloud",
-        course: parsed,
+        course: parsed.course,
         revision: row.revision,
       });
     }
   }
   addVersions(byId, issues, "cloud", cloudVersions);
-  if (issues.length > 0) return { kind: "invalid", issues };
 
   const courses: ReconciliationVersion[] = [];
   const conflicts: Array<{
@@ -177,16 +219,24 @@ export function reconcileScheduleSources(input: {
       });
     }
   }
+  if (byId.size > MAX_SCHEDULE_COURSES) {
+    issues.push({
+      kind: "course-limit-exceeded",
+      source: "merged",
+      courseId: "schedule",
+    });
+  }
+  issues.sort(
+    (a, b) =>
+      compareIds(a.courseId, b.courseId) ||
+      SOURCE_ORDER.indexOf(a.source as ReconciliationSource) -
+        SOURCE_ORDER.indexOf(b.source as ReconciliationSource) ||
+      compareIds(a.kind, b.kind),
+  );
+  if (issues.length > 0) return { kind: "invalid", courses, conflicts, issues };
   return conflicts.length > 0
     ? { kind: "conflict", courses, conflicts }
     : { kind: "merge-ready", courses };
-}
-
-function validCloudCourse(row: CloudScheduleRow): ScheduleCourse | undefined {
-  if (row.payload === null) return undefined;
-  const course = parseStoredScheduleCourse(row.payload);
-  if (course.id !== row.id) throw new Error("Cloud row ID mismatch.");
-  return course;
 }
 
 export function resolvePulledRow(input: {
@@ -194,12 +244,14 @@ export function resolvePulledRow(input: {
   cloud: CloudScheduleRow;
   pendingMutation?: ScheduleOutboxMutation;
 }): PullRowResolution {
-  let remote: ScheduleCourse | undefined;
-  try {
-    remote = validCloudCourse(input.cloud);
-  } catch {
+  const parsed = parseCloudRow(input.cloud);
+  if (parsed.kind === "invalid-row") {
+    return { kind: "invalid-cloud-row", courseId: input.cloud.id };
+  }
+  if (parsed.kind === "invalid-payload") {
     return { kind: "invalid-cloud-payload", courseId: input.cloud.id };
   }
+  const remote = parsed.kind === "active" ? parsed.course : undefined;
   const { pendingMutation } = input;
   if (
     pendingMutation &&
@@ -207,6 +259,12 @@ export function resolvePulledRow(input: {
       (pendingMutation.operation === "upsert" && !pendingMutation.course))
   ) {
     return { kind: "invalid-cloud-payload", courseId: input.cloud.id };
+  }
+  if (
+    input.accountLocal?.serverRevision !== undefined &&
+    input.cloud.revision < input.accountLocal.serverRevision
+  ) {
+    return { kind: "no-change", serverRevision: input.cloud.revision };
   }
 
   if (input.cloud.payload === null) {
