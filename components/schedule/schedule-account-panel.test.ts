@@ -36,3 +36,14 @@ test("account panel discloses private storage and no Google Calendar access", as
   assert.match(source, /not shared with Google or Google Calendar/);
   assert.match(source, /min-h-11/);
 });
+
+test("account panel does not fabricate sync state before coordinator wiring", async () => {
+  const source = await readFile(
+    new URL("./schedule-account-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /syncStatus\s*=\s*\{/);
+  assert.match(source, /Private sync enabled/);
+  assert.match(source, /onSyncNow \?/);
+  assert.doesNotMatch(source, /disabled=\{!onSyncNow\}/);
+});

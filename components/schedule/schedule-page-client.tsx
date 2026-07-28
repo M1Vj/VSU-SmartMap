@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { liveQuery } from "dexie";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Database, Plus, ShieldCheck, Trash2 } from "lucide-react";
@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useFacilitySearchData } from "@/components/facility/use-facility-search-data";
 import { ScheduleRepository } from "@/lib/schedule/repository";
 import type { ScheduleScope } from "@/lib/schedule/scope";
+import { canRunScheduleScopeAction } from "@/lib/schedule/scope-bound-action";
 import { isScheduleAccountSyncEnabled } from "@/lib/schedule/sync/feature-flag";
 import {
   MAX_SCHEDULE_COURSES,
@@ -32,9 +33,9 @@ import { ScheduleAccountPanel } from "./schedule-account-panel";
 import { useScheduleAccount } from "./use-schedule-account";
 
 type Confirmation =
-  | { kind: "delete"; course: ScheduleCourse }
-  | { kind: "clear" }
-  | { kind: "restore"; backup: ScheduleBackupDocument }
+  | { kind: "delete"; course: ScheduleCourse; scope: ScheduleScope }
+  | { kind: "clear"; scope: ScheduleScope }
+  | { kind: "restore"; backup: ScheduleBackupDocument; scope: ScheduleScope }
   | { kind: "remove-local-account"; scope: ScheduleScope };
 
 export function SchedulePageClient() {
@@ -46,9 +47,17 @@ export function SchedulePageClient() {
     [scheduleAccount.scope],
   );
   const [loadedCourses, setLoadedCourses] = useState<{
-    scope: string;
+    scope: ScheduleScope;
     courses: ScheduleCourse[];
   } | null>(null);
+  const currentScopeRef = useRef(scheduleAccount.scope);
+  const loadedScopeRef = useRef<ScheduleScope | undefined>(undefined);
+  const actionGeneration = useRef(0);
+  if (currentScopeRef.current !== scheduleAccount.scope) {
+    currentScopeRef.current = scheduleAccount.scope;
+    loadedScopeRef.current = undefined;
+    actionGeneration.current += 1;
+  }
   const courses = useMemo(
     () =>
       loadedCourses?.scope === scheduleAccount.scope
@@ -73,8 +82,10 @@ export function SchedulePageClient() {
   });
   const [selectedDay, setSelectedDay] = useState<IsoWeekday>(() => getManilaWeekPosition(new Date()).weekday);
   const [now, setNow] = useState(() => new Date());
-  const [editing, setEditing] = useState<ScheduleCourse | null | undefined>();
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [editing, setEditing] = useState<
+    { scope: ScheduleScope; course: ScheduleCourse | null } | undefined
+  >();
+  const [transferScope, setTransferScope] = useState<ScheduleScope>();
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -85,16 +96,31 @@ export function SchedulePageClient() {
   }, [facilityQuery]);
 
   useEffect(() => {
+    setEditing(undefined);
+    setConfirmation(undefined);
+    setTransferScope(undefined);
+    setFacilityQuery("");
+    setDeferredFacilityQuery("");
+    setBusy(false);
+  }, [scheduleAccount.scope]);
+
+  useEffect(() => {
     setLoading(true);
     setStorageError("");
     setLoadedCourses(null);
     const subscribedScope = scheduleAccount.scope;
     const subscription = liveQuery(() => scheduleRepository.list()).subscribe({
       next(value) {
+        if (currentScopeRef.current !== subscribedScope) return;
+        loadedScopeRef.current = subscribedScope;
         setLoadedCourses({ scope: subscribedScope, courses: value });
         setLoading(false);
       },
-      error(error) { setStorageError(error instanceof Error ? error.message : "The schedule could not be loaded."); setLoading(false); },
+      error(error) {
+        if (currentScopeRef.current !== subscribedScope) return;
+        setStorageError(error instanceof Error ? error.message : "The schedule could not be loaded.");
+        setLoading(false);
+      },
     });
     return () => subscription.unsubscribe();
   }, [reloadKey, scheduleAccount.scope, scheduleRepository]);
@@ -127,46 +153,88 @@ export function SchedulePageClient() {
   );
   const atCourseLimit = courses.length >= MAX_SCHEDULE_COURSES;
   const save = useCallback(async (value: unknown) => {
+    const origin = editing?.scope;
+    const operation = actionGeneration.current;
+    if (
+      !origin ||
+      !canRunScheduleScopeAction(
+        origin,
+        currentScopeRef.current,
+        loadedScopeRef.current,
+      )
+    ) {
+      toast.error("The account changed. Reopen the schedule action and try again.");
+      return;
+    }
     setBusy(true);
     try {
       await scheduleRepository.put(value);
-      toast.success(editing ? "Course updated" : "Course added");
+      if (
+        operation !== actionGeneration.current ||
+        origin !== currentScopeRef.current
+      ) return;
+      toast.success(editing.course ? "Course updated" : "Course added");
       setEditing(undefined);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save the course.");
       throw error;
     } finally {
-      setBusy(false);
+      if (operation === actionGeneration.current) setBusy(false);
     }
   }, [editing, scheduleRepository]);
 
   const confirmAction = async () => {
     if (!confirmation) return;
+    const origin = confirmation.scope;
+    const operation = actionGeneration.current;
+    if (
+      !canRunScheduleScopeAction(
+        origin,
+        currentScopeRef.current,
+        loadedScopeRef.current,
+      )
+    ) {
+      toast.error("The account changed. Reopen the schedule action and try again.");
+      return;
+    }
     setBusy(true);
     try {
       if (confirmation.kind === "delete") {
         await scheduleRepository.remove(confirmation.course.id);
-        toast.success("Course deleted");
       } else if (confirmation.kind === "clear") {
         await scheduleRepository.clear();
-        toast.success("Schedule cleared");
       } else if (confirmation.kind === "restore") {
         await scheduleRepository.replaceAll(confirmation.backup.courses);
-        toast.success(`Restored ${confirmation.backup.courses.length} courses`);
       } else {
         await scheduleAccount.removeLocalData(confirmation.scope);
-        toast.success("Local account schedule removed");
       }
+      if (
+        operation !== actionGeneration.current ||
+        origin !== currentScopeRef.current
+      ) return;
+      toast.success(
+        confirmation.kind === "remove-local-account"
+          ? "Local account schedule removed"
+          : confirmation.kind === "delete"
+            ? "Course deleted"
+            : confirmation.kind === "clear"
+              ? "Schedule cleared"
+              : `Restored ${confirmation.backup.courses.length} courses`,
+      );
       setConfirmation(undefined);
-      setTransferOpen(
+      setTransferScope(
         confirmation.kind === "restore"
           ? transitionRestoreDialogs("confirm", "confirmed") === "transfer"
-          : false,
+            ? origin
+            : undefined
+          : undefined,
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The schedule could not be changed.");
+      if (operation === actionGeneration.current) {
+        toast.error(error instanceof Error ? error.message : "The schedule could not be changed.");
+      }
     } finally {
-      setBusy(false);
+      if (operation === actionGeneration.current) setBusy(false);
     }
   };
 
@@ -179,7 +247,7 @@ export function SchedulePageClient() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div><h1 id="schedule-page-heading" className="text-2xl font-bold md:text-3xl">My Schedule</h1><p className="mt-1 text-muted-foreground">A private, offline-first weekly planner stored on this device.</p></div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setTransferOpen(true)}><Database className="mr-2 h-4 w-4" />Backup & export</Button>{courses.length > 0 ? <Button variant="outline" onClick={() => setConfirmation({ kind: "clear" })}><Trash2 className="mr-2 h-4 w-4" />Clear</Button> : null}<Button onClick={() => setEditing(null)} disabled={atCourseLimit} aria-describedby={atCourseLimit ? "schedule-course-limit" : undefined}><Plus className="mr-2 h-4 w-4" />Add course</Button></div>
+            <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}><Database className="mr-2 h-4 w-4" />Backup & export</Button>{courses.length > 0 ? <Button variant="outline" onClick={() => setConfirmation({ kind: "clear", scope: scheduleAccount.scope })}><Trash2 className="mr-2 h-4 w-4" />Clear</Button> : null}<Button onClick={() => setEditing({ scope: scheduleAccount.scope, course: null })} disabled={atCourseLimit} aria-describedby={atCourseLimit ? "schedule-course-limit" : undefined}><Plus className="mr-2 h-4 w-4" />Add course</Button></div>
             {atCourseLimit ? <p id="schedule-course-limit" role="status" className="max-w-sm text-xs text-muted-foreground">This device has reached the {MAX_SCHEDULE_COURSES}-course schedule limit. Edit or delete a course before adding another.</p> : null}
           </div>
         </header>
@@ -192,7 +260,7 @@ export function SchedulePageClient() {
           onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
           onEnable={() => { void scheduleAccount.enableConsent(); }}
           onSignOut={() => { void scheduleAccount.signOut(); }}
-          onBackup={() => setTransferOpen(true)}
+          onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
           onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
         />
 
@@ -204,16 +272,16 @@ export function SchedulePageClient() {
                 {next?.meeting.facilityId && knownFacilityIds.has(next.meeting.facilityId) ? <Button variant="outline" onClick={() => router.push(`/?facility=${encodeURIComponent(next.meeting.facilityId!)}`)}>Open facility on map</Button> : null}
               </CardContent>
             </Card>
-            {courses.length === 0 ? <Card className="border-dashed"><CardContent className="flex min-h-52 flex-col items-center justify-center p-6 text-center"><CalendarDays className="mb-3 h-9 w-9 text-muted-foreground" /><h2 className="text-lg font-semibold">Build your weekly plan</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">Add courses, recurring times, campus facilities, free-text rooms, or TBA meetings.</p><Button className="mt-4" onClick={() => setEditing(null)}>Add your first course</Button></CardContent></Card> : null}
-            <ScheduleAgenda courses={courses} selectedDay={selectedDay} onDayChange={setSelectedDay} onEdit={(course) => setEditing(course)} onDelete={(course) => setConfirmation({ kind: "delete", course })} onMap={(facilityId) => router.push(`/?facility=${encodeURIComponent(facilityId)}`)} isLiveFacility={(facilityId) => knownFacilityIds.has(facilityId)} />
+            {courses.length === 0 ? <Card className="border-dashed"><CardContent className="flex min-h-52 flex-col items-center justify-center p-6 text-center"><CalendarDays className="mb-3 h-9 w-9 text-muted-foreground" /><h2 className="text-lg font-semibold">Build your weekly plan</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">Add courses, recurring times, campus facilities, free-text rooms, or TBA meetings.</p><Button className="mt-4" onClick={() => setEditing({ scope: scheduleAccount.scope, course: null })}>Add your first course</Button></CardContent></Card> : null}
+            <ScheduleAgenda courses={courses} selectedDay={selectedDay} onDayChange={setSelectedDay} onEdit={(course) => setEditing({ scope: scheduleAccount.scope, course })} onDelete={(course) => setConfirmation({ kind: "delete", course, scope: scheduleAccount.scope })} onMap={(facilityId) => router.push(`/?facility=${encodeURIComponent(facilityId)}`)} isLiveFacility={(facilityId) => knownFacilityIds.has(facilityId)} />
             {courses.length > 0 ? <ScheduleWeekGrid courses={courses} /> : null}
           </>
         )}
-        <aside className="flex gap-3 rounded-lg border bg-muted/40 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Your class routine stays in this browser&apos;s IndexedDB. It is not synced to an account, sent to Supabase, placed in URLs, or stored in service-worker caches. Keep a JSON backup before clearing browser data or changing devices.</p></aside>
+        <aside className="flex gap-3 rounded-lg border bg-muted/40 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>{scheduleAccount.account.kind !== "authenticated" ? "Your class routine stays in this browser’s IndexedDB and is not sent to Supabase. Keep a JSON backup before clearing browser data or changing devices." : !scheduleAccount.account.offlineVerified ? "This cached account’s local schedule is available only on this device while offline. Cloud sync stays paused until the account is verified online." : !scheduleAccount.consentEnabled ? "This account’s schedule remains local to this device. Signing in does not send it to Supabase unless you explicitly enable private sync." : "Private sync consent is enabled. Your schedule remains available locally; cloud activity and success are shown only when a verified sync status is available."}</p></aside>
       </div>
       <CourseDialog
-        open={editing !== undefined}
-        course={editing ?? undefined}
+        open={editing?.scope === scheduleAccount.scope}
+        course={editing?.course ?? undefined}
         facilities={facilities}
         facilityOptions={facilitySearchOptions}
         facilityOptionsQuery={facilityOptionsQuery}
@@ -228,8 +296,8 @@ export function SchedulePageClient() {
         }}
         onSave={save}
       />
-      <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => { setTransferOpen(transitionRestoreDialogs("transfer", "restore-ready") === "transfer"); setConfirmation({ kind: "restore", backup }); }} />
-      <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : confirmation?.kind === "remove-local-account" ? "Remove this account schedule from this device?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : confirmation?.kind === "remove-local-account" ? "This removes only this signed-in account’s local courses, pending changes, sync consent, and review items. It does not remove guest, other-account, or cloud data." : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : confirmation?.kind === "remove-local-account" ? "Remove local account data" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; setConfirmation(undefined); setTransferOpen(Boolean(reopen)); }} onConfirm={() => { void confirmAction(); }} />
+      <ScheduleTransferDialog open={transferScope === scheduleAccount.scope && loadedCourses?.scope === scheduleAccount.scope} courses={courses} busy={busy} onClose={() => setTransferScope(undefined)} onRestoreReady={(backup) => { const origin = transferScope; if (!origin || !canRunScheduleScopeAction(origin, currentScopeRef.current, loadedScopeRef.current)) { toast.error("The account changed. Reopen the schedule action and try again."); return; } setTransferScope(transitionRestoreDialogs("transfer", "restore-ready") === "transfer" ? origin : undefined); setConfirmation({ kind: "restore", backup, scope: origin }); }} />
+      <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation?.scope === scheduleAccount.scope} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : confirmation?.kind === "remove-local-account" ? "Remove this account schedule from this device?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : confirmation?.kind === "remove-local-account" ? "This removes only this signed-in account’s local courses, pending changes, sync consent, and review items. It does not remove guest, other-account, or cloud data." : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : confirmation?.kind === "remove-local-account" ? "Remove local account data" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; const origin = confirmation?.scope; setConfirmation(undefined); setTransferScope(reopen ? origin : undefined); }} onConfirm={() => { void confirmAction(); }} />
     </div>
   );
 }

@@ -1,35 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 import { signInWithGoogle } from "@/lib/auth/oauth";
 import { db } from "@/lib/db";
 import { removeLocalScheduleAccountData } from "@/lib/schedule/account-local-data";
 import { accountScheduleScope, GUEST_SCHEDULE_SCOPE, type ScheduleScope } from "@/lib/schedule/scope";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import {
+  createScheduleAccountGeneration,
+  readScopedScheduleConsent,
+  resolveScheduleAuth,
+  signOutGuestFirst,
+  writeScopedScheduleConsent,
+  type ScheduleAccountState,
+} from "@/lib/schedule/sync/account-state";
 
-const CONSENT_INTENT_KEY = "vsu.schedule.sync-consent-intent";
 const GENERIC_AUTH_ERROR = "Google sign-in is unavailable. Please try again.";
 
-export type ScheduleAccountState =
-  | { kind: "loading" }
-  | { kind: "guest" }
-  | {
-      kind: "authenticated";
-      userId: string;
-      email?: string;
-      offlineVerified: boolean;
-    };
-
-function authenticated(user: User, offlineVerified: boolean): ScheduleAccountState {
-  return {
-    kind: "authenticated",
-    userId: user.id,
-    ...(user.email ? { email: user.email } : {}),
-    offlineVerified,
-  };
-}
+export type { ScheduleAccountState } from "@/lib/schedule/sync/account-state";
 
 export function useScheduleAccount(enabled: boolean) {
   const [account, setAccount] = useState<ScheduleAccountState>(
@@ -37,27 +27,14 @@ export function useScheduleAccount(enabled: boolean) {
   );
   const [consentEnabled, setConsentEnabled] = useState(false);
   const [authError, setAuthError] = useState("");
-  const generation = useRef(0);
-
-  const loadConsent = useCallback(async (state: ScheduleAccountState) => {
-    if (state.kind !== "authenticated") {
-      setConsentEnabled(false);
-      return;
-    }
-    const scope = accountScheduleScope(state.userId);
-    const intent = sessionStorage.getItem(CONSENT_INTENT_KEY) === "pending";
-    const row = await db.schedule_sync_state.get(scope);
-    if (intent && state.offlineVerified) {
-      await db.schedule_sync_state.put({ ...row, scope, consentEnabled: true });
-      sessionStorage.removeItem(CONSENT_INTENT_KEY);
-      setConsentEnabled(true);
-      return;
-    }
-    setConsentEnabled(row?.consentEnabled === true);
-  }, []);
+  const authGeneration = useRef(0);
+  const consentGeneration = useRef(createScheduleAccountGeneration());
+  const consentToken = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
+      authGeneration.current += 1;
+      consentGeneration.current.invalidate();
       setAccount({ kind: "guest" });
       setConsentEnabled(false);
       return;
@@ -67,7 +44,6 @@ export function useScheduleAccount(enabled: boolean) {
       search.get("auth_error") === "oauth" ||
       search.get("error") === "oauth"
     ) {
-      sessionStorage.removeItem(CONSENT_INTENT_KEY);
       setAuthError("Google sign-in failed. Please try again. Your local schedule is unchanged.");
     }
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -79,41 +55,67 @@ export function useScheduleAccount(enabled: boolean) {
     }
 
     const client = getSupabaseBrowserClient();
+    const consentGate = consentGeneration.current;
     let alive = true;
-    const resolve = async (cachedUser?: User) => {
-      const current = ++generation.current;
-      let next: ScheduleAccountState = { kind: "guest" };
-      try {
-        const { data, error } = await client.auth.getUser();
-        if (error) throw error;
-        if (data.user) next = authenticated(data.user, true);
-      } catch {
-        try {
-          const user =
-            cachedUser ??
-            (await client.auth.getSession()).data.session?.user;
-          if (user) next = authenticated(user, false);
-        } catch {
-          next = { kind: "guest" };
-          setAuthError(GENERIC_AUTH_ERROR);
-        }
-      }
-      if (!alive || current !== generation.current) return;
+    const resolve = async (cachedSession?: Session | null) => {
+      const current = ++authGeneration.current;
+      consentGate.invalidate();
+      setConsentEnabled(false);
+      setAccount({ kind: "loading" });
+      const next = await resolveScheduleAuth(
+        true,
+        {
+          async getUser() {
+            const { data, error } = await client.auth.getUser();
+            return { user: data.user, error };
+          },
+          async getSessionUser() {
+            return (
+              cachedSession?.user ??
+              (await client.auth.getSession()).data.session?.user
+            );
+          },
+        },
+        navigator.onLine,
+      );
+      if (!alive || current !== authGeneration.current) return;
       setAccount(next);
-      await loadConsent(next);
+      if (next.kind !== "authenticated") {
+        consentGate.invalidate();
+        if (next.kind === "guest" && next.authRequired) {
+          setAuthError("Your Google session needs to be verified again.");
+        }
+        return;
+      }
+      const nextScope = accountScheduleScope(next.userId);
+      const token = consentGate.begin(nextScope);
+      consentToken.current = token;
+      const consent = await readScopedScheduleConsent(
+        nextScope,
+        token,
+        consentGate,
+        (scope) => db.schedule_sync_state.get(scope),
+      );
+      if (
+        !alive ||
+        current !== authGeneration.current ||
+        consent === undefined
+      ) return;
+      setConsentEnabled(consent);
     };
     void resolve();
     const { data: listener } = client.auth.onAuthStateChange(
       (_event: AuthChangeEvent, session: Session | null) => {
-      void resolve(session?.user);
+        void resolve(session);
       },
     );
     return () => {
       alive = false;
-      generation.current += 1;
+      authGeneration.current += 1;
+      consentGate.invalidate();
       listener.subscription.unsubscribe();
     };
-  }, [enabled, loadConsent]);
+  }, [enabled]);
 
   const scope: ScheduleScope =
     account.kind === "authenticated"
@@ -122,11 +124,9 @@ export function useScheduleAccount(enabled: boolean) {
 
   const startGoogleSignIn = useCallback(async () => {
     setAuthError("");
-    sessionStorage.setItem(CONSENT_INTENT_KEY, "pending");
     try {
       await signInWithGoogle("/schedule");
     } catch {
-      sessionStorage.removeItem(CONSENT_INTENT_KEY);
       setAuthError(GENERIC_AUTH_ERROR);
     }
   }, []);
@@ -134,21 +134,26 @@ export function useScheduleAccount(enabled: boolean) {
   const enableConsent = useCallback(async () => {
     if (account.kind !== "authenticated" || !account.offlineVerified) return;
     const accountScope = accountScheduleScope(account.userId);
-    const row = await db.schedule_sync_state.get(accountScope);
-    await db.schedule_sync_state.put({
-      ...row,
-      scope: accountScope,
-      consentEnabled: true,
-    });
-    setConsentEnabled(true);
+    const updated = await writeScopedScheduleConsent(
+      accountScope,
+      consentToken.current,
+      consentGeneration.current,
+      db.schedule_sync_state,
+    );
+    if (updated) setConsentEnabled(true);
   }, [account]);
 
   const signOut = useCallback(async () => {
-    setAccount({ kind: "guest" });
-    setConsentEnabled(false);
-    generation.current += 1;
     try {
-      await getSupabaseBrowserClient().auth.signOut();
+      await signOutGuestFirst(
+        () => {
+          setAccount({ kind: "guest" });
+          setConsentEnabled(false);
+          authGeneration.current += 1;
+          consentGeneration.current.invalidate();
+        },
+        () => getSupabaseBrowserClient().auth.signOut(),
+      );
     } catch {
       setAuthError("Sign out could not be completed. Please try again.");
     }
@@ -160,7 +165,14 @@ export function useScheduleAccount(enabled: boolean) {
       accountScheduleScope(account.userId) !== expectedScope
     ) return;
     await removeLocalScheduleAccountData(db, expectedScope);
-    setConsentEnabled(false);
+    if (
+      consentGeneration.current.isCurrent(
+        consentToken.current,
+        expectedScope,
+      )
+    ) {
+      setConsentEnabled(false);
+    }
   }, [account]);
 
   return {

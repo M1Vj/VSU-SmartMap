@@ -21,7 +21,7 @@ export function ScheduleAccountPanel({
   account,
   consentEnabled,
   authError,
-  syncStatus = { kind: "pending", pending: 0 },
+  syncStatus,
   onContinue,
   onEnable,
   onSyncNow,
@@ -66,18 +66,22 @@ export function ScheduleAccountPanel({
         <div><p className="font-medium">{account.email ?? "Google account"}</p><p className="text-sm text-muted-foreground">When enabled, schedules use private Supabase rows and are not shared with Google or Google Calendar.</p></div>
         {!consentEnabled ? (
           <div className="space-y-2">
-            <p className="text-sm">Signing in alone does not enable schedule sync.</p>
+            <p className="text-sm">{account.offlineVerified ? "Signing in alone does not enable schedule sync." : "This cached account can use only its local schedule while offline. Reconnect and verify the account before enabling private sync."}</p>
             <Button type="button" onClick={onEnable} disabled={!account.offlineVerified}>Enable private sync</Button>
           </div>
         ) : (
           <div className="space-y-2" aria-live="polite">
-            <p className="font-medium">{STATUS_LABEL[syncStatus.kind === "guest" ? "pending" : syncStatus.kind]}</p>
-            {"pending" in syncStatus ? <p className="text-sm text-muted-foreground">{syncStatus.pending} pending change{syncStatus.pending === 1 ? "" : "s"}</p> : null}
-            {"conflicts" in syncStatus ? <p className="text-sm text-muted-foreground">{syncStatus.conflicts} item{syncStatus.conflicts === 1 ? "" : "s"} need review</p> : null}
-            <Button type="button" variant="outline" onClick={onSyncNow} disabled={!onSyncNow}>Sync now</Button>
+            {syncStatus && syncStatus.kind !== "guest" ? (
+              <>
+                <p className="font-medium">{STATUS_LABEL[syncStatus.kind]}</p>
+                {"pending" in syncStatus ? <p className="text-sm text-muted-foreground">{syncStatus.pending} pending change{syncStatus.pending === 1 ? "" : "s"}</p> : null}
+                {"conflicts" in syncStatus ? <p className="text-sm text-muted-foreground">{syncStatus.conflicts} item{syncStatus.conflicts === 1 ? "" : "s"} need review</p> : null}
+                {onSyncNow ? <Button type="button" variant="outline" onClick={onSyncNow}>Sync now</Button> : null}
+              </>
+            ) : <><p className="font-medium">Private sync enabled</p><p className="text-sm text-muted-foreground">{account.offlineVerified ? "Cloud sync status will appear here when synchronization starts." : "This device can use the account-local schedule, but cloud sync is paused until the account is verified online."}</p></>}
           </div>
         )}
-        {authError ? <p role="alert" className="text-sm text-destructive">{authError}</p> : null}
+        {authError ? <p role="alert" aria-live="assertive" className="text-sm text-destructive">{authError}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={onBackup}>Backup & export</Button>
           <Button type="button" variant="outline" onClick={onSignOut}>Sign out</Button>
