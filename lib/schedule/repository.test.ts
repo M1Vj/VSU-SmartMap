@@ -14,6 +14,7 @@ import {
   ScheduleCourseLimitError,
   ScheduleRepository,
   ScheduleStorageError,
+  createDexieScopedScheduleStore,
   type ScopedScheduleStore,
 } from "./repository";
 import {
@@ -23,8 +24,10 @@ import {
 } from "./scope";
 import {
   scopedCourseKey,
+  type ScheduleOutboxMutation,
   type StoredScopedScheduleCourse,
 } from "./local-types";
+import { desiredScheduleMutation, type ScheduleMutationDependencies } from "./outbox";
 
 const COURSE_ID = "123e4567-e89b-42d3-a456-426614174000";
 const OTHER_ID = "123e4567-e89b-42d3-a456-426614174002";
@@ -60,7 +63,10 @@ function courseId(index: number): string {
 
 class FakeStore implements ScopedScheduleStore {
   rows: StoredScopedScheduleCourse[];
+  outbox: ScheduleOutboxMutation[] = [];
+  transactions = 0;
   replaceCalls = 0;
+  failOutbox = false;
 
   constructor(
     rows: unknown[] = [],
@@ -131,6 +137,131 @@ class FakeStore implements ScopedScheduleStore {
         course: structuredClone(course),
       })),
     );
+  }
+
+  async accountPut(
+    scope: ScheduleScope,
+    course: ScheduleCourse,
+    maximumCourses: number,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void> {
+    this.transactions += 1;
+    const beforeRows = structuredClone(this.rows);
+    const beforeOutbox = structuredClone(this.outbox);
+    try {
+      await this.put(scope, course, maximumCourses);
+      const row = beforeRows.find((item) => item.key === scopedCourseKey(scope, course.id));
+      const existing = beforeOutbox.find(
+        (item) => item.scope === scope && item.courseId === course.id,
+      );
+      this.persistMutation(desiredScheduleMutation({
+        existing,
+        scope,
+        course,
+        operation: "upsert",
+        knownRevision: row?.serverRevision,
+        ...dependencies,
+      })!);
+    } catch (error) {
+      this.rows = beforeRows;
+      this.outbox = beforeOutbox;
+      throw error;
+    }
+  }
+
+  async accountRemove(
+    scope: ScheduleScope,
+    id: string,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void> {
+    this.transactions += 1;
+    const row = this.rows.find((item) => item.key === scopedCourseKey(scope, id));
+    const existing = this.outbox.find(
+      (item) => item.scope === scope && item.courseId === id,
+    );
+    await this.remove(scope, id);
+    this.outbox = this.outbox.filter(
+      (item) => item.scope !== scope || item.courseId !== id,
+    );
+    const mutation = desiredScheduleMutation({
+      existing,
+      scope,
+      courseId: id,
+      operation: "delete",
+      knownRevision: row?.serverRevision,
+      ...dependencies,
+    });
+    if (mutation) this.persistMutation(mutation);
+  }
+
+  async accountClear(
+    scope: ScheduleScope,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void> {
+    this.transactions += 1;
+    const rows = this.rows.filter((row) => row.scope === scope);
+    await this.clear(scope);
+    for (const row of rows) {
+      const id = row.id;
+      const mutation = desiredScheduleMutation({
+        existing: this.outbox.find(
+          (item) => item.scope === scope && item.courseId === id,
+        ),
+        scope,
+        courseId: id,
+        operation: "delete",
+        knownRevision: row.serverRevision,
+        ...dependencies,
+      });
+      this.outbox = this.outbox.filter(
+        (item) => item.scope !== scope || item.courseId !== id,
+      );
+      if (mutation) this.persistMutation(mutation);
+    }
+  }
+
+  async accountReplaceAll(
+    scope: ScheduleScope,
+    courses: ScheduleCourse[],
+    maximumCourses: number,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void> {
+    this.transactions += 1;
+    const rows = this.rows.filter((row) => row.scope === scope);
+    const desired = new Map(courses.map((course) => [course.id, course]));
+    const ids = new Set([
+      ...rows.map((row) => row.id),
+      ...this.outbox.filter((item) => item.scope === scope).map((item) => item.courseId),
+      ...desired.keys(),
+    ]);
+    await this.replaceAll(scope, courses, maximumCourses);
+    for (const id of ids) {
+      const course = desired.get(id);
+      const mutation = desiredScheduleMutation({
+        existing: this.outbox.find(
+          (item) => item.scope === scope && item.courseId === id,
+        ),
+        scope,
+        courseId: id,
+        operation: course ? "upsert" : "delete",
+        course,
+        knownRevision: rows.find((row) => row.id === id)?.serverRevision,
+        ...dependencies,
+      });
+      this.outbox = this.outbox.filter(
+        (item) => item.scope !== scope || item.courseId !== id,
+      );
+      if (mutation) this.persistMutation(mutation);
+    }
+  }
+
+  private persistMutation(mutation: ScheduleOutboxMutation): void {
+    if (this.failOutbox) throw new Error("outbox failure");
+    this.outbox = this.outbox.filter(
+      (item) =>
+        item.scope !== mutation.scope || item.courseId !== mutation.courseId,
+    );
+    this.outbox.push(structuredClone(mutation));
   }
 }
 
@@ -428,4 +559,180 @@ test("repositories sharing one store isolate guest and account CRUD", async () =
   await guest.clear();
   assert.deepEqual(await guest.list(), []);
   assert.equal((await account.list())[0]?.title, "Account title");
+});
+
+test("account put writes course and mutation in one transaction while guest never queues", async () => {
+  const accountScope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = new FakeStore();
+  const account = new ScheduleRepository(accountScope, () => store);
+  await account.put(storedCourse());
+  assert.equal(store.transactions, 1);
+  assert.equal(store.rows.length, 1);
+  assert.deepEqual(store.outbox.map((item) => item.operation), ["upsert"]);
+
+  const guestStore = new FakeStore();
+  await new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => guestStore).put(storedCourse());
+  assert.equal(guestStore.outbox.length, 0);
+  assert.equal(guestStore.transactions, 0);
+});
+
+test("failed outbox persistence rolls back the account course change", async () => {
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = new FakeStore();
+  store.failOutbox = true;
+  await assert.rejects(new ScheduleRepository(scope, () => store).put(storedCourse()));
+  assert.deepEqual(store.rows, []);
+  assert.deepEqual(store.outbox, []);
+});
+
+test("repeated edits coalesce and create then delete becomes net zero", async () => {
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = new FakeStore();
+  const repository = new ScheduleRepository(scope, () => store);
+  await repository.put(storedCourse());
+  await repository.put({ ...storedCourse(), title: "Latest title" });
+  assert.equal(store.outbox.length, 1);
+  assert.equal(store.outbox[0]?.course?.title, "Latest title");
+  assert.equal(store.outbox[0]?.expectedRevision, 0);
+  await repository.remove(COURSE_ID);
+  assert.deepEqual(store.rows, []);
+  assert.deepEqual(store.outbox, []);
+});
+
+test("delete then recreate retains the original known server revision", async () => {
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = new FakeStore();
+  store.rows = [{
+    key: scopedCourseKey(scope, COURSE_ID),
+    scope,
+    id: COURSE_ID,
+    course: storedCourse(),
+    serverRevision: 12,
+  }];
+  const repository = new ScheduleRepository(scope, () => store);
+  await repository.remove(COURSE_ID);
+  await repository.put({ ...storedCourse(), title: "Restored" });
+  assert.equal(store.outbox.length, 1);
+  assert.equal(store.outbox[0]?.operation, "upsert");
+  assert.equal(store.outbox[0]?.expectedRevision, 12);
+});
+
+test("real IndexedDB atomically rolls back and coalesces account writes", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const otherScope = accountScheduleScope("22222222-2222-4222-8222-222222222222");
+  const store = createDexieScopedScheduleStore(database);
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+
+  const failing = new ScheduleRepository(scope, () => store, {
+    mutationId: () => "invalid",
+    now: () => new Date(CREATED_AT),
+  });
+  await assert.rejects(failing.put(storedCourse()), ScheduleStorageError);
+  assert.equal(await database.schedule_scoped_courses.count(), 0);
+  assert.equal(await database.schedule_outbox.count(), 0);
+
+  const mutationIds = [
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  ];
+  const repository = new ScheduleRepository(scope, () => store, {
+    mutationId: () => mutationIds.shift()!,
+    now: () => new Date(CREATED_AT),
+  });
+  await repository.put(storedCourse());
+  await repository.put({ ...storedCourse(), title: "Latest" });
+  const coalesced = await database.schedule_outbox
+    .where("[scope+courseId]")
+    .equals([scope, COURSE_ID])
+    .first();
+  assert.equal(coalesced?.mutationId, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+  assert.equal(coalesced?.expectedRevision, 0);
+  assert.equal(coalesced?.course?.title, "Latest");
+
+  await new ScheduleRepository(otherScope, () => store, {
+    mutationId: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    now: () => new Date(CREATED_AT),
+  }).put({ ...storedCourse(), title: "Other account" });
+  await repository.remove(COURSE_ID);
+  assert.equal(
+    await database.schedule_outbox.where("scope").equals(scope).count(),
+    0,
+  );
+  assert.equal(
+    await database.schedule_outbox.where("scope").equals(otherScope).count(),
+    1,
+  );
+  assert.equal(
+    await database.schedule_scoped_courses.where("scope").equals(otherScope).count(),
+    1,
+  );
+});
+
+test("real IndexedDB clear and restore create bounded per-course desired mutations", async (t) => {
+  await Dexie.delete(DATABASE_NAME);
+  const database = new VSUDatabase();
+  const scope = accountScheduleScope("11111111-1111-4111-8111-111111111111");
+  const store = createDexieScopedScheduleStore(database);
+  let nextId = 1;
+  const repository = new ScheduleRepository(scope, () => store, {
+    mutationId: () =>
+      `00000000-0000-4000-8000-${(nextId++).toString(16).padStart(12, "0")}`,
+    now: () => new Date(CREATED_AT),
+  });
+  t.after(async () => {
+    database.close();
+    await Dexie.delete(DATABASE_NAME);
+  });
+
+  await database.schedule_scoped_courses.bulkAdd([
+    {
+      key: scopedCourseKey(scope, COURSE_ID),
+      scope,
+      id: COURSE_ID,
+      course: storedCourse(COURSE_ID),
+      serverRevision: 4,
+    },
+    {
+      key: scopedCourseKey(scope, OTHER_ID),
+      scope,
+      id: OTHER_ID,
+      course: storedCourse(OTHER_ID),
+      serverRevision: 8,
+    },
+  ]);
+  await repository.clear();
+  const deletes = await database.schedule_outbox.where("scope").equals(scope).toArray();
+  assert.deepEqual(
+    deletes.map(({ courseId, expectedRevision, operation }) => ({
+      courseId,
+      expectedRevision,
+      operation,
+    })).sort((a, b) => a.courseId.localeCompare(b.courseId)),
+    [
+      { courseId: COURSE_ID, expectedRevision: 4, operation: "delete" },
+      { courseId: OTHER_ID, expectedRevision: 8, operation: "delete" },
+    ],
+  );
+  await repository.replaceAll([storedCourse(COURSE_ID), storedCourse(OTHER_ID)]);
+  const restores = await database.schedule_outbox.where("scope").equals(scope).toArray();
+  assert.deepEqual(
+    restores.map(({ courseId, expectedRevision, operation }) => ({
+      courseId,
+      expectedRevision,
+      operation,
+    })).sort((a, b) => a.courseId.localeCompare(b.courseId)),
+    [
+      { courseId: COURSE_ID, expectedRevision: 4, operation: "upsert" },
+      { courseId: OTHER_ID, expectedRevision: 8, operation: "upsert" },
+    ],
+  );
+  assert.equal(await database.schedule_scoped_courses.where("scope").equals(scope).count(), 2);
 });

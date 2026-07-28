@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, type VSUDatabase } from "../db";
 import {
   MAX_SCHEDULE_COURSES,
   type ScheduleCourse,
@@ -15,8 +15,14 @@ import {
 } from "./scope";
 import {
   scopedCourseKey,
+  type ScheduleOutboxMutation,
   type StoredScopedScheduleCourse,
 } from "./local-types";
+import {
+  defaultScheduleMutationDependencies,
+  desiredScheduleMutation,
+  type ScheduleMutationDependencies,
+} from "./outbox";
 
 export type ScheduleStorageErrorCode =
   | "unavailable"
@@ -63,6 +69,27 @@ export interface ScopedScheduleStore {
     scope: ScheduleScope,
     courses: ScheduleCourse[],
     maximumCourses: number,
+  ): Promise<void>;
+  accountPut(
+    scope: ScheduleScope,
+    course: ScheduleCourse,
+    maximumCourses: number,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void>;
+  accountRemove(
+    scope: ScheduleScope,
+    id: string,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void>;
+  accountClear(
+    scope: ScheduleScope,
+    dependencies: ScheduleMutationDependencies,
+  ): Promise<void>;
+  accountReplaceAll(
+    scope: ScheduleScope,
+    courses: ScheduleCourse[],
+    maximumCourses: number,
+    dependencies: ScheduleMutationDependencies,
   ): Promise<void>;
 }
 
@@ -153,27 +180,43 @@ function productionStore(): ScopedScheduleStore {
   if (typeof window === "undefined" || !db) {
     throw new ScheduleStorageError("unavailable");
   }
+  return createDexieScopedScheduleStore(db);
+}
+
+export function createDexieScopedScheduleStore(
+  database: VSUDatabase,
+): ScopedScheduleStore {
+  const pendingFor = (scope: ScheduleScope, courseId: string) =>
+    database.schedule_outbox.get([scope, courseId]);
+  const replaceMutation = async (
+    scope: ScheduleScope,
+    courseId: string,
+    mutation: ScheduleOutboxMutation | undefined,
+  ) => {
+    await database.schedule_outbox.where("[scope+courseId]").equals([scope, courseId]).delete();
+    if (mutation) await database.schedule_outbox.add(mutation);
+  };
 
   return {
     async list(scope) {
-      const rows = await db.schedule_scoped_courses
+      const rows = await database.schedule_scoped_courses
         .where("scope")
         .equals(scope)
         .toArray();
       return rows.map((row) => row.course);
     },
     async put(scope, course, maximumCourses) {
-      await db.transaction("rw", db.schedule_scoped_courses, async () => {
+      await database.transaction("rw", database.schedule_scoped_courses, async () => {
         const key = scopedCourseKey(scope, course.id);
-        const existing = await db.schedule_scoped_courses.get(key);
+        const existing = await database.schedule_scoped_courses.get(key);
         if (
           existing === undefined &&
-          (await db.schedule_scoped_courses.where("scope").equals(scope).count()) >=
+          (await database.schedule_scoped_courses.where("scope").equals(scope).count()) >=
             maximumCourses
         ) {
           throw new ScheduleCourseLimitError();
         }
-        await db.schedule_scoped_courses.put({
+        await database.schedule_scoped_courses.put({
           key,
           scope,
           id: course.id,
@@ -185,25 +228,168 @@ function productionStore(): ScopedScheduleStore {
       });
     },
     async remove(scope, id) {
-      await db.schedule_scoped_courses.delete(scopedCourseKey(scope, id));
+      await database.schedule_scoped_courses.delete(scopedCourseKey(scope, id));
     },
     async clear(scope) {
-      await db.schedule_scoped_courses.where("scope").equals(scope).delete();
+      await database.schedule_scoped_courses.where("scope").equals(scope).delete();
     },
     async replaceAll(scope, courses, maximumCourses) {
       if (courses.length > maximumCourses) {
         throw new ScheduleCourseLimitError();
       }
-      await db.transaction("rw", db.schedule_scoped_courses, async () => {
-        await db.schedule_scoped_courses.where("scope").equals(scope).delete();
+      await database.transaction("rw", database.schedule_scoped_courses, async () => {
+        await database.schedule_scoped_courses.where("scope").equals(scope).delete();
         const rows: StoredScopedScheduleCourse[] = courses.map((course) => ({
           key: scopedCourseKey(scope, course.id),
           scope,
           id: course.id,
           course,
         }));
-        await db.schedule_scoped_courses.bulkAdd(rows);
+        await database.schedule_scoped_courses.bulkAdd(rows);
       });
+    },
+    async accountPut(scope, course, maximumCourses, dependencies) {
+      await database.transaction(
+        "rw",
+        database.schedule_scoped_courses,
+        database.schedule_outbox,
+        async () => {
+          const key = scopedCourseKey(scope, course.id);
+          const existingRow = await database.schedule_scoped_courses.get(key);
+          if (
+            existingRow === undefined &&
+            (await database.schedule_scoped_courses.where("scope").equals(scope).count()) >=
+              maximumCourses
+          ) {
+            throw new ScheduleCourseLimitError();
+          }
+          const existingMutation = await pendingFor(scope, course.id);
+          await database.schedule_scoped_courses.put({
+            key,
+            scope,
+            id: course.id,
+            course,
+            ...(existingRow?.serverRevision === undefined
+              ? {}
+              : { serverRevision: existingRow.serverRevision }),
+          });
+          await replaceMutation(
+            scope,
+            course.id,
+            desiredScheduleMutation({
+              existing: existingMutation,
+              scope,
+              course,
+              operation: "upsert",
+              knownRevision: existingRow?.serverRevision,
+              ...dependencies,
+            }),
+          );
+        },
+      );
+    },
+    async accountRemove(scope, id, dependencies) {
+      await database.transaction(
+        "rw",
+        database.schedule_scoped_courses,
+        database.schedule_outbox,
+        async () => {
+          const key = scopedCourseKey(scope, id);
+          const row = await database.schedule_scoped_courses.get(key);
+          const existingMutation = await pendingFor(scope, id);
+          await database.schedule_scoped_courses.delete(key);
+          await replaceMutation(
+            scope,
+            id,
+            desiredScheduleMutation({
+              existing: existingMutation,
+              scope,
+              courseId: id,
+              operation: "delete",
+              knownRevision: row?.serverRevision,
+              ...dependencies,
+            }),
+          );
+        },
+      );
+    },
+    async accountClear(scope, dependencies) {
+      await database.transaction(
+        "rw",
+        database.schedule_scoped_courses,
+        database.schedule_outbox,
+        async () => {
+          const rows = await database.schedule_scoped_courses.where("scope").equals(scope).toArray();
+          const pending = await database.schedule_outbox.where("scope").equals(scope).toArray();
+          const pendingById = new Map(pending.map((mutation) => [mutation.courseId, mutation]));
+          await database.schedule_scoped_courses.where("scope").equals(scope).delete();
+          for (const row of rows) {
+            await replaceMutation(
+              scope,
+              row.id,
+              desiredScheduleMutation({
+                existing: pendingById.get(row.id),
+                scope,
+                courseId: row.id,
+                operation: "delete",
+                knownRevision: row.serverRevision,
+                ...dependencies,
+              }),
+            );
+          }
+        },
+      );
+    },
+    async accountReplaceAll(scope, courses, maximumCourses, dependencies) {
+      if (courses.length > maximumCourses) throw new ScheduleCourseLimitError();
+      await database.transaction(
+        "rw",
+        database.schedule_scoped_courses,
+        database.schedule_outbox,
+        async () => {
+          const rows = await database.schedule_scoped_courses.where("scope").equals(scope).toArray();
+          const rowsById = new Map(rows.map((row) => [row.id, row]));
+          const pending = await database.schedule_outbox.where("scope").equals(scope).toArray();
+          const pendingById = new Map(pending.map((mutation) => [mutation.courseId, mutation]));
+          const desiredById = new Map(courses.map((course) => [course.id, course]));
+          const affectedIds = new Set([
+            ...rowsById.keys(),
+            ...pendingById.keys(),
+            ...desiredById.keys(),
+          ]);
+          await database.schedule_scoped_courses.where("scope").equals(scope).delete();
+          await database.schedule_scoped_courses.bulkAdd(
+            courses.map((course) => {
+              const prior = rowsById.get(course.id);
+              return {
+                key: scopedCourseKey(scope, course.id),
+                scope,
+                id: course.id,
+                course,
+                ...(prior?.serverRevision === undefined
+                  ? {}
+                  : { serverRevision: prior.serverRevision }),
+              };
+            }),
+          );
+          for (const id of affectedIds) {
+            const course = desiredById.get(id);
+            await replaceMutation(
+              scope,
+              id,
+              desiredScheduleMutation({
+                existing: pendingById.get(id),
+                scope,
+                courseId: id,
+                operation: course ? "upsert" : "delete",
+                course,
+                knownRevision: rowsById.get(id)?.serverRevision,
+                ...dependencies,
+              }),
+            );
+          }
+        },
+      );
     },
   };
 }
@@ -212,6 +398,8 @@ export class ScheduleRepository {
   constructor(
     private readonly scope: ScheduleScope = GUEST_SCHEDULE_SCOPE,
     private readonly storeFactory: ScopedScheduleStoreFactory = productionStore,
+    private readonly mutationDependencies: ScheduleMutationDependencies =
+      defaultScheduleMutationDependencies,
   ) {}
 
   async list(): Promise<ScheduleCourse[]> {
@@ -233,7 +421,17 @@ export class ScheduleRepository {
   async put(value: unknown): Promise<ScheduleCourse> {
     const course = normalizeScheduleCourse(value);
     try {
-      await this.storeFactory().put(this.scope, course, MAX_SCHEDULE_COURSES);
+      const store = this.storeFactory();
+      if (this.scope === GUEST_SCHEDULE_SCOPE) {
+        await store.put(this.scope, course, MAX_SCHEDULE_COURSES);
+      } else {
+        await store.accountPut(
+          this.scope,
+          course,
+          MAX_SCHEDULE_COURSES,
+          this.mutationDependencies,
+        );
+      }
       return course;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;
@@ -248,7 +446,13 @@ export class ScheduleRepository {
       ]);
     }
     try {
-      await this.storeFactory().remove(this.scope, id.trim().toLowerCase());
+      const canonicalId = id.trim().toLowerCase();
+      const store = this.storeFactory();
+      if (this.scope === GUEST_SCHEDULE_SCOPE) {
+        await store.remove(this.scope, canonicalId);
+      } else {
+        await store.accountRemove(this.scope, canonicalId, this.mutationDependencies);
+      }
     } catch (error) {
       throw storageError(error);
     }
@@ -256,7 +460,12 @@ export class ScheduleRepository {
 
   async clear(): Promise<void> {
     try {
-      await this.storeFactory().clear(this.scope);
+      const store = this.storeFactory();
+      if (this.scope === GUEST_SCHEDULE_SCOPE) {
+        await store.clear(this.scope);
+      } else {
+        await store.accountClear(this.scope, this.mutationDependencies);
+      }
     } catch (error) {
       throw storageError(error);
     }
@@ -278,11 +487,17 @@ export class ScheduleRepository {
     }
 
     try {
-      await this.storeFactory().replaceAll(
-        this.scope,
-        courses,
-        MAX_SCHEDULE_COURSES,
-      );
+      const store = this.storeFactory();
+      if (this.scope === GUEST_SCHEDULE_SCOPE) {
+        await store.replaceAll(this.scope, courses, MAX_SCHEDULE_COURSES);
+      } else {
+        await store.accountReplaceAll(
+          this.scope,
+          courses,
+          MAX_SCHEDULE_COURSES,
+          this.mutationDependencies,
+        );
+      }
       return courses;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;
