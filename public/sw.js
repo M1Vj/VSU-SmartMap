@@ -1,7 +1,8 @@
-const CACHE_NAME = 'vsu-smartmap-v14';
+const CACHE_NAME = 'vsu-smartmap-v15';
 const TILE_CACHE_NAME = 'map-tiles-v1';
 const API_CACHE_NAME = 'api-cache-v2';
 const TILE_CACHE_MAX_ENTRIES = 400;
+const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
 const IS_LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1', '0.0.0.0'].includes(self.location.hostname) &&
   !ENABLE_LOCAL_OFFLINE_PREVIEW;
@@ -13,6 +14,7 @@ const STATIC_ASSETS = [
   '/chat',
   '/events',
   '/info',
+  '/schedule',
   '/offline',
   '/manifest.json',
   '/icons/icon-192x192.png?v=20260709',
@@ -140,37 +142,84 @@ function getStaticAssetUrlsFromHtml(html) {
   return [...new Set(matches)].map((assetPath) => new URL(assetPath, self.location.origin).toString());
 }
 
-async function cacheStaticAssetsFromHtml(html, cache) {
+function runBoundedPrecacheOperation(label, operation, onTimeout) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error(`Timed out while attempting to ${label}`));
+    }, PRECACHE_OPERATION_TIMEOUT_MS);
+
+    Promise.resolve()
+      .then(operation)
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timeout));
+  });
+}
+
+function fetchForPrecache(request) {
+  const controller = new AbortController();
+  return runBoundedPrecacheOperation(
+    `fetch ${request.url}`,
+    () => fetch(request, { signal: controller.signal }),
+    () => controller.abort()
+  );
+}
+
+function matchForPrecache(cache, request) {
+  return runBoundedPrecacheOperation(
+    `read ${request.url} from the precache`,
+    () => cache.match(request)
+  );
+}
+
+function putForPrecache(cache, request, response) {
+  return runBoundedPrecacheOperation(
+    `write ${request.url} to the precache`,
+    () => cache.put(request, response)
+  );
+}
+
+async function cacheOptionalStaticAsset(assetUrl, cache) {
+  const request = new Request(assetUrl);
+  const cached = await matchForPrecache(cache, request);
+  if (cached) return;
+
+  const response = await fetchForPrecache(request);
+  if (!response.ok) {
+    throw new Error(`Failed to precache optional asset ${assetUrl}: ${response.status}`);
+  }
+  await putForPrecache(cache, request, response);
+}
+
+async function cacheStaticAssetsFromHtml(html, cache, optionalAssetTasks = new Map()) {
   const assetUrls = getStaticAssetUrlsFromHtml(html);
 
-  await Promise.all(assetUrls.map(async (assetUrl) => {
-    const request = new Request(assetUrl);
-    const cached = await cache.match(request);
-    if (cached) return;
-
-    try {
-      const response = await fetch(request);
-      if (response.ok) {
-        await cache.put(request, response);
-      }
-    } catch {
-      // Missing dev chunks should not fail service worker installation.
+  await Promise.all(assetUrls.map((assetUrl) => {
+    if (!optionalAssetTasks.has(assetUrl)) {
+      const task = cacheOptionalStaticAsset(assetUrl, cache).catch((error) => {
+        console.warn(`[service-worker] Optional precache asset skipped: ${assetUrl}`, error);
+      });
+      optionalAssetTasks.set(assetUrl, task);
     }
+    return optionalAssetTasks.get(assetUrl);
   }));
 }
 
-async function cachePageResponse(request, response) {
+async function cachePageResponse(request, response, precacheCache, optionalAssetTasks) {
   if (!response || !response.ok) return;
-  const cache = await caches.open(CACHE_NAME);
+  const cache = precacheCache || await caches.open(CACHE_NAME);
   const contentType = response.headers.get('Content-Type') || '';
 
   if (!contentType.includes('text/html')) {
-    await cache.put(request, response.clone());
+    await putForPrecache(cache, request, response.clone());
     return;
   }
 
   const headers = new Headers(response.headers);
-  const html = await response.text();
+  const html = await runBoundedPrecacheOperation(
+    `read ${request.url} response body`,
+    () => response.text()
+  );
   const offlineScripts = html.includes('/_next/webpack-hmr')
     ? `${OFFLINE_CACHE_MARKER_SCRIPT}${DEV_HMR_OFFLINE_SHIM}`
     : OFFLINE_CACHE_MARKER_SCRIPT;
@@ -178,33 +227,52 @@ async function cachePageResponse(request, response) {
     ? html.replace('<head>', `<head>${offlineScripts}`)
     : `${offlineScripts}${html}`;
 
-  await cache.put(request, new Response(withOfflineShim, {
+  await putForPrecache(cache, request, new Response(withOfflineShim, {
     status: response.status,
     statusText: response.statusText,
     headers,
   }));
-  await cacheStaticAssetsFromHtml(html, cache);
+  await cacheStaticAssetsFromHtml(html, cache, optionalAssetTasks);
+}
+
+async function precacheRequiredStaticAsset(asset, cache, optionalAssetTasks) {
+  const request = new Request(asset);
+  const response = await fetchForPrecache(request);
+
+  if (!response.ok) {
+    throw new Error(`Failed to precache ${asset}: ${response.status}`);
+  }
+
+  const contentType = response.headers.get('Content-Type') || '';
+  if (contentType.includes('text/html')) {
+    await cachePageResponse(request, response, cache, optionalAssetTasks);
+    return;
+  }
+
+  await putForPrecache(cache, request, response);
 }
 
 async function precacheStaticAssets() {
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await runBoundedPrecacheOperation(
+    `open ${CACHE_NAME}`,
+    () => caches.open(CACHE_NAME)
+  );
+  const optionalAssetTasks = new Map();
+  const results = await Promise.allSettled(
+    STATIC_ASSETS.map((asset) =>
+      precacheRequiredStaticAsset(asset, cache, optionalAssetTasks)
+    )
+  );
+  const failures = results
+    .map((result, index) => ({ result, asset: STATIC_ASSETS[index] }))
+    .filter(({ result }) => result.status === 'rejected');
 
-  await Promise.all(STATIC_ASSETS.map(async (asset) => {
-    const request = new Request(asset);
-    const response = await fetch(request);
-
-    if (!response.ok) {
-      throw new Error(`Failed to precache ${asset}: ${response.status}`);
-    }
-
-    const contentType = response.headers.get('Content-Type') || '';
-    if (contentType.includes('text/html')) {
-      await cachePageResponse(request, response);
-      return;
-    }
-
-    await cache.put(request, response);
-  }));
+  if (failures.length > 0) {
+    failures.forEach(({ result, asset }) => {
+      console.error(`[service-worker] Required precache asset failed: ${asset}`, result.reason);
+    });
+    throw new Error(`Failed to precache ${failures.length} required static asset(s)`);
+  }
 }
 
 
@@ -267,13 +335,18 @@ self.addEventListener('fetch', (event) => {
               cache.put(request, response.clone());
             }
             return response;
-          }).catch(async () => {
-            // For JS chunks that fail offline, clients will need to reload
-            // Return a proper error that won't crash the app silently
-            return new Response('/* offline */', {
-              status: 200,
-              headers: { 'Content-Type': 'application/javascript' }
-            });
+          }).catch(() => {
+            return new Response(
+              'throw new Error("VSU SmartMap cannot load this uncached code while offline.");',
+              {
+                status: 503,
+                statusText: 'Service Unavailable',
+                headers: {
+                  'Content-Type': 'application/javascript; charset=utf-8',
+                  'Cache-Control': 'no-store',
+                },
+              }
+            );
           })
         )
       )

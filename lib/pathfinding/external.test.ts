@@ -5,6 +5,8 @@ import {
   buildExternalRoutingUrl,
   buildGeoapifyRoutingUrl,
   buildOrsRoutingUrl,
+  getExternalPath,
+  resolveExternalRouteProviders,
 } from "./external.ts";
 
 test("external routing URL requests one definitive foot route (keyless OSRM)", () => {
@@ -38,4 +40,84 @@ test("openrouteservice routing URL uses foot-walking and lng,lat start/end", () 
   assert.equal(url.searchParams.get("start"), "124.78,10.74");
   assert.equal(url.searchParams.get("end"), "124.79,10.75");
   assert.equal(url.searchParams.get("api_key"), "test-key");
+});
+
+test("an already-aborted external route performs no provider fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOnLine = Object.getOwnPropertyDescriptor(globalThis.navigator, "onLine");
+  let fetchCalls = 0;
+  Object.defineProperty(globalThis.navigator, "onLine", {
+    configurable: true,
+    value: true,
+  });
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("fetch should not be called");
+  };
+
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await getExternalPath(
+      { lat: 10.74, lng: 124.78 },
+      { lat: 10.75, lng: 124.79 },
+      "walking",
+      controller.signal,
+    );
+
+    assert.equal(result, null);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalOnLine) {
+      Object.defineProperty(globalThis.navigator, "onLine", originalOnLine);
+    } else {
+      Reflect.deleteProperty(globalThis.navigator, "onLine");
+    }
+  }
+});
+
+test("provider resolver falls back after a keyed provider returns no route", async () => {
+  const calls: string[] = [];
+  const result = await resolveExternalRouteProviders(
+    [
+      async () => {
+        calls.push("keyed");
+        return null;
+      },
+      async () => {
+        calls.push("public");
+        return { path: [], totalDistance: 1, estimatedTime: 1 };
+      },
+    ],
+    new AbortController().signal,
+  );
+
+  assert.deepEqual(calls, ["keyed", "public"]);
+  assert.equal(result?.totalDistance, 1);
+});
+
+test("mid-flight abort prevents provider fallback", async () => {
+  const controller = new AbortController();
+  let fallbackCalls = 0;
+  let resolveFirst!: (value: null) => void;
+  const first = new Promise<null>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const resultPromise = resolveExternalRouteProviders(
+    [
+      () => first,
+      async () => {
+        fallbackCalls += 1;
+        return null;
+      },
+    ],
+    controller.signal,
+  );
+
+  controller.abort();
+  resolveFirst(null);
+
+  assert.equal(await resultPromise, null);
+  assert.equal(fallbackCalls, 0);
 });

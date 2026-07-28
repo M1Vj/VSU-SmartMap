@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, Polyline } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
 import type { LatLng } from "leaflet";
@@ -12,9 +12,9 @@ import {
   mergePathsAtTransitionGate,
 } from "@/lib/pathfinding/transition-gates";
 import { canUseStraightRouteFallback } from "@/lib/navigation/external-route-policy";
+import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
+import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
-
-const TOAST_ID = "navigation-status";
 
 interface NavigationLayerProps {
   startPoint: LatLng | null;
@@ -38,25 +38,33 @@ export function NavigationLayer({
   onRoutesFound,
 }: NavigationLayerProps) {
   const [path, setPath] = useState<PathResult | null>(null);
-  const hasShownToastRef = useRef(false);
-
-  useEffect(() => {
-    hasShownToastRef.current = false;
-    setPath(null);
-  }, [endPoint?.lat, endPoint?.lng, destinationId, mode]);
+  const coordinator = useMemo(
+    () =>
+      createRouteRequestCoordinator<PathResult>({
+        clear: () => {
+          setPath(null);
+          onRoutesFound?.([]);
+        },
+        publish: (result) => {
+          setPath(result);
+          onRoutesFound?.([result]);
+        },
+        loading: (message, id) => toast.loading(message, { id }),
+        success: (message, id) => toast.success(message, { id }),
+        error: (message, id) => toast.error(message, { id }),
+        dismiss: (id) => toast.dismiss(id),
+        reportError: (error) => console.error("NavigationLayer: Process error", error),
+      }),
+    [onRoutesFound],
+  );
 
   useEffect(() => {
     if (waitingForUserLocation) {
-      if (!hasShownToastRef.current) toast.loading("Waiting for user location...", { id: TOAST_ID });
-      setPath(null);
-      onRoutesFound?.([]);
-      return;
+      return coordinator.start({ loadingMessage: "Waiting for user location..." });
     }
 
-    if (!startPoint || !endPoint) {
-      setPath(null);
-      onRoutesFound?.([]);
-      return;
+    if (!startPoint || !endPoint || !nodes || nodes.length === 0 || !edges || edges.length === 0) {
+      return coordinator.start({});
     }
 
     const makeNode = (id: string, point: { lat: number; lng: number }): MapNode => ({
@@ -201,94 +209,37 @@ export function NavigationLayer({
       };
     };
 
-    const resolveRoute = async () => {
-      if (!nodes || nodes.length === 0 || !edges || edges.length === 0) return;
-
-      if (!hasShownToastRef.current) toast.loading("Loading route...", { id: TOAST_ID });
-
+    const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
-      const startInside = isPointInsideRoutingBoundary(start);
-      const endInside = isPointInsideRoutingBoundary(end);
-
-      try {
-        let result: PathResult | null = null;
-
-        if (startInside && endInside) {
-          result = buildInternalRoute(start, end, destinationId);
-          if (
-            !result &&
+      return resolveNavigationRoute({
+        start,
+        end,
+        destinationId,
+        mode,
+        signal,
+        dependencies: {
+          isInside: isPointInsideRoutingBoundary,
+          findGate: (outside, inside) => findClosestTransitionGate(outside, inside, nodes),
+          buildInternalRoute,
+          straightRoute,
+          externalPath: getExternalPath,
+          mergeAtGate: mergePathsAtTransitionGate,
+          calculateTime,
+          canUseStraightFallback: (startInside, endInside) =>
             canUseStraightRouteFallback({
               startInsideRoutingBoundary: startInside,
               endInsideRoutingBoundary: endInside,
-            })
-          ) {
-            result = straightRoute(start, end);
-          }
-        } else if (!startInside && endInside) {
-          const gate = findClosestTransitionGate(start, end, nodes);
-          const externalPromise = getExternalPath(start, gate, mode);
-          const internalRoute = buildInternalRoute(gate, end, destinationId);
-          const externalRoute = await externalPromise;
-          if (!externalRoute || !internalRoute) {
-            throw new Error("External routing provider could not resolve this route.");
-          }
-          result = mergePathsAtTransitionGate(
-            externalRoute.path,
-            gate,
-            internalRoute.path,
-            mode
-          );
-        } else if (startInside && !endInside) {
-          const gate = findClosestTransitionGate(end, start, nodes);
-          const externalPromise = getExternalPath(gate, end, mode);
-          const internalRoute = buildInternalRoute(start, gate);
-          const externalRoute = await externalPromise;
-          if (!externalRoute || !internalRoute) {
-            throw new Error("External routing provider could not resolve this route.");
-          }
-          result = mergePathsAtTransitionGate(
-            internalRoute.path,
-            gate,
-            externalRoute.path,
-            mode
-          );
-        } else {
-          const externalRoute = await getExternalPath(start, end, mode);
-          if (!externalRoute) {
-            throw new Error("External routing provider could not resolve this route.");
-          }
-          result = {
-            ...externalRoute,
-            estimatedTime:
-              externalRoute.estimatedTime ?? calculateTime(externalRoute.totalDistance, mode),
-          };
-        }
-
-        if (!result) {
-          throw new Error("No route could be resolved.");
-        }
-
-        setPath(result);
-        onRoutesFound?.([result]);
-
-        if (!hasShownToastRef.current) {
-          toast.success("Route found!", { id: TOAST_ID });
-          hasShownToastRef.current = true;
-        }
-      } catch (error) {
-        console.error("NavigationLayer: Process error", error);
-        setPath(null);
-        onRoutesFound?.([]);
-        if (!hasShownToastRef.current) {
-          toast.error("No route found. External routing may be unavailable.", { id: TOAST_ID });
-          hasShownToastRef.current = true;
-        }
-      }
+            }),
+        },
+      });
     };
 
-    resolveRoute();
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, onRoutesFound]);
+    return coordinator.start({
+      loadingMessage: "Loading route...",
+      resolve: resolveRoute,
+    });
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, coordinator]);
 
   if (!path) return null;
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
+import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
 
@@ -27,6 +28,7 @@ type MapSelectionLayerProps = {
   onMapClick?: (point: { lat: number; lng: number }) => void;
   onClearSelection?: () => void;
   flyZoom?: number;
+  navigationOwnsViewport?: boolean;
 };
 
 export function MapSelectionLayer({
@@ -40,6 +42,7 @@ export function MapSelectionLayer({
   onMapClick,
   onClearSelection,
   flyZoom = 19,
+  navigationOwnsViewport = false,
 }: MapSelectionLayerProps) {
   const map = useMap();
   const prevSelectedId = useRef<string | null>(null);
@@ -225,24 +228,40 @@ export function MapSelectionLayer({
   }, [onClearSelection, selectedId]);
 
   useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const cameraPolicy = getMapCameraPolicy({
+      owner: "selection",
+      navigationOwnsViewport,
+      reducedMotion,
+    });
+
     if (selectedId && selectedId !== prevSelectedId.current) {
       const selected = items.find((m) => m.id === selectedId);
-      if (selected) {
+      if (selected && cameraPolicy.shouldMove) {
         previousViewRef.current = getCurrentView();
-        map.flyTo([selected.coordinates.lat, selected.coordinates.lng], Math.max(map.getZoom(), flyZoom), {
-          duration: 0.6,
-        });
+        const center: [number, number] = [selected.coordinates.lat, selected.coordinates.lng];
+        const zoom = Math.max(map.getZoom(), flyZoom);
+        if (cameraPolicy.animate) {
+          map.flyTo(center, zoom, { duration: 0.6 });
+        } else {
+          map.setView(center, zoom, { animate: false });
+        }
       }
       prevSelectedId.current = selectedId;
     } else if (!selectedId && prevSelectedId.current !== null) {
       const nextView = getViewAfterDeselect(getCurrentView(), previousViewRef.current);
-      map.flyTo([nextView.center.lat, nextView.center.lng], nextView.zoom, {
-        duration: 0.5,
-      });
+      if (cameraPolicy.shouldMove) {
+        const center: [number, number] = [nextView.center.lat, nextView.center.lng];
+        if (cameraPolicy.animate) {
+          map.flyTo(center, nextView.zoom, { duration: 0.5 });
+        } else {
+          map.setView(center, nextView.zoom, { animate: false });
+        }
+      }
       previousViewRef.current = null;
       prevSelectedId.current = null;
     }
-  }, [selectedId, items, map, flyZoom, getCurrentView]);
+  }, [selectedId, items, map, flyZoom, getCurrentView, navigationOwnsViewport]);
 
   return (
     <MapMarkers

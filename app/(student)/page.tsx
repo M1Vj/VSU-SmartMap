@@ -37,6 +37,7 @@ import {
   getNavigationControlsState,
   getNavigationMapBounds,
 } from "@/lib/map/navigation-viewport";
+import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
 import {
   areFacilityMarkerListsEquivalent,
   getVisibleFacilitiesForMapLoad,
@@ -663,6 +664,11 @@ function MapView({
           <MapSelectionLayer
             items={filtered}
             selectedId={selectedId}
+            navigationOwnsViewport={doesNavigationOwnViewport({
+              hasDestination: Boolean(navEnd),
+              manualStartPending: isManualStartPending,
+              pendingNavigation: Boolean(pendingNavigationFacility),
+            })}
             routeDestinationId={hasActiveRoute ? targetFacilityId ?? null : null}
             minimizeNonDestinationMarkers={hasActiveRoute}
             onSelect={(item) => onSelect(item.id)}

@@ -20,10 +20,25 @@ export const ROUTING_BUDGET = GEOAPIFY_KEY
     : { minIntervalMs: 1100, concurrency: 1 }; // keyless OSRM-DE demo ~1 req/s
 
 const REQUEST_TIMEOUT_MS = 8000;
+type ExternalRouteProvider = () => Promise<PathResult | null>;
+
+export async function resolveExternalRouteProviders(
+  providers: readonly ExternalRouteProvider[],
+  signal?: AbortSignal,
+): Promise<PathResult | null> {
+  for (const provider of providers) {
+    if (signal?.aborted) return null;
+    const route = await provider();
+    if (signal?.aborted) return null;
+    if (route) return route;
+  }
+  return null;
+}
 
 // fetch() that aborts on a timeout or when the caller's signal aborts (combining
 // both without relying on AbortSignal.any for older runtimes).
 async function fetchWithTimeout(url: string, signal?: AbortSignal): Promise<Response> {
+  signal?.throwIfAborted();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const onAbort = () => controller.abort();
@@ -213,34 +228,43 @@ export async function getExternalPath(
   mode: TransportMode = "walking",
   signal?: AbortSignal,
 ): Promise<PathResult | null> {
+  if (signal?.aborted) return null;
   if (typeof navigator !== "undefined" && !navigator.onLine) return null;
 
-  // Try keyed providers first; any keyed-provider failure (error or empty) must
-  // still fall through to the next option rather than abandoning the route.
+  const providers: ExternalRouteProvider[] = [];
+
   if (GEOAPIFY_KEY) {
-    try {
-      const route = await fetchGeoapify(start, end, mode, GEOAPIFY_KEY, signal);
-      if (route) return route;
-    } catch (error) {
-      if (signal?.aborted) return null;
-      console.error("Geoapify routing failed, falling back:", error);
-    }
+    providers.push(async () => {
+      try {
+        return await fetchGeoapify(start, end, mode, GEOAPIFY_KEY, signal);
+      } catch (error) {
+        if (!signal?.aborted) console.error("Geoapify routing failed, falling back:", error);
+        return null;
+      }
+    });
   }
 
   if (ORS_KEY) {
-    try {
-      const route = await fetchOrs(start, end, mode, ORS_KEY, signal);
-      if (route) return route;
-    } catch (error) {
-      if (signal?.aborted) return null;
-      console.error("OpenRouteService routing failed, falling back to OSRM:", error);
-    }
+    providers.push(async () => {
+      try {
+        return await fetchOrs(start, end, mode, ORS_KEY, signal);
+      } catch (error) {
+        if (!signal?.aborted) {
+          console.error("OpenRouteService routing failed, falling back to OSRM:", error);
+        }
+        return null;
+      }
+    });
   }
 
-  try {
-    return await fetchOsrm(start, end, mode, signal);
-  } catch (error) {
-    if (!signal?.aborted) console.error("External routing failed:", error);
-    return null;
-  }
+  providers.push(async () => {
+    try {
+      return await fetchOsrm(start, end, mode, signal);
+    } catch (error) {
+      if (!signal?.aborted) console.error("External routing failed:", error);
+      return null;
+    }
+  });
+
+  return resolveExternalRouteProviders(providers, signal);
 }
