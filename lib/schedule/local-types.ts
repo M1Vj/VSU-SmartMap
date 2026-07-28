@@ -23,6 +23,7 @@ export interface ScheduleOutboxMutation {
 export interface ScheduleSyncState {
   scope: ScheduleScope;
   cursor?: number;
+  consentEnabled?: boolean;
 }
 
 export interface StoredScheduleConflict {

@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { useFacilitySearchData } from "@/components/facility/use-facility-search-data";
 import { ScheduleRepository } from "@/lib/schedule/repository";
+import type { ScheduleScope } from "@/lib/schedule/scope";
+import { isScheduleAccountSyncEnabled } from "@/lib/schedule/sync/feature-flag";
 import {
   MAX_SCHEDULE_COURSES,
   type IsoWeekday,
@@ -26,17 +28,34 @@ import { CourseDialog } from "./course-dialog";
 import { ScheduleAgenda } from "./schedule-agenda";
 import { ScheduleWeekGrid } from "./schedule-week-grid";
 import { ScheduleTransferDialog } from "./schedule-transfer-dialog";
-
-const scheduleRepository = new ScheduleRepository();
+import { ScheduleAccountPanel } from "./schedule-account-panel";
+import { useScheduleAccount } from "./use-schedule-account";
 
 type Confirmation =
   | { kind: "delete"; course: ScheduleCourse }
   | { kind: "clear" }
-  | { kind: "restore"; backup: ScheduleBackupDocument };
+  | { kind: "restore"; backup: ScheduleBackupDocument }
+  | { kind: "remove-local-account"; scope: ScheduleScope };
 
 export function SchedulePageClient() {
   const router = useRouter();
-  const [courses, setCourses] = useState<ScheduleCourse[]>([]);
+  const accountSyncEnabled = isScheduleAccountSyncEnabled();
+  const scheduleAccount = useScheduleAccount(accountSyncEnabled);
+  const scheduleRepository = useMemo(
+    () => new ScheduleRepository(scheduleAccount.scope),
+    [scheduleAccount.scope],
+  );
+  const [loadedCourses, setLoadedCourses] = useState<{
+    scope: string;
+    courses: ScheduleCourse[];
+  } | null>(null);
+  const courses = useMemo(
+    () =>
+      loadedCourses?.scope === scheduleAccount.scope
+        ? loadedCourses.courses
+        : [],
+    [loadedCourses, scheduleAccount.scope],
+  );
   const [loading, setLoading] = useState(true);
   const [storageError, setStorageError] = useState("");
   const [facilityQuery, setFacilityQuery] = useState("");
@@ -68,12 +87,17 @@ export function SchedulePageClient() {
   useEffect(() => {
     setLoading(true);
     setStorageError("");
+    setLoadedCourses(null);
+    const subscribedScope = scheduleAccount.scope;
     const subscription = liveQuery(() => scheduleRepository.list()).subscribe({
-      next(value) { setCourses(value); setLoading(false); },
+      next(value) {
+        setLoadedCourses({ scope: subscribedScope, courses: value });
+        setLoading(false);
+      },
       error(error) { setStorageError(error instanceof Error ? error.message : "The schedule could not be loaded."); setLoading(false); },
     });
     return () => subscription.unsubscribe();
-  }, [reloadKey]);
+  }, [reloadKey, scheduleAccount.scope, scheduleRepository]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
@@ -114,7 +138,7 @@ export function SchedulePageClient() {
     } finally {
       setBusy(false);
     }
-  }, [editing]);
+  }, [editing, scheduleRepository]);
 
   const confirmAction = async () => {
     if (!confirmation) return;
@@ -126,9 +150,12 @@ export function SchedulePageClient() {
       } else if (confirmation.kind === "clear") {
         await scheduleRepository.clear();
         toast.success("Schedule cleared");
-      } else {
+      } else if (confirmation.kind === "restore") {
         await scheduleRepository.replaceAll(confirmation.backup.courses);
         toast.success(`Restored ${confirmation.backup.courses.length} courses`);
+      } else {
+        await scheduleAccount.removeLocalData(confirmation.scope);
+        toast.success("Local account schedule removed");
       }
       setConfirmation(undefined);
       setTransferOpen(
@@ -157,7 +184,19 @@ export function SchedulePageClient() {
           </div>
         </header>
 
-        {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (
+        <ScheduleAccountPanel
+          enabled={accountSyncEnabled}
+          account={scheduleAccount.account}
+          consentEnabled={scheduleAccount.consentEnabled}
+          authError={scheduleAccount.authError}
+          onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
+          onEnable={() => { void scheduleAccount.enableConsent(); }}
+          onSignOut={() => { void scheduleAccount.signOut(); }}
+          onBackup={() => setTransferOpen(true)}
+          onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
+        />
+
+        {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading || scheduleAccount.account.kind === "loading" || loadedCourses?.scope !== scheduleAccount.scope ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (
           <>
             <Card>
               <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -190,7 +229,7 @@ export function SchedulePageClient() {
         onSave={save}
       />
       <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => { setTransferOpen(transitionRestoreDialogs("transfer", "restore-ready") === "transfer"); setConfirmation({ kind: "restore", backup }); }} />
-      <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; setConfirmation(undefined); setTransferOpen(Boolean(reopen)); }} onConfirm={() => { void confirmAction(); }} />
+      <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : confirmation?.kind === "remove-local-account" ? "Remove this account schedule from this device?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : confirmation?.kind === "remove-local-account" ? "This removes only this signed-in account’s local courses, pending changes, sync consent, and review items. It does not remove guest, other-account, or cloud data." : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : confirmation?.kind === "remove-local-account" ? "Remove local account data" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; setConfirmation(undefined); setTransferOpen(Boolean(reopen)); }} onConfirm={() => { void confirmAction(); }} />
     </div>
   );
 }
