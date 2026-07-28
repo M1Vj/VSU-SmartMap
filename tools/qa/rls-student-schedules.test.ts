@@ -54,6 +54,20 @@ test("student schedule migration establishes the least-privilege RPC boundary", 
     "grant execute on function public.apply_student_schedule_mutation(uuid, uuid, bigint, text, jsonb) to authenticated",
     "create function public.student_schedule_authenticated_user_id()",
     "revoke all on function public.student_schedule_authenticated_user_id() from public, anon, authenticated",
+    "grant execute on function public.student_schedule_authenticated_user_id() to student_schedule_mutator",
+    "alter function public.apply_student_schedule_mutation(uuid, uuid, bigint, text, jsonb) owner to student_schedule_mutator",
+    "revoke all on function public.enforce_student_schedule_row() from public, anon, authenticated",
+    "rolcanlogin",
+    "rolinherit",
+    "rolsuper",
+    "rolbypassrls",
+    "rolcreatedb",
+    "rolcreaterole",
+    "rolreplication",
+    "rolconfig",
+    "pg_catalog.pg_auth_members",
+    "unexpected student_schedule_mutator membership",
+    "unsafe student_schedule_mutator role attributes",
   ]) {
     assert.ok(sql.includes(contract), `missing SQL contract: ${contract}`);
   }
@@ -70,6 +84,11 @@ test("student schedule migration establishes the least-privilege RPC boundary", 
     /grant[^;]*\bselect\b[^;]*student_schedule_server_version_seq[^;]*student_schedule_mutator/,
   );
   assert.doesNotMatch(sql, /grant usage on schema auth/);
+  assert.ok(
+    sql.indexOf("unsafe student_schedule_mutator role attributes")
+      < sql.indexOf("grant student_schedule_mutator to postgres"),
+    "role validation must precede temporary membership and object grants",
+  );
 });
 
 test("mutation RPC is revision-aware, idempotent, bounded, and operation-limited", async () => {
@@ -90,6 +109,8 @@ test("mutation RPC is revision-aware, idempotent, bounded, and operation-limited
     "deleted_at is null",
     ">= 200",
     "'conflict'::text",
+    "p_operation = 'delete' and not found and p_expected_revision = 0",
+    "'deleted'::text",
     "raise exception",
   ]) {
     assert.ok(sql.includes(contract), `missing mutation contract: ${contract}`);
@@ -101,4 +122,10 @@ test("mutation RPC is revision-aware, idempotent, bounded, and operation-limited
   assert.ok(triggerDefinition, "missing schedule trigger function");
   assert.doesNotMatch(triggerDefinition, /security definer/);
   assert.doesNotMatch(sql, /revision conflict[^;]*raise exception/);
+
+  const missingDelete = sql.match(
+    /if p_operation = 'delete' and not found and p_expected_revision = 0.*?end if;/,
+  )?.[0];
+  assert.ok(missingDelete, "missing delete no-op branch is required");
+  assert.doesNotMatch(missingDelete, /insert|nextval|update/);
 });

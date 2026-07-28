@@ -434,6 +434,9 @@ locks the user's mutation stream, returns the existing canonical result when
 `last_mutation_id` matches, returns `status = 'conflict'` when the expected
 revision differs, and otherwise inserts, updates, or tombstones. New rows
 require expected revision `0`; operations are only `upsert` and `delete`.
+Deleting a missing course with expected revision `0` returns a deterministic
+canonical `deleted` no-op without creating a tombstone row or consuming a
+server version. A missing delete with a nonzero expected revision conflicts.
 
 Temporarily grant the role `CREATE` on `public` only for ownership transfer,
 then revoke it immediately:

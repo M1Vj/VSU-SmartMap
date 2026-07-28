@@ -227,6 +227,8 @@ Within one transaction it:
 4. enforces the expected revision;
 5. enforces the 200-active-course limit;
 6. inserts, updates, or tombstones the course;
+   deleting a missing course at expected revision `0` is a non-persisting,
+   deterministic `deleted` no-op, while a nonzero expected revision conflicts;
 7. increments the course revision and global server version;
 8. returns the canonical row or an explicit conflict result.
 

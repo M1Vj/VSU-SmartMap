@@ -42,6 +42,27 @@ function mutation(id, expectedRevision, operation, payload, mutationId = randomU
   };
 }
 
+function sequenceLastValue() {
+  return Number.parseInt(
+    execFileSync(
+      "docker",
+      [
+        "exec",
+        "supabase_db_vsu-smartmap",
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        "SELECT last_value FROM public.student_schedule_server_version_seq",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim(),
+    10,
+  );
+}
+
 let passed = 0;
 let failed = 0;
 function check(name, ok, detail = "") {
@@ -87,11 +108,82 @@ async function main() {
 
     const anonRead = await anon.from("student_schedule_courses").select("*");
     check("anon cannot read schedules", anonRead.error?.code === "42501", anonRead.error?.message);
+    const anonCourseId = randomUUID();
     const anonRpc = await anon.rpc(
       "apply_student_schedule_mutation",
-      mutation(randomUUID(), 0, "upsert", { id: randomUUID() }),
+      mutation(anonCourseId, 0, "upsert", { id: anonCourseId }),
     );
-    check("anon cannot execute mutation RPC", Boolean(anonRpc.error), anonRpc.error?.message);
+    check(
+      "anon cannot execute mutation RPC by privilege",
+      anonRpc.error?.code === "42501"
+        || /permission denied/i.test(anonRpc.error?.message ?? ""),
+      anonRpc.error?.message,
+    );
+
+    const missingDeleteId = randomUUID();
+    const missingMutationId = randomUUID();
+    const rowsBeforeMissingDeletes = await userA
+      .from("student_schedule_courses")
+      .select("id", { count: "exact", head: true });
+    const sequenceBeforeMissingDeletes = sequenceLastValue();
+    const firstMissingDelete = await userA.rpc(
+      "apply_student_schedule_mutation",
+      mutation(missingDeleteId, 0, "delete", null, missingMutationId),
+    );
+    const repeatedMissingDelete = await userA.rpc(
+      "apply_student_schedule_mutation",
+      mutation(missingDeleteId, 0, "delete", null, missingMutationId),
+    );
+    const randomMissingDeletes = await Promise.all(
+      Array.from({ length: 25 }, () => {
+        const id = randomUUID();
+        return userA.rpc(
+          "apply_student_schedule_mutation",
+          mutation(id, 0, "delete", null),
+        );
+      }),
+    );
+    const rowsAfterMissingDeletes = await userA
+      .from("student_schedule_courses")
+      .select("id", { count: "exact", head: true });
+    const sequenceAfterMissingDeletes = sequenceLastValue();
+    check(
+      "missing delete returns deterministic canonical no-op",
+      !firstMissingDelete.error
+        && firstMissingDelete.data?.[0]?.status === "deleted"
+        && firstMissingDelete.data?.[0]?.id === missingDeleteId
+        && firstMissingDelete.data?.[0]?.payload === null
+        && firstMissingDelete.data?.[0]?.revision === 0
+        && firstMissingDelete.data?.[0]?.server_version === null
+        && firstMissingDelete.data?.[0]?.created_at === null
+        && firstMissingDelete.data?.[0]?.updated_at === null
+        && firstMissingDelete.data?.[0]?.deleted_at === null,
+      firstMissingDelete.error?.message,
+    );
+    check(
+      "repeated missing delete returns the same canonical result",
+      !repeatedMissingDelete.error
+        && JSON.stringify(repeatedMissingDelete.data) === JSON.stringify(firstMissingDelete.data),
+      repeatedMissingDelete.error?.message,
+    );
+    check(
+      "many missing deletes all succeed without persistence",
+      randomMissingDeletes.every(
+        (result) => !result.error && result.data?.[0]?.status === "deleted",
+      )
+        && rowsAfterMissingDeletes.count === rowsBeforeMissingDeletes.count
+        && sequenceAfterMissingDeletes === sequenceBeforeMissingDeletes,
+      `${rowsBeforeMissingDeletes.count}→${rowsAfterMissingDeletes.count} rows, sequence ${sequenceBeforeMissingDeletes}→${sequenceAfterMissingDeletes}`,
+    );
+    const missingConflict = await userA.rpc(
+      "apply_student_schedule_mutation",
+      mutation(randomUUID(), 1, "delete", null),
+    );
+    check(
+      "missing delete with nonzero expected revision conflicts",
+      !missingConflict.error && missingConflict.data?.[0]?.status === "conflict",
+      missingConflict.error?.message,
+    );
 
     const courseId = randomUUID();
     const mutationId = randomUUID();
@@ -218,13 +310,27 @@ async function main() {
       .select("id", { count: "exact", head: true });
     check("rejected course does not overshoot quota", afterExtra.count === 200);
 
-    console.log(`\n${passed} passed, ${failed} failed`);
-    process.exitCode = failed > 0 ? 1 : 0;
   } finally {
     for (const userId of createdUserIds) {
-      await service.auth.admin.deleteUser(userId);
+      try {
+        const cleanup = await service.auth.admin.deleteUser(userId);
+        check(
+          `cleanup removes local test user ${userId.slice(0, 8)}`,
+          !cleanup.error,
+          cleanup.error?.message,
+        );
+      } catch (error) {
+        check(
+          `cleanup removes local test user ${userId.slice(0, 8)}`,
+          false,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exitCode = failed > 0 ? 1 : 0;
 }
 
 main().catch((error) => {

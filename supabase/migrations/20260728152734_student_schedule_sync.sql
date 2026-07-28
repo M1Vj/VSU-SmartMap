@@ -1,10 +1,55 @@
 DO $$
+DECLARE
+  v_role pg_catalog.pg_roles%ROWTYPE;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'student_schedule_mutator'
   ) THEN
     EXECUTE 'CREATE ROLE student_schedule_mutator NOLOGIN NOINHERIT';
+  END IF;
+
+  SELECT roles.*
+  INTO STRICT v_role
+  FROM pg_catalog.pg_roles AS roles
+  WHERE roles.rolname = 'student_schedule_mutator';
+
+  IF v_role.rolcanlogin
+    OR v_role.rolinherit
+    OR v_role.rolsuper
+    OR v_role.rolbypassrls
+    OR v_role.rolcreatedb
+    OR v_role.rolcreaterole
+    OR v_role.rolreplication
+    OR coalesce(pg_catalog.cardinality(v_role.rolconfig), 0) <> 0
+  THEN
+    RAISE EXCEPTION 'unsafe student_schedule_mutator role attributes'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS memberships
+    JOIN pg_catalog.pg_roles AS members
+      ON members.oid = memberships.member
+    JOIN pg_catalog.pg_roles AS grantors
+      ON grantors.oid = memberships.grantor
+    WHERE memberships.roleid = v_role.oid
+      AND NOT (
+        members.rolname = 'postgres'
+        AND grantors.rolname = 'supabase_admin'
+        AND NOT memberships.inherit_option
+        AND NOT memberships.set_option
+      )
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS memberships
+    WHERE memberships.member = v_role.oid
+  )
+  THEN
+    RAISE EXCEPTION 'unexpected student_schedule_mutator membership'
+      USING ERRCODE = '42501';
   END IF;
 END $$;
 
@@ -251,6 +296,19 @@ BEGIN
     RETURN;
   END IF;
 
+  IF p_operation = 'delete' AND NOT FOUND AND p_expected_revision = 0 THEN
+    RETURN QUERY SELECT
+      'deleted'::TEXT,
+      p_course_id,
+      NULL::JSONB,
+      0::BIGINT,
+      NULL::BIGINT,
+      NULL::TIMESTAMPTZ,
+      NULL::TIMESTAMPTZ,
+      NULL::TIMESTAMPTZ;
+    RETURN;
+  END IF;
+
   IF p_operation = 'upsert' THEN
     IF NOT FOUND OR v_existing.deleted_at IS NOT NULL THEN
       SELECT count(*)
@@ -285,31 +343,13 @@ BEGIN
         deleted_at = NULL
     RETURNING * INTO v_result;
   ELSE
-    IF NOT FOUND THEN
-      INSERT INTO public.student_schedule_courses (
-        user_id,
-        id,
-        payload,
-        last_mutation_id,
-        deleted_at
-      )
-      VALUES (
-        v_user_id,
-        p_course_id,
-        NULL,
-        p_mutation_id,
-        pg_catalog.clock_timestamp()
-      )
-      RETURNING * INTO v_result;
-    ELSE
-      UPDATE public.student_schedule_courses AS schedules
-      SET payload = NULL,
-          last_mutation_id = p_mutation_id,
-          deleted_at = pg_catalog.clock_timestamp()
-      WHERE schedules.user_id = v_user_id
-        AND schedules.id = p_course_id
-      RETURNING * INTO v_result;
-    END IF;
+    UPDATE public.student_schedule_courses AS schedules
+    SET payload = NULL,
+        last_mutation_id = p_mutation_id,
+        deleted_at = pg_catalog.clock_timestamp()
+    WHERE schedules.user_id = v_user_id
+      AND schedules.id = p_course_id
+    RETURNING * INTO v_result;
   END IF;
 
   RETURN QUERY SELECT
