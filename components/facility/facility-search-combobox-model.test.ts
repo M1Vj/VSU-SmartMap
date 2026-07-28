@@ -51,6 +51,7 @@ test("blank queries without recents never expose stale facility options to Enter
 test("keyboard actions wrap, select the first option, and close on Escape", () => {
   assert.deepEqual(getFacilityComboboxKeyAction("ArrowDown", 2, 3), {
     preventDefault: true,
+    stopPropagation: false,
     open: true,
     highlightedIndex: 0,
     selectIndex: null,
@@ -63,8 +64,16 @@ test("keyboard actions wrap, select the first option, and close on Escape", () =
     getFacilityComboboxKeyAction("Enter", -1, 3).selectIndex,
     0,
   );
-  assert.deepEqual(getFacilityComboboxKeyAction("Escape", 1, 3), {
+  assert.deepEqual(getFacilityComboboxKeyAction("Escape", 1, 3, true), {
+    preventDefault: true,
+    stopPropagation: true,
+    open: false,
+    highlightedIndex: -1,
+    selectIndex: null,
+  });
+  assert.deepEqual(getFacilityComboboxKeyAction("Escape", 1, 3, false), {
     preventDefault: false,
+    stopPropagation: false,
     open: false,
     highlightedIndex: -1,
     selectIndex: null,

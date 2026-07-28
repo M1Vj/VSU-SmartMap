@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ScheduleCourse } from "./types";
 import type { Facility } from "@/lib/types/facility";
+import { buildFacilitySearchOptions } from "@/lib/map/facility-search-model";
 import {
   applyFacilitySearchSelection,
   assignMeetingColumns,
@@ -64,9 +65,15 @@ test("schedule facility search uses shared map ranking for code, alias, and room
     rooms,
     query: "DSTAT-201",
   })[0];
+  const sharedRoomMatch = buildFacilitySearchOptions({
+    facilities: [scheduleSearchFacility],
+    rooms,
+    query: "DSTAT-201",
+  })[0];
   assert.equal(roomMatch?.facility.id, "dstat");
   assert.equal(roomMatch?.matchedRoomCode, "DSTAT-201");
   assert.equal(roomMatch?.secondary, "DSTAT - Academic - Room DSTAT-201");
+  assert.deepEqual(roomMatch, sharedRoomMatch);
 });
 
 test("facility search selection preserves the typed room detail exactly", () => {

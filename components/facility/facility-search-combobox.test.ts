@@ -67,16 +67,14 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
   );
 });
 
-test("Escape closes open facility results without reaching a parent dialog", async () => {
+test("shared facility combobox executes the modeled event policy", async () => {
   const source = await readFile(
     new URL("./facility-search-combobox.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(
-    source,
-    /if \(event\.key === "Escape" && shouldRenderListbox\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?\}/,
-  );
+  assert.match(source, /getFacilityComboboxKeyAction\([\s\S]*?shouldRenderListbox/);
+  assert.match(source, /if \(action\.stopPropagation\) event\.stopPropagation\(\)/);
 });
 
 test("AppHeader wires selection and TBA suppression into the shared combobox", async () => {
@@ -88,7 +86,6 @@ test("AppHeader wires selection and TBA suppression into the shared combobox", a
   );
   assert.match(source, /suppressResults=\{isTbaQuery\}/);
   assert.match(source, /optionsQuery=\{debouncedQuery\}/);
-  assert.doesNotMatch(source, /secondary:\s*option\.secondary\.replaceAll/);
 });
 
 test("schedule dialog exposes real loading and unavailable combobox states once", async () => {

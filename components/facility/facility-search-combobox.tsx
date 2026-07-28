@@ -148,17 +148,14 @@ export function FacilitySearchCombobox({
     const supportedKeys = ["ArrowDown", "ArrowUp", "Enter", "Escape"] as const;
     if (!supportedKeys.includes(event.key as (typeof supportedKeys)[number])) return;
 
-    if (event.key === "Escape" && shouldRenderListbox) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-
     const action = getFacilityComboboxKeyAction(
       event.key,
       highlightedIndex,
       renderedCount,
+      shouldRenderListbox,
     );
     if (action.preventDefault) event.preventDefault();
+    if (action.stopPropagation) event.stopPropagation();
     if (action.open !== null) setOpen(action.open);
     setHighlightedIndex(action.highlightedIndex);
     if (action.selectIndex !== null) selectIndex(action.selectIndex);

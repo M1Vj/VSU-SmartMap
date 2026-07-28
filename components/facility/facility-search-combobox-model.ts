@@ -71,6 +71,7 @@ export function getFacilityComboboxRenderState({
 
 export type FacilityComboboxKeyAction = {
   preventDefault: boolean;
+  stopPropagation: boolean;
   open: boolean | null;
   highlightedIndex: number;
   selectIndex: number | null;
@@ -80,10 +81,12 @@ export function getFacilityComboboxKeyAction(
   key: string,
   highlightedIndex: number,
   renderedCount: number,
+  listboxOpen = false,
 ): FacilityComboboxKeyAction {
   if (key === "ArrowDown" && renderedCount > 0) {
     return {
       preventDefault: true,
+      stopPropagation: false,
       open: true,
       highlightedIndex: (highlightedIndex + 1) % renderedCount,
       selectIndex: null,
@@ -93,6 +96,7 @@ export function getFacilityComboboxKeyAction(
   if (key === "ArrowUp" && renderedCount > 0) {
     return {
       preventDefault: true,
+      stopPropagation: false,
       open: true,
       highlightedIndex:
         highlightedIndex <= 0 ? renderedCount - 1 : highlightedIndex - 1,
@@ -103,6 +107,7 @@ export function getFacilityComboboxKeyAction(
   if (key === "Enter" && renderedCount > 0) {
     return {
       preventDefault: true,
+      stopPropagation: false,
       open: null,
       highlightedIndex,
       selectIndex:
@@ -114,7 +119,8 @@ export function getFacilityComboboxKeyAction(
 
   if (key === "Escape") {
     return {
-      preventDefault: false,
+      preventDefault: listboxOpen,
+      stopPropagation: listboxOpen,
       open: false,
       highlightedIndex: -1,
       selectIndex: null,
@@ -123,6 +129,7 @@ export function getFacilityComboboxKeyAction(
 
   return {
     preventDefault: false,
+    stopPropagation: false,
     open: null,
     highlightedIndex,
     selectIndex: null,
