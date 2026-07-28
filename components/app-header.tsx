@@ -259,6 +259,7 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
                 id="map-facility-search"
                 label="Search buildings or facilities"
                 query={searchQuery}
+                optionsQuery={debouncedQuery}
                 options={facilitySearchOptions}
                 selectedFacilityId={selectedFacility?.id ?? pendingFacilityId ?? undefined}
                 loading={facilitySearchLoading}

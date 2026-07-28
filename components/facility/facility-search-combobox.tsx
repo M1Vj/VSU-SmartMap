@@ -13,11 +13,16 @@ import type { FacilitySearchOption } from "@/lib/map/facility-search-model";
 import type { RecentSearch } from "@/lib/map/recent-searches";
 import type { Facility } from "@/lib/types/facility";
 import { cn } from "@/lib/utils";
+import {
+  getFacilityComboboxKeyAction,
+  getFacilityComboboxRenderState,
+} from "./facility-search-combobox-model";
 
 export type FacilitySearchComboboxProps = {
   id: string;
   label: string;
   query: string;
+  optionsQuery?: string;
   options: readonly FacilitySearchOption[];
   selectedFacilityId?: string;
   loading?: boolean;
@@ -39,6 +44,7 @@ export function FacilitySearchCombobox({
   id,
   label,
   query,
+  optionsQuery = query,
   options,
   selectedFacilityId,
   loading = false,
@@ -63,24 +69,23 @@ export function FacilitySearchCombobox({
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const trimmedQuery = query.trim();
-  const showRecents =
-    !suppressResults &&
-    focused &&
-    trimmedQuery.length === 0 &&
-    recents.length > 0;
-  const renderedCount = suppressResults
-    ? 0
-    : showRecents
-      ? recents.length
-      : options.length;
-  const showStatus =
-    trimmedQuery.length > 0 &&
-    (loading || unavailable || (!loading && options.length === 0));
-  const shouldRenderListbox =
-    !suppressResults &&
-    focused &&
-    open &&
-    (showRecents || trimmedQuery.length > 0);
+  const {
+    showRecents,
+    renderFacilityOptions,
+    renderedCount,
+    showStatus,
+    shouldRenderListbox,
+  } = getFacilityComboboxRenderState({
+    query,
+    optionsQuery,
+    optionCount: options.length,
+    recentCount: recents.length,
+    focused,
+    open,
+    loading,
+    unavailable,
+    suppressResults,
+  });
   const activeOptionId =
     highlightedIndex >= 0 && highlightedIndex < renderedCount
       ? `${listboxId}-option-${highlightedIndex}`
@@ -132,38 +137,18 @@ export function FacilitySearchCombobox({
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (suppressResults) return;
 
-    if (event.key === "ArrowDown") {
-      if (renderedCount === 0) return;
-      event.preventDefault();
-      setOpen(true);
-      setHighlightedIndex((current) => (current + 1) % renderedCount);
-      return;
-    }
+    const supportedKeys = ["ArrowDown", "ArrowUp", "Enter", "Escape"] as const;
+    if (!supportedKeys.includes(event.key as (typeof supportedKeys)[number])) return;
 
-    if (event.key === "ArrowUp") {
-      if (renderedCount === 0) return;
-      event.preventDefault();
-      setOpen(true);
-      setHighlightedIndex((current) =>
-        current <= 0 ? renderedCount - 1 : current - 1,
-      );
-      return;
-    }
-
-    if (event.key === "Enter" && renderedCount > 0) {
-      event.preventDefault();
-      selectIndex(
-        highlightedIndex >= 0 && highlightedIndex < renderedCount
-          ? highlightedIndex
-          : 0,
-      );
-      return;
-    }
-
-    if (event.key === "Escape") {
-      setOpen(false);
-      setHighlightedIndex(-1);
-    }
+    const action = getFacilityComboboxKeyAction(
+      event.key,
+      highlightedIndex,
+      renderedCount,
+    );
+    if (action.preventDefault) event.preventDefault();
+    if (action.open !== null) setOpen(action.open);
+    setHighlightedIndex(action.highlightedIndex);
+    if (action.selectIndex !== null) selectIndex(action.selectIndex);
   };
 
   const statusText = useMemo(() => {
@@ -224,35 +209,34 @@ export function FacilitySearchCombobox({
 
       {shouldRenderListbox && (
         <div
-          id={listboxId}
-          role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-[1400] overflow-hidden rounded-xl border border-border/70 bg-background/95 py-1 shadow-xl backdrop-blur-md"
         >
-          {showRecents && (
+          {showRecents && onClearRecents && (
             <div className="flex items-center justify-between gap-3 px-3 py-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Recent
               </span>
-              {onClearRecents && (
-                <button
-                  type="button"
-                  className="rounded-full px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={onClearRecents}
-                >
-                  Clear history
-                </button>
-              )}
+              <button
+                type="button"
+                tabIndex={-1}
+                className="rounded-full px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onClearRecents}
+              >
+                Clear history
+              </button>
             </div>
           )}
 
-          {showRecents
-            ? recents.map((recent, index) => (
+          <div id={listboxId} role="listbox">
+            {showRecents
+              ? recents.map((recent, index) => (
                 <button
                   key={recent.id}
                   id={`${listboxId}-option-${index}`}
                   type="button"
                   role="option"
+                  tabIndex={-1}
                   aria-selected={selectedFacilityId === recent.id}
                   className={cn(
                     "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors",
@@ -268,13 +252,15 @@ export function FacilitySearchCombobox({
                     {recent.name}
                   </span>
                 </button>
-              ))
-            : options.map((option, index) => (
+                ))
+              : renderFacilityOptions
+                ? options.map((option, index) => (
                 <button
                   key={option.id}
                   id={`${listboxId}-option-${index}`}
                   type="button"
                   role="option"
+                  tabIndex={-1}
                   aria-selected={selectedFacilityId === option.facility.id}
                   className={cn(
                     "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left transition-colors",
@@ -299,13 +285,15 @@ export function FacilitySearchCombobox({
                     </span>
                   </span>
                 </button>
-              ))}
+                  ))
+                : null}
 
-          {showStatus && (
-            <div className="px-3 py-3 text-sm text-muted-foreground" role="status">
-              {statusText}
-            </div>
-          )}
+            {showStatus && (
+              <div className="px-3 py-3 text-sm text-muted-foreground" role="status">
+                {statusText}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

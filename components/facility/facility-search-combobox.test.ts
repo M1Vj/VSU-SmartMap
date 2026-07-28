@@ -38,14 +38,15 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
   for (const required of [
     "suppressResults",
     "current >= renderedCount ? renderedCount - 1 : current",
-    "(current + 1) % renderedCount",
-    "current <= 0 ? renderedCount - 1 : current - 1",
     "onMouseDown={(event) => event.preventDefault()}",
     "recents = []",
-    "loading || unavailable || (!loading && options.length === 0)",
     'role="status"',
     "aria-selected={selectedFacilityId === option.facility.id}",
     "aria-selected={selectedFacilityId === recent.id}",
+    "tabIndex={-1}",
+    'document.addEventListener("pointerdown", handlePointerDown)',
+    "onClick={onClearRecents}",
+    "id={listboxId}",
   ]) {
     assert.match(
       source,
@@ -54,6 +55,16 @@ test("shared facility combobox preserves keyboard, pointer, and dynamic result b
   }
 
   assert.doesNotMatch(source, /aria-selected=\{highlightedIndex === index\}/);
+  assert.match(source, /\{showRecents && onClearRecents && \(/);
+  assert.match(
+    source,
+    /showRecents && onClearRecents[\s\S]*?<button[\s\S]*?tabIndex=\{-1\}[\s\S]*?Clear history/,
+  );
+  assert.match(source, /role="listbox"[\s\S]*\{showRecents[\s\S]*recents\.map/);
+  assert.doesNotMatch(
+    source,
+    /role="listbox"[\s\S]*Clear history[\s\S]*recents\.map/,
+  );
 });
 
 test("AppHeader wires selection and TBA suppression into the shared combobox", async () => {
@@ -64,4 +75,5 @@ test("AppHeader wires selection and TBA suppression into the shared combobox", a
     /selectedFacilityId=\{selectedFacility\?\.id \?\? pendingFacilityId \?\? undefined\}/,
   );
   assert.match(source, /suppressResults=\{isTbaQuery\}/);
+  assert.match(source, /optionsQuery=\{debouncedQuery\}/);
 });
