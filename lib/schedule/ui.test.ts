@@ -5,11 +5,13 @@ import {
   assignMeetingColumns,
   assertScheduleFileSize,
   buildFacilityLocationLabel,
+  buildWeekGridModel,
   analyzeDayConflicts,
   endTimeValueToMinute,
   facilitySelectionError,
   getMeetingGridPosition,
   mapScheduleIssuesToFormErrors,
+  MAX_WEEK_GRID_OCCURRENCES,
   minuteToTimeValue,
   selectedDayConflictNotices,
   getDayAgendaData,
@@ -115,6 +117,81 @@ test("bounds conflict details at maximum valid schedule cardinality", () => {
   assert.equal(analysis.remainingPairCount, 1_273_500);
   assert.equal(analysis.conflictMeetingIds.size, 1600);
   assert.ok(elapsed < 250, `analysis took ${elapsed.toFixed(1)}ms`);
+});
+
+test("weekly grid preflight skips all expensive work above its occurrence budget", () => {
+  const courses = Array.from({ length: 200 }, (_, courseIndex): ScheduleCourse => ({
+    id: `week-course-${courseIndex}`,
+    code: `W${courseIndex}`,
+    title: "Week",
+    color: "blue",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    meetings: Array.from({ length: 8 }, (_, meetingIndex) => ({
+      id: `week-meeting-${courseIndex}-${meetingIndex}`,
+      days: [1, 2, 3, 4, 5, 6, 7],
+      startMinute: 540,
+      endMinute: 600,
+    })),
+  }));
+  let analyzerCalls = 0;
+  let layoutCalls = 0;
+  const started = performance.now();
+  const model = buildWeekGridModel(courses, {
+    analyzeDay: () => {
+      analyzerCalls += 1;
+      throw new Error("analyzer must not run");
+    },
+    layoutDay: () => {
+      layoutCalls += 1;
+      throw new Error("layout must not run");
+    },
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(model.kind, "fallback");
+  assert.equal(model.occurrenceCount, 11_200);
+  assert.equal(analyzerCalls, 0);
+  assert.equal(layoutCalls, 0);
+  assert.ok(elapsed < 50, `preflight took ${elapsed.toFixed(1)}ms`);
+});
+
+test("weekly grid renders at its budget and falls back one occurrence above", () => {
+  const coursesForOccurrences = (occurrences: number): ScheduleCourse[] =>
+    Array.from({ length: Math.ceil(occurrences / 8) }, (_, courseIndex) => ({
+      id: `boundary-${courseIndex}`,
+      code: "BOUND",
+      title: "Boundary",
+      color: "blue",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      meetings: Array.from(
+        {
+          length: Math.min(8, occurrences - courseIndex * 8),
+        },
+        (_, meetingIndex) => ({
+          id: `boundary-meeting-${courseIndex}-${meetingIndex}`,
+          days: [1],
+          startMinute: 540,
+          endMinute: 600,
+        }),
+      ),
+    }));
+  let calls = 0;
+  const hooks = {
+    analyzeDay: () => {
+      calls += 1;
+      return { conflictMeetingIds: new Set<string>(), totalPairCount: 0, notices: [], remainingPairCount: 0 };
+    },
+    layoutDay: () => {
+      calls += 1;
+      return [];
+    },
+  };
+  assert.equal(buildWeekGridModel(coursesForOccurrences(MAX_WEEK_GRID_OCCURRENCES), hooks).kind, "grid");
+  assert.ok(calls > 0);
+  calls = 0;
+  assert.equal(buildWeekGridModel(coursesForOccurrences(MAX_WEEK_GRID_OCCURRENCES + 1), hooks).kind, "fallback");
+  assert.equal(calls, 0);
 });
 
 test("maps domain validation issues to visible controls for each location mode", () => {

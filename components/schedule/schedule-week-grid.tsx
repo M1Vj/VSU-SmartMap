@@ -1,11 +1,30 @@
 import type { CSSProperties } from "react";
 import type { IsoWeekday, ScheduleCourse } from "@/lib/schedule/types";
 import { DAY_SHORT_LABELS, formatMinuteOfDay } from "@/lib/schedule/time";
-import { analyzeDayConflicts, assignMeetingColumns, getMeetingGridPosition } from "@/lib/schedule/ui";
+import { buildWeekGridModel, getMeetingGridPosition } from "@/lib/schedule/ui";
 
 const DAYS: IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
 
 export function ScheduleWeekGrid({ courses }: { courses: readonly ScheduleCourse[] }) {
+  const model = buildWeekGridModel(courses);
+  if (model.kind === "fallback") {
+    return (
+      <section
+        aria-labelledby="week-heading"
+        className="hidden rounded-lg border border-dashed p-5 lg:block"
+      >
+        <h2 id="week-heading" className="text-xl font-semibold">
+          Weekly timetable simplified
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This schedule has {model.occurrenceCount.toLocaleString()} weekly
+          meeting occurrences, so the visual grid is unavailable to keep the
+          planner responsive. The complete semantic agenda above remains
+          available for every day.
+        </p>
+      </section>
+    );
+  }
   return (
     <section aria-labelledby="week-heading" className="hidden lg:block">
       <h2 id="week-heading" className="mb-4 text-xl font-semibold">Weekly timetable</h2>
@@ -17,14 +36,10 @@ export function ScheduleWeekGrid({ courses }: { courses: readonly ScheduleCourse
           <div className="relative h-[1200px] border-r">
             {Array.from({ length: 24 }, (_, index) => index * 60).map((minute) => <span key={minute} className="absolute right-2 text-xs text-muted-foreground" style={{ top: `${(minute / 1440) * 100}%` }}>{formatMinuteOfDay(minute)}</span>)}
           </div>
-          {DAYS.map((day) => {
-            const conflictMeetingIds = analyzeDayConflicts(
-              courses,
-              day,
-            ).conflictMeetingIds;
+          {model.days.map(({ day, conflictMeetingIds, blocks }) => {
             return (
             <div key={day} className="relative h-[1200px] overflow-hidden border-l">
-              {assignMeetingColumns(courses, day).map(({ course, meeting, column, columnCount }) => {
+              {blocks.map(({ course, meeting, column, columnCount }) => {
                 const position = getMeetingGridPosition(meeting.startMinute, meeting.endMinute);
                 const hasConflict = conflictMeetingIds.has(
                   `${course.id}:${meeting.id}`,

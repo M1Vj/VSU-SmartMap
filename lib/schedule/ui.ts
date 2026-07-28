@@ -35,6 +35,50 @@ export interface MeetingGridBlock {
   columnCount: number;
 }
 
+export const MAX_WEEK_GRID_OCCURRENCES = 224;
+const ISO_WEEKDAYS: IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
+
+export type WeekGridModel =
+  | { kind: "fallback"; occurrenceCount: number }
+  | {
+      kind: "grid";
+      occurrenceCount: number;
+      days: Array<{
+        day: IsoWeekday;
+        conflictMeetingIds: Set<string>;
+        blocks: MeetingGridBlock[];
+      }>;
+    };
+
+export function buildWeekGridModel(
+  courses: readonly ScheduleCourse[],
+  helpers: {
+    analyzeDay?: typeof analyzeDayConflicts;
+    layoutDay?: typeof assignMeetingColumns;
+  } = {},
+): WeekGridModel {
+  let occurrenceCount = 0;
+  for (const course of courses) {
+    for (const meeting of course.meetings) {
+      occurrenceCount += meeting.days.length;
+    }
+  }
+  if (occurrenceCount > MAX_WEEK_GRID_OCCURRENCES) {
+    return { kind: "fallback", occurrenceCount };
+  }
+  const analyzeDay = helpers.analyzeDay ?? analyzeDayConflicts;
+  const layoutDay = helpers.layoutDay ?? assignMeetingColumns;
+  return {
+    kind: "grid",
+    occurrenceCount,
+    days: ISO_WEEKDAYS.map((day) => ({
+      day,
+      conflictMeetingIds: analyzeDay(courses, day).conflictMeetingIds,
+      blocks: layoutDay(courses, day),
+    })),
+  };
+}
+
 export function getMeetingGridPosition(
   startMinute: number,
   endMinute: number,
