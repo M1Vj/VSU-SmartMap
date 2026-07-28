@@ -151,7 +151,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.student_schedule_courses
 
 REVOKE ALL ON SEQUENCE public.student_schedule_server_version_seq
   FROM PUBLIC, anon, authenticated;
-GRANT USAGE, SELECT ON SEQUENCE public.student_schedule_server_version_seq
+GRANT USAGE ON SEQUENCE public.student_schedule_server_version_seq
   TO student_schedule_mutator;
 GRANT USAGE ON SCHEMA public TO student_schedule_mutator;
 

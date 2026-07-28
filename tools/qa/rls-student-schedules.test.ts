@@ -65,6 +65,10 @@ test("student schedule migration establishes the least-privilege RPC boundary", 
     sql,
     /grant\s+(insert|update|delete|all)[^;]*student_schedule_courses[^;]*authenticated/,
   );
+  assert.doesNotMatch(
+    sql,
+    /grant[^;]*\bselect\b[^;]*student_schedule_server_version_seq[^;]*student_schedule_mutator/,
+  );
   assert.doesNotMatch(sql, /grant usage on schema auth/);
 });
 
