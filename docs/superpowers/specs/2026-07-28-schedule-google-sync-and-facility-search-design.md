@@ -66,6 +66,11 @@ network requests. Authenticated schedules use `user:<auth-user-id>` scopes.
 Google sign-in does not automatically upload the guest schedule. The student
 must choose what happens after authentication.
 
+The account-sync UI is additionally guarded by the build-time
+`NEXT_PUBLIC_SCHEDULE_ACCOUNT_SYNC_ENABLED` flag. Missing or non-`true` values
+fail closed to the anonymous local planner. This lets the compatible application
+deploy before production schema enablement without exposing a broken sync path.
+
 ## User experience
 
 ### Anonymous schedule
@@ -82,12 +87,16 @@ must choose what happens after authentication.
 - Only `openid`, email, and profile identity scopes are requested.
 - OAuth failures return to `/schedule` with a user-safe error. They never send a
   student to the owner login page.
+- Callback destinations use an exact same-origin allowlist for `/schedule` and
+  `/owner`. Raw or encoded slashes, backslashes, control characters, fragments,
+  and unapproved query parameters are rejected before URL construction.
 - The schedule route remains public and does not require a student role.
 
 ### First sign-in reconciliation
 
 The application loads the guest schedule, the account-scoped local schedule, and
-the cloud schedule before enabling sync.
+the cloud schedule before enabling sync. Reconciliation models all three sources
+with explicit `guest`, `account-local`, and `cloud` provenance.
 
 - If all are empty, sync begins with an empty account schedule.
 - If cloud is empty and guest has courses, offer `Copy this device to my
@@ -99,7 +108,8 @@ the cloud schedule before enabling sync.
   - `Use cloud schedule`;
   - `Not now`.
 - Distinct course IDs can be combined automatically in the review.
-- Same-ID courses with different revisions require a per-course choice.
+- Same-ID courses with different revisions require a per-course choice among
+  every present source.
 - A guest schedule is copied, not silently deleted. After a successful copy, the
   student may explicitly remove the guest copy from that device.
 
@@ -136,7 +146,8 @@ the legacy rows instead of mutating the v10 object store's primary key:
     revision.
 - `schedule_outbox`
   - ordered local sequence;
-  - unique mutation ID;
+  - at most one pending desired mutation per scope and course;
+  - unique mutation ID for the current desired state;
   - scope, course ID, expected server revision, operation, and validated course
     payload when applicable.
 - `schedule_sync_state`
@@ -145,7 +156,8 @@ the legacy rows instead of mutating the v10 object store's primary key:
     state.
 - `schedule_conflicts`
   - one row per unresolved course conflict;
-  - local and remote validated versions plus their revisions.
+  - source-tagged guest, account-local, and cloud validated versions plus their
+    revisions.
 
 The v11 upgrade copies every existing unscoped course to
 `schedule_scoped_courses` under `guest`, validates the copied row, and clears the
@@ -153,11 +165,18 @@ legacy store only after the copy succeeds. The empty legacy object store remains
 for this release to avoid a destructive schema transition. No course is uploaded
 or deleted during migration.
 
+Repeated offline changes to one course coalesce transactionally into the latest
+desired state while retaining the last known server revision. Creating and then
+deleting a never-synced course removes the net-zero outbox mutation. If a newer
+local mutation arrives while an older mutation is in flight, acknowledging the
+older mutation rebases the newer mutation to the returned canonical revision
+instead of deleting it.
+
 `ScheduleRepository` becomes scope-aware but retains its validation and
 transactional behavior. A `ScheduleSyncCoordinator` owns network activity,
-outbox replay, pull cursors, and conflict transitions. React components consume
-repository state and a small sync status interface; they do not issue raw cloud
-writes.
+outbox replay, pull cursors, revision rebasing, and conflict transitions. React
+components consume repository state and a small sync status interface; they do
+not issue raw cloud writes.
 
 ## Cloud data architecture
 
@@ -179,9 +198,10 @@ eight meetings are atomically stored in the course payload.
 - primary key `(user_id, id)`
 
 The payload contains the bounded course fields and meetings but not ownership or
-server metadata. Active payloads must be JSON objects below a strict byte limit.
-Tombstones set `payload` to null so deleted schedules do not retain routine,
-location, instructor, or notes data.
+server metadata. Active payloads must be JSON objects below a strict byte limit,
+and the payload's course ID must equal the row ID. Tombstones set `payload` to
+null so deleted schedules do not retain routine, location, instructor, or notes
+data.
 
 A database sequence supplies monotonically increasing `server_version` values.
 Clients pull rows where `server_version` is greater than their cursor, ordered by
@@ -191,7 +211,7 @@ version and ID.
 
 `apply_student_schedule_mutation` derives ownership from `auth.uid()` and
 accepts a mutation UUID, course UUID, expected revision, operation, and bounded
-payload.
+payload. It is the only cloud write surface.
 
 Within one transaction it:
 
@@ -205,8 +225,13 @@ Within one transaction it:
 8. returns the canonical row or an explicit conflict result.
 
 Database checks and triggers enforce ownership immutability, payload size,
-server timestamps, revision changes, and the active-course limit even if a user
-attempts direct Data API writes.
+server timestamps, revision changes, and the active-course limit.
+
+The function uses `SECURITY DEFINER` only because authenticated clients are not
+granted direct table writes. It has an empty fixed search path, fully
+schema-qualified object references, and a dedicated non-login owner whose
+privileges are limited to this table and sequence. It performs an explicit
+`auth.uid()` check before any data access.
 
 ## RLS and database privileges
 
@@ -214,21 +239,25 @@ The schedule table is in the exposed `public` schema and must have RLS enabled
 before any client grant.
 
 - Revoke all access from `PUBLIC` and `anon`.
-- Grant only the required `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges
-  to `authenticated` after policies exist.
-- `SELECT TO authenticated USING ((select auth.uid()) = user_id)`.
-- `INSERT TO authenticated WITH CHECK ((select auth.uid()) = user_id)`.
-- `UPDATE TO authenticated USING ((select auth.uid()) = user_id) WITH CHECK
-  ((select auth.uid()) = user_id)`.
-- `DELETE TO authenticated USING ((select auth.uid()) = user_id)`.
+- Grant table `SELECT` only to `authenticated` after policies exist.
+- Revoke direct table `INSERT`, `UPDATE`, and `DELETE` from `authenticated`;
+  every write must use the validated mutation function.
+- `SELECT TO authenticated, student_schedule_mutator USING ((select
+  auth.uid()) = user_id)`.
+- `INSERT TO student_schedule_mutator WITH CHECK ((select auth.uid()) =
+  user_id)`.
+- `UPDATE TO student_schedule_mutator USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id)`.
+- `DELETE TO student_schedule_mutator USING ((select auth.uid()) = user_id)`.
 - Grant the mutation function only to `authenticated`; revoke it from `PUBLIC`
-  and `anon`.
+  and `anon`. Its dedicated non-login owner has no unrelated privileges.
 - Never authorize by email, Google domain, user metadata, or a browser-supplied
   user ID.
 - Never expose a service-role credential to the browser.
 
 Adversarial tests must prove that anonymous callers and user B cannot read,
-create, update, delete, attach, or discover user A's schedule rows.
+create, update, delete, attach, or discover user A's schedule rows. They must
+also prove authenticated direct table DML fails for the row owner.
 
 ## Authentication hardening
 
@@ -280,6 +309,10 @@ The combobox supports a programmatic label, `aria-autocomplete`, listbox and
 option relationships, active-descendant state, Arrow Up/Down, Enter, Escape,
 pointer selection, click outside, loading, offline-cache, unavailable, and
 no-results states. Results remain capped at eight.
+
+Cached facility and room results are published before a deferred network refresh
+resolves. A successful remote empty result is canonical and clears stale cached
+results; it is not treated as a network failure.
 
 Map-only side effects such as opening the map sheet, changing categories, TBA
 help, and recent navigation history remain in the map parent. Schedule selection
@@ -368,13 +401,16 @@ production verification against the merged SHA.
 1. Pin the existing Supabase packages to exact versions before changing auth or
    sync code.
 2. Add and verify the migration locally.
-3. Deploy schema and application to preview with sync UI disabled.
+3. Deploy the application to production with the sync flag disabled, and deploy
+   schema plus the enabled UI to preview/staging.
 4. Verify Google provider configuration, exact redirect allowlists, removed
    fallback flags, RLS advisors, and preview browser flows.
 5. Enable sync in preview and complete two-account/offline/conflict tests.
 6. Merge through protected `main`.
-7. Apply the production migration, verify it, then enable the production UI.
-8. Verify `vsumap.vercel.app` serves the merge SHA and the Android TWA route.
+7. Apply the production migration and verify it while the production flag
+   remains disabled.
+8. Set the production flag to `true`, redeploy the same merge commit, and verify
+   `vsumap.vercel.app` plus the Android TWA route.
 
 Before any schedule rows exist, rollback may use a new migration that removes
 the additive tables. After user data exists, rollback disables sync and revokes
