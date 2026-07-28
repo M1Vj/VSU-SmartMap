@@ -17,6 +17,7 @@
     "qa:seed": "node tools/qa/seed-boarding-houses.mjs",
     "perf:pages": "node tools/qa/benchmark-pages.mjs",
     "qa:rls": "node tools/qa/rls-boarding-houses.mjs",
+    "qa:rls:schedules": "node tools/qa/rls-student-schedules.mjs",
     "typecheck": "rm -rf .next/dev && next typegen && tsc --noEmit",
     "lint": "eslint .",
     "ai:dev": "genkit start"
