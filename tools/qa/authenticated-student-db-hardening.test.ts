@@ -91,6 +91,7 @@ test("hardening migration uses a bounded service-only verification-document leas
   assert.match(sql, /owner_verification_documents_deletion_claim_check/);
   assert.match(sql, /CREATE INDEX IF NOT EXISTS owner_verification_documents_expiry_claim_idx/);
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.claim_expired_verification_documents\(/);
+  assert.match(sql, /p_limit IS NULL OR p_lease_seconds IS NULL/);
   assert.match(sql, /p_limit < 1 OR p_limit > 100/);
   assert.match(sql, /p_lease_seconds < 60 OR p_lease_seconds > 3600/);
   assert.match(sql, /FOR UPDATE SKIP LOCKED/);

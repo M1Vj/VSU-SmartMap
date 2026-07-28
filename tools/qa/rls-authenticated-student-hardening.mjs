@@ -500,7 +500,7 @@ async function main() {
       application_id: ownerApplication.data.id,
       user_id: ownerApplication.data.user_id,
       storage_bucket: "boarding-house-verification",
-      storage_path: `${ownerApplication.data.user_id}/${ownerApplication.data.id}/fixture-${suffix}.pdf`,
+      storage_path: `${ownerApplication.data.user_id}/${ownerApplication.data.id}/identity-1720000000000-${"a".repeat(194)}`,
       original_filename: "fixture.pdf",
       mime_type: "application/pdf",
       size_bytes: 128,
@@ -512,6 +512,32 @@ async function main() {
     throw new Error("Unable to seed the verification retention fixture.");
   }
   verificationDocumentId = verificationDocument.data.id;
+  const nullLimitClaim = await service.rpc("claim_expired_verification_documents", {
+    p_now: "2026-07-29T00:00:00.000Z",
+    p_limit: null,
+    p_lease_seconds: 900,
+  });
+  const nullLeaseClaim = await service.rpc("claim_expired_verification_documents", {
+    p_now: "2026-07-29T00:00:00.000Z",
+    p_limit: 1,
+    p_lease_seconds: null,
+  });
+  const afterNullClaims = await service
+    .from("owner_verification_documents")
+    .select("id,deletion_started_at,deletion_claim_token")
+    .eq("id", verificationDocumentId)
+    .single();
+  check(
+    "null verification claim bounds are rejected without changing the row",
+    Boolean(nullLimitClaim.error)
+      && Boolean(nullLeaseClaim.error)
+      && !afterNullClaims.error
+      && afterNullClaims.data?.deletion_started_at === null
+      && afterNullClaims.data?.deletion_claim_token === null,
+    nullLimitClaim.error?.message
+      ?? nullLeaseClaim.error?.message
+      ?? afterNullClaims.error?.message,
+  );
   const firstClaim = await service.rpc("claim_expired_verification_documents", {
     p_now: "2026-07-29T00:00:00.000Z",
     p_limit: 1,
@@ -753,6 +779,7 @@ async function main() {
     !publicSearch.error
       && Array.isArray(publicSearch.data)
       && publicSearch.data.length > 0
+      && publicSearch.data.some((row) => row.id === knowledgeFixtureId)
       && publicSearch.data.every((row) => typeof row.search_rank === "number"),
     publicSearch.error?.message,
   );

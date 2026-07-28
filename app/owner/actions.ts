@@ -18,8 +18,12 @@ import {
 } from "@/lib/auth/server";
 import { notifyAdmins } from "@/lib/notifications/service";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
+import {
+  VERIFICATION_DOCUMENT_BUCKET,
+  buildVerificationDocumentPath,
+  type VerificationDocumentLabel,
+} from "@/lib/storage/verification-document-path";
 
-const DOCUMENT_BUCKET = "boarding-house-verification";
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_DOCUMENT_TYPES = new Set([
   "image/png",
@@ -595,13 +599,19 @@ async function uploadVerificationDocument({
 }: {
   applicationId: string;
   userId: string;
-  label: string;
+  label: VerificationDocumentLabel;
   file: File;
 }): Promise<ActionResult> {
   const serviceClient = getSupabaseServiceRoleClient();
-  const storagePath = `${userId}/${applicationId}/${label}-${Date.now()}-${safeFilename(file.name)}`;
+  const storagePath = buildVerificationDocumentPath({
+    userId,
+    applicationId,
+    label,
+    timestamp: Date.now(),
+    filename: file.name,
+  });
   const { error: uploadError } = await serviceClient.storage
-    .from(DOCUMENT_BUCKET)
+    .from(VERIFICATION_DOCUMENT_BUCKET)
     .upload(storagePath, file, {
       contentType: file.type,
       upsert: false,
@@ -617,7 +627,7 @@ async function uploadVerificationDocument({
     .insert({
       application_id: applicationId,
       user_id: userId,
-      storage_bucket: DOCUMENT_BUCKET,
+      storage_bucket: VERIFICATION_DOCUMENT_BUCKET,
       storage_path: storagePath,
       original_filename: file.name,
       mime_type: file.type,
@@ -627,6 +637,9 @@ async function uploadVerificationDocument({
 
   if (rowError) {
     console.error("uploadVerificationDocument row insert failed", rowError);
+    await serviceClient.storage
+      .from(VERIFICATION_DOCUMENT_BUCKET)
+      .remove([storagePath]);
     return { error: "Could not save your documents. Please try again." };
   }
   return {};
@@ -1027,8 +1040,4 @@ function validateDocument(file: File): string | null {
     return "Each document must be 10MB or smaller.";
   }
   return null;
-}
-
-function safeFilename(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
 }

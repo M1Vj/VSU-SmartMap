@@ -57,7 +57,8 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
-  IF p_now IS NULL OR p_limit < 1 OR p_limit > 100 OR
+  IF p_now IS NULL OR p_limit IS NULL OR p_lease_seconds IS NULL OR
+     p_limit < 1 OR p_limit > 100 OR
      p_lease_seconds < 60 OR p_lease_seconds > 3600 THEN
     RAISE EXCEPTION 'invalid verification document claim';
   END IF;

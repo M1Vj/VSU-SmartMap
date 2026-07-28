@@ -1,12 +1,10 @@
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
+import {
+  VERIFICATION_DOCUMENT_BUCKET,
+  isValidVerificationDocumentLocation,
+} from "@/lib/storage/verification-document-path";
 
-const DOCUMENT_BUCKET = "boarding-house-verification";
 const MAX_BATCH_SIZE = 100;
-const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const DOCUMENT_PATH_PATTERN = new RegExp(
-  `^${UUID}/${UUID}/[a-z0-9][a-z0-9.-]{0,199}$`,
-  "i",
-);
 
 type ServiceClient = ReturnType<typeof getSupabaseServiceRoleClient>;
 type StorageRemovalError = {
@@ -44,14 +42,6 @@ function isMissingObjectError(error: StorageRemovalError) {
   );
 }
 
-function isSafeDocumentLocation(row: VerificationDocumentClaim) {
-  return (
-    row.storage_bucket === DOCUMENT_BUCKET
-    && DOCUMENT_PATH_PATTERN.test(row.storage_path)
-    && !row.storage_path.includes("..")
-  );
-}
-
 export async function reclaimExpiredVerificationDocuments(options?: {
   client?: ServiceClient;
   now?: Date;
@@ -84,7 +74,7 @@ export async function reclaimExpiredVerificationDocuments(options?: {
   let retry = 0;
 
   for (const row of rows.slice(0, MAX_BATCH_SIZE)) {
-    if (!isSafeDocumentLocation(row)) {
+    if (!isValidVerificationDocumentLocation(row.storage_bucket, row.storage_path)) {
       await client.rpc("release_verification_document_deletion", {
         p_document_id: row.id,
         p_claim_token: row.claim_token,
@@ -94,7 +84,7 @@ export async function reclaimExpiredVerificationDocuments(options?: {
     }
 
     const { error: storageError } = await client.storage
-      .from(DOCUMENT_BUCKET)
+      .from(VERIFICATION_DOCUMENT_BUCKET)
       .remove([row.storage_path]);
     if (storageError && !isMissingObjectError(storageError)) {
       await client.rpc("release_verification_document_deletion", {

@@ -304,11 +304,17 @@ database schedule does not create a cleanup job. The existing daily Vercel
 `/api/cron/storage-retention` job is the owner-controlled cleanup mechanism: it
 keeps the exact `CRON_SECRET` bearer boundary, uses the server-only service-role
 client to claim at most 100 expired rows with bounded leases, validates the
-fixed private bucket/path, deletes each physical object through the Supabase
+fixed private bucket/path through the same canonical path contract used by
+uploads, deletes each physical object through the Supabase
 Storage API, and only then completes deletion of the exactly claimed database
 row. Missing objects are treated as removed; invalid paths and transient
 Storage failures release their exact claims, while completion failures retain
-the claim for stale-lease recovery. The legacy metadata-only SQL cleanup is
+the claim for stale-lease recovery. New upload names are sanitized and capped,
+while cleanup still accepts valid historical object segments and rejects
+traversal, encoded separators, malformed labels, and overlong keys. Uploads
+whose metadata insert fails immediately remove the exact object they created.
+Claim calls reject null bounds without changing the row. The legacy
+metadata-only SQL cleanup is
 disabled and uncallable, because direct deletion from `storage.objects` can
 orphan physical files. All three daily retention jobs start independently;
 any failure produces only a generic no-store non-2xx response without
