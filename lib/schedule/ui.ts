@@ -1,5 +1,8 @@
 import { MAX_SCHEDULE_BACKUP_BYTES } from "./backup";
+import { findScheduleConflicts } from "./conflicts";
+import { formatMinuteOfDay } from "./time";
 import type { IsoWeekday, ScheduleCourse, ScheduleMeeting } from "./types";
+import type { ScheduleValidationIssue } from "./validation";
 
 export function timeValueToMinute(value: string): number {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
@@ -31,6 +34,82 @@ export interface MeetingGridBlock {
   meeting: ScheduleMeeting;
   column: number;
   columnCount: number;
+}
+
+export function getMeetingGridPosition(
+  startMinute: number,
+  endMinute: number,
+): { topPercent: number; heightPercent: number } {
+  if (
+    !Number.isInteger(startMinute) ||
+    !Number.isInteger(endMinute) ||
+    startMinute < 0 ||
+    endMinute > 1440 ||
+    startMinute >= endMinute
+  ) {
+    throw new RangeError("Choose a valid meeting time.");
+  }
+  return {
+    topPercent: (startMinute / 1440) * 100,
+    heightPercent: ((endMinute - startMinute) / 1440) * 100,
+  };
+}
+
+export interface ScheduleConflictNotice {
+  key: string;
+  label: string;
+}
+
+export function selectedDayConflictNotices(
+  courses: readonly ScheduleCourse[],
+  day: IsoWeekday,
+): ScheduleConflictNotice[] {
+  return findScheduleConflicts(courses)
+    .filter(
+      (conflict) =>
+        conflict.meetingA.days.includes(day) &&
+        conflict.meetingB.days.includes(day),
+    )
+    .map((conflict) => {
+      const start = Math.max(
+        conflict.meetingA.startMinute,
+        conflict.meetingB.startMinute,
+      );
+      const end = Math.min(
+        conflict.meetingA.endMinute,
+        conflict.meetingB.endMinute,
+      );
+      return {
+        key: `${conflict.courseA.id}:${conflict.meetingA.id}:${conflict.courseB.id}:${conflict.meetingB.id}`,
+        label: `${conflict.courseA.code} conflicts with ${conflict.courseB.code}, ${formatMinuteOfDay(start)}–${formatMinuteOfDay(end)}.`,
+      };
+    });
+}
+
+export function mapScheduleIssuesToFormErrors(
+  issues: readonly ScheduleValidationIssue[],
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const issue of issues) {
+    if (issue.field.endsWith(".time")) {
+      const prefix = issue.field.slice(0, -".time".length);
+      result[`${prefix}.start`] ??= issue.message;
+      result[`${prefix}.end`] ??= issue.message;
+    } else {
+      result[issue.field] ??= issue.message;
+    }
+  }
+  return result;
+}
+
+export function facilitySelectionError(
+  mode: string,
+  facilityId: string,
+  knownFacilityIds: readonly string[],
+): string | undefined {
+  return mode === "facility" && !knownFacilityIds.includes(facilityId)
+    ? "Choose a valid campus facility."
+    : undefined;
 }
 
 export function assignMeetingColumns(

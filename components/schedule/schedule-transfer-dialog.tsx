@@ -52,7 +52,10 @@ export function ScheduleTransferDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogScaffoldContent className="w-[calc(100%-1rem)] sm:max-w-lg">
+      <DialogScaffoldContent
+        className="w-[calc(100%-1rem)] motion-reduce:animate-none motion-reduce:transition-none sm:max-w-lg"
+        overlayClassName="motion-reduce:animate-none motion-reduce:transition-none"
+      >
         <DialogScaffoldHeader><DialogTitle>Backup and calendar</DialogTitle><DialogDescription>All files are created and read on this device.</DialogDescription></DialogScaffoldHeader>
         <DialogScaffoldBody className="space-y-6 px-4 sm:px-6">
           <section className="space-y-2"><h3 className="font-semibold">JSON backup</h3><p className="text-sm text-muted-foreground">Download a private copy or choose a backup to replace this schedule after confirmation.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => download(exportScheduleBackup(courses), "vsu-smartmap-schedule.json", "application/json")}>Download JSON</Button><Label className="inline-flex h-10 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">Choose backup<Input type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} /></Label></div>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}</section>

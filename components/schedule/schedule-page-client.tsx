@@ -115,10 +115,13 @@ export function SchedulePageClient() {
   };
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto bg-background">
+    <div
+      className="h-full min-w-0 overflow-y-auto bg-background"
+      aria-labelledby="schedule-page-heading"
+    >
       <div className="mx-auto w-full max-w-7xl space-y-6 px-3 py-5 pb-28 sm:px-6 md:pb-8">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div><h1 className="text-2xl font-bold md:text-3xl">My Schedule</h1><p className="mt-1 text-muted-foreground">A private, offline-first weekly planner stored on this device.</p></div>
+          <div><h1 id="schedule-page-heading" className="text-2xl font-bold md:text-3xl">My Schedule</h1><p className="mt-1 text-muted-foreground">A private, offline-first weekly planner stored on this device.</p></div>
           <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setTransferOpen(true)}><Database className="mr-2 h-4 w-4" />Backup & export</Button>{courses.length > 0 ? <Button variant="outline" onClick={() => setConfirmation({ kind: "clear" })}><Trash2 className="mr-2 h-4 w-4" />Clear</Button> : null}<Button onClick={() => setEditing(null)}><Plus className="mr-2 h-4 w-4" />Add course</Button></div>
         </header>
 
@@ -140,6 +143,6 @@ export function SchedulePageClient() {
       <CourseDialog open={editing !== undefined} course={editing ?? undefined} facilities={facilities} saving={busy} onClose={() => setEditing(undefined)} onSave={save} />
       <ScheduleTransferDialog open={transferOpen} courses={courses} busy={busy} onClose={() => setTransferOpen(false)} onRestoreReady={(backup) => setConfirmation({ kind: "restore", backup })} />
       <ConfirmDialog open={confirmation !== undefined} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : "Clear schedule"} loading={busy} onCancel={() => setConfirmation(undefined)} onConfirm={() => { void confirmAction(); }} />
-    </main>
+    </div>
   );
 }
