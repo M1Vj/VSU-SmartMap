@@ -27,13 +27,9 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities-cache";
-import { getCachedRooms } from "@/lib/cache/rooms-cache";
+import { useFacilitySearchData } from "@/components/facility/use-facility-search-data";
 import { getCategoryMeta } from "@/lib/constants/facilities";
-import {
-  getSearchSuggestions,
-  type RoomSearchSource,
-} from "@/lib/map/search-suggestions";
+import { getSearchSuggestions } from "@/lib/map/search-suggestions";
 import {
   getTbaSearchDialogDelay,
   isTbaSearchQuery,
@@ -44,8 +40,6 @@ import {
   readRecentSearches,
   type RecentSearch,
 } from "@/lib/map/recent-searches";
-import { searchRooms } from "@/lib/supabase/queries/rooms";
-import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
 import type { Facility } from "@/lib/types/facility";
 
 type AppHeaderProps = {
@@ -81,8 +75,6 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
 
   const eventsQueryParam = searchParams.get("q") ?? "";
   const [eventsQuery, setEventsQuery] = useState(eventsQueryParam);
-  const [facilityOptions, setFacilityOptions] = useState<readonly Facility[]>([]);
-  const [roomOptions, setRoomOptions] = useState<readonly RoomSearchSource[]>([]);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -93,6 +85,15 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
   const listboxId = useId();
 
   const trimmedSuggestionQuery = debouncedQuery.trim();
+  const {
+    facilities: facilityOptions,
+    rooms: roomOptions,
+  } = useFacilitySearchData({
+    enabled:
+      isFacilitySearchPage &&
+      (searchFocused || trimmedSuggestionQuery.length > 0),
+    query: trimmedSuggestionQuery,
+  });
   const isTbaQuery = isTbaSearchQuery(searchQuery);
   const suggestions = useMemo(
     () =>
@@ -135,68 +136,6 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
       typeof window === "undefined" ? null : window.localStorage,
     ));
   }, []);
-
-  const loadFacilityOptions = useCallback(async () => {
-    const cached = await getCachedFacilities();
-    if (cached?.length) {
-      setFacilityOptions(cached);
-    }
-
-    const { data } = await getFacilitiesLite();
-    if (data?.length) {
-      const facilities = data as unknown as Facility[];
-      setFacilityOptions(facilities);
-      void setCachedFacilities(facilities);
-      return facilities;
-    }
-
-    return cached ?? [];
-  }, []);
-
-  useEffect(() => {
-    if (!isFacilitySearchPage || (!searchFocused && trimmedSuggestionQuery.length === 0)) return;
-
-    let cancelled = false;
-    const load = async () => {
-      const facilities = await loadFacilityOptions();
-      if (!cancelled) {
-        setFacilityOptions(facilities);
-      }
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [isFacilitySearchPage, loadFacilityOptions, searchFocused, trimmedSuggestionQuery.length]);
-
-  useEffect(() => {
-    if (!isFacilitySearchPage || trimmedSuggestionQuery.length < 2) {
-      setRoomOptions([]);
-      return;
-    }
-
-    let cancelled = false;
-    const loadRooms = async () => {
-      const cachedRooms = await getCachedRooms();
-      if (!cancelled && cachedRooms?.length) {
-        setRoomOptions(cachedRooms);
-      }
-
-      const { data } = await searchRooms({
-        term: trimmedSuggestionQuery.toLowerCase(),
-        includeFacility: true,
-      });
-      if (!cancelled) {
-        setRoomOptions(data ?? cachedRooms ?? []);
-      }
-    };
-
-    void loadRooms();
-    return () => {
-      cancelled = true;
-    };
-  }, [isFacilitySearchPage, trimmedSuggestionQuery]);
 
   useEffect(() => {
     if (!searchFocused) return;
@@ -264,19 +203,12 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
     searchInputRef.current?.blur();
   }, [pushRecentSearch, selectFacility, selectedCategories, setCategories, setSearchQuery]);
 
-  const chooseRecentSearch = useCallback(async (recent: RecentSearch) => {
+  const chooseRecentSearch = useCallback((recent: RecentSearch) => {
     const existingFacility = facilityOptions.find((facility) => facility.id === recent.id);
     if (existingFacility) {
       chooseFacility(existingFacility);
-      return;
     }
-
-    const facilities = await loadFacilityOptions();
-    const loadedFacility = facilities.find((facility) => facility.id === recent.id);
-    if (loadedFacility) {
-      chooseFacility(loadedFacility);
-    }
-  }, [chooseFacility, facilityOptions, loadFacilityOptions]);
+  }, [chooseFacility, facilityOptions]);
 
   const handleFacilitySearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isFacilitySearchPage) return;

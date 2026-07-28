@@ -8,9 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
-import { getCachedFacilities, setCachedFacilities } from "@/lib/cache/facilities-cache";
-import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
-import type { Facility } from "@/lib/types";
+import { useFacilitySearchData } from "@/components/facility/use-facility-search-data";
 import { ScheduleRepository } from "@/lib/schedule/repository";
 import {
   MAX_SCHEDULE_COURSES,
@@ -37,8 +35,10 @@ export function SchedulePageClient() {
   const [courses, setCourses] = useState<ScheduleCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [storageError, setStorageError] = useState("");
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [knownFacilityIds, setKnownFacilityIds] = useState<Set<string>>(new Set());
+  const { facilities, source: facilitySource } = useFacilitySearchData({
+    enabled: true,
+    query: "",
+  });
   const [selectedDay, setSelectedDay] = useState<IsoWeekday>(() => getManilaWeekPosition(new Date()).weekday);
   const [now, setNow] = useState(() => new Date());
   const [editing, setEditing] = useState<ScheduleCourse | null | undefined>();
@@ -58,31 +58,6 @@ export function SchedulePageClient() {
   }, [reloadKey]);
 
   useEffect(() => {
-    let mounted = true;
-    void (async () => {
-      const cached = await getCachedFacilities();
-      if (mounted && cached) {
-        setFacilities(cached);
-        setKnownFacilityIds(
-          reconcileKnownFacilityIds(cached.map((facility) => facility.id), undefined),
-        );
-      }
-      const result = await getFacilitiesLite();
-      if (!mounted || result.error || !result.data) return;
-      const refreshed = result.data as Facility[];
-      setFacilities(refreshed);
-      setKnownFacilityIds(
-        reconcileKnownFacilityIds(
-          cached?.map((facility) => facility.id) ?? [],
-          refreshed.map((facility) => facility.id),
-        ),
-      );
-      await setCachedFacilities(refreshed);
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
     const timeout = setTimeout(() => {
       setNow(new Date());
@@ -92,6 +67,13 @@ export function SchedulePageClient() {
   }, []);
 
   const next = useMemo(() => getNextClassOccurrence(courses, now), [courses, now]);
+  const knownFacilityIds = useMemo(() => {
+    const facilityIds = facilities.map((facility) => facility.id);
+    return reconcileKnownFacilityIds(
+      facilityIds,
+      facilitySource === "remote" ? facilityIds : undefined,
+    );
+  }, [facilities, facilitySource]);
   const atCourseLimit = courses.length >= MAX_SCHEDULE_COURSES;
   const save = useCallback(async (value: unknown) => {
     setBusy(true);
