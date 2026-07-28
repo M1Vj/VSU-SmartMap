@@ -88,6 +88,7 @@ test("AppHeader wires selection and TBA suppression into the shared combobox", a
   );
   assert.match(source, /suppressResults=\{isTbaQuery\}/);
   assert.match(source, /optionsQuery=\{debouncedQuery\}/);
+  assert.doesNotMatch(source, /secondary:\s*option\.secondary\.replaceAll/);
 });
 
 test("schedule dialog exposes real loading and unavailable combobox states once", async () => {

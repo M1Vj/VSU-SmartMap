@@ -28,7 +28,7 @@ export function buildFacilitySearchOptions(input: {
       suggestion.matchedRoomCode
         ? `Room ${suggestion.matchedRoomCode}`
         : null,
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(" - ");
 
     return {
       id: suggestion.facility.id,

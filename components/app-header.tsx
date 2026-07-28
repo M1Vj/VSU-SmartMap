@@ -98,10 +98,7 @@ export function AppHeader({ tabsSlot }: AppHeaderProps) {
         facilities: facilityOptions,
         query: trimmedSuggestionQuery,
         rooms: roomOptions,
-      }).map((option) => ({
-        ...option,
-        secondary: option.secondary.replaceAll(" · ", " - "),
-      })),
+      }),
     [facilityOptions, roomOptions, trimmedSuggestionQuery],
   );
 

@@ -31,7 +31,7 @@ test("maps ranked suggestions to one shared display model", () => {
     id: "11111111-1111-4111-8111-111111111111",
     facility,
     primary: "Department of Statistics",
-    secondary: "DSTAT · Academic · Room DSTAT-201",
+    secondary: "DSTAT - Academic - Room DSTAT-201",
     color: "#10b981",
     matchedRoomCode: "DSTAT-201",
   }]);
