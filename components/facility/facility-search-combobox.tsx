@@ -33,6 +33,9 @@ export type FacilitySearchComboboxProps = {
   className?: string;
   inputClassName?: string;
   dataTour?: string;
+  inputRef?: (input: HTMLInputElement | null) => void;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
   recents?: readonly RecentSearch[];
   onQueryChange: (value: string) => void;
   onSelect: (facility: Facility) => void;
@@ -56,6 +59,9 @@ export function FacilitySearchCombobox({
   className,
   inputClassName,
   dataTour,
+  inputRef,
+  ariaInvalid,
+  ariaDescribedBy,
   recents = [],
   onQueryChange,
   onSelect,
@@ -64,7 +70,7 @@ export function FacilitySearchCombobox({
   onFocusChange,
 }: FacilitySearchComboboxProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const internalInputRef = useRef<HTMLInputElement>(null);
   const generatedId = useId();
   const listboxId = `${id}-${generatedId.replace(/:/g, "")}-listbox`;
   const [focused, setFocused] = useState(false);
@@ -132,7 +138,7 @@ export function FacilitySearchCombobox({
     setOpen(false);
     setFocused(false);
     setHighlightedIndex(-1);
-    inputRef.current?.blur();
+    internalInputRef.current?.blur();
     onFocusChange?.(false);
   };
 
@@ -171,7 +177,10 @@ export function FacilitySearchCombobox({
       </label>
       <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
       <input
-        ref={inputRef}
+        ref={(node) => {
+          internalInputRef.current = node;
+          inputRef?.(node);
+        }}
         id={id}
         type="search"
         placeholder={placeholder}
@@ -181,6 +190,8 @@ export function FacilitySearchCombobox({
         aria-expanded={shouldRenderListbox}
         aria-controls={shouldRenderListbox ? listboxId : undefined}
         aria-activedescendant={activeOptionId}
+        aria-invalid={ariaInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
         className={cn(
           "w-full rounded-full border border-input bg-muted/50 pl-9 pr-4 py-2 text-sm shadow-sm transition-all focus-visible:bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           inputClassName,

@@ -40,6 +40,7 @@ export function SchedulePageClient() {
   const [loading, setLoading] = useState(true);
   const [storageError, setStorageError] = useState("");
   const [facilityQuery, setFacilityQuery] = useState("");
+  const [deferredFacilityQuery, setDeferredFacilityQuery] = useState("");
   const {
     facilities,
     rooms,
@@ -49,7 +50,7 @@ export function SchedulePageClient() {
     error: facilitiesError,
   } = useFacilitySearchData({
     enabled: true,
-    query: facilityQuery,
+    query: deferredFacilityQuery,
   });
   const [selectedDay, setSelectedDay] = useState<IsoWeekday>(() => getManilaWeekPosition(new Date()).weekday);
   const [now, setNow] = useState(() => new Date());
@@ -58,6 +59,11 @@ export function SchedulePageClient() {
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setDeferredFacilityQuery(facilityQuery), 250);
+    return () => clearTimeout(timeout);
+  }, [facilityQuery]);
 
   useEffect(() => {
     setLoading(true);

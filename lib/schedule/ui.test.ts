@@ -14,6 +14,7 @@ import {
   endTimeValueToMinute,
   facilitySelectionError,
   getFacilityOptionsStatus,
+  getActiveFacilityQuery,
   getMeetingGridPosition,
   mapScheduleIssuesToFormErrors,
   MAX_WEEK_GRID_OCCURRENCES,
@@ -21,6 +22,7 @@ import {
   selectedDayConflictNotices,
   getDayAgendaData,
   reconcileKnownFacilityIds,
+  shouldClearFacilitySelection,
   transitionRestoreDialogs,
   timeValueToMinute,
 } from "./ui";
@@ -90,6 +92,29 @@ test("facility display queries reinitialize from the newly edited course", () =>
     ),
     [""],
   );
+});
+
+test("visible facility edits clear only a non-equivalent saved selection", () => {
+  assert.equal(
+    shouldClearFacilitySelection(
+      "  department OF statistics ",
+      "Department of Statistics",
+    ),
+    false,
+  );
+  assert.equal(
+    shouldClearFacilitySelection("DSTAT-201", "Department of Statistics"),
+    true,
+  );
+  assert.equal(shouldClearFacilitySelection("anything", undefined), false);
+});
+
+test("refocusing a meeting reactivates only that meeting's local query", () => {
+  assert.equal(
+    getActiveFacilityQuery(["Department of Statistics", "Admin"], 0),
+    "Department of Statistics",
+  );
+  assert.equal(getActiveFacilityQuery(["Department of Statistics"], 3), "");
 });
 
 test("converts HTML time values to integer minutes and back", () => {
@@ -326,7 +351,10 @@ test("facility option status distinguishes loading, cached fallback, and unavail
       error: null,
       facilityCount: 2,
     }),
-    { message: "Showing saved campus facilities while offline.", tone: "warning" },
+    {
+      message: "Showing saved campus facilities while refreshing…",
+      tone: "muted",
+    },
   );
   assert.deepEqual(
     getFacilityOptionsStatus({

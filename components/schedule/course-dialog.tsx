@@ -26,9 +26,11 @@ import {
   buildFacilityLocationLabel,
   endTimeValueToMinute,
   facilitySelectionError,
+  getActiveFacilityQuery,
   getFacilityOptionsStatus,
   mapScheduleIssuesToFormErrors,
   minuteToTimeValue,
+  shouldClearFacilitySelection,
   timeValueToMinute,
 } from "@/lib/schedule/ui";
 import type { FacilitySearchOption } from "@/lib/map/facility-search-model";
@@ -181,6 +183,9 @@ export function CourseDialog({
   };
   const errorFor = (field: FieldPath<CourseForm>) =>
     form.getFieldState(field, form.formState).error?.message;
+  const focusFacilityInput = (index: number) => {
+    document.getElementById(`facility-${index}`)?.focus();
+  };
 
   const submit = form.handleSubmit(async (value) => {
     const knownFacilityIds = facilities.map((facility) => facility.id);
@@ -195,8 +200,9 @@ export function CourseDialog({
       form.setError(
         `meetings.${missingFacility}.facilityId`,
         { type: "validate", message: "Choose a valid campus facility." },
-        { shouldFocus: true },
+        { shouldFocus: false },
       );
+      focusFacilityInput(missingFacility);
       focusSummary();
       return;
     }
@@ -253,7 +259,15 @@ export function CourseDialog({
         focusSummary();
       }
     }
-  }, focusSummary);
+  }, (errors) => {
+    const invalidFacility = Array.isArray(errors.meetings)
+      ? errors.meetings.findIndex((meeting) => Boolean(meeting?.facilityId))
+      : -1;
+    if (invalidFacility >= 0) {
+      focusFacilityInput(invalidFacility);
+    }
+    focusSummary();
+  });
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !saving && onClose()}>
@@ -500,6 +514,13 @@ export function CourseDialog({
                               Boolean(facilitiesError) && facilities.length === 0
                             }
                             unavailableMessage="Facility search is unavailable. Try again online or choose Other location."
+                            ariaInvalid={Boolean(facilityError)}
+                            ariaDescribedBy={[
+                              facilityError ? `facility-${index}-error` : null,
+                              facilityStatus && facilitySource === "cache"
+                                ? `facility-${index}-status`
+                                : null,
+                            ].filter(Boolean).join(" ") || undefined}
                             placeholder="Search by building, code, alias, or room..."
                             inputClassName={
                               facilityError
@@ -507,12 +528,36 @@ export function CourseDialog({
                                 : undefined
                             }
                             onQueryChange={(query) => {
+                              const selectedFacilityId = form.getValues(
+                                `meetings.${index}.facilityId`,
+                              );
+                              const selectedFacility = facilities.find(
+                                (facility) => facility.id === selectedFacilityId,
+                              );
+                              if (
+                                shouldClearFacilitySelection(
+                                  query,
+                                  selectedFacility?.name,
+                                )
+                              ) {
+                                form.setValue(
+                                  `meetings.${index}.facilityId`,
+                                  "",
+                                  { shouldDirty: true, shouldValidate: true },
+                                );
+                              }
                               setFacilityQueries((current) => {
                                 const next = [...current];
                                 next[index] = query;
                                 return next;
                               });
                               onFacilityQueryChange(query);
+                            }}
+                            onFocusChange={(focused) => {
+                              if (!focused) return;
+                              onFacilityQueryChange(
+                                getActiveFacilityQuery(facilityQueries, index),
+                              );
                             }}
                             onSelect={(facility) => {
                               const selected = applyFacilitySearchSelection(

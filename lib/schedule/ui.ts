@@ -34,6 +34,27 @@ export function buildFacilityDisplayQueries(
   return meetings.map((meeting) => namesById.get(meeting.facilityId) ?? "");
 }
 
+function normalizeFacilityQuery(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function shouldClearFacilitySelection(
+  query: string,
+  selectedFacilityName: string | undefined,
+): boolean {
+  return Boolean(
+    selectedFacilityName &&
+    normalizeFacilityQuery(query) !== normalizeFacilityQuery(selectedFacilityName),
+  );
+}
+
+export function getActiveFacilityQuery(
+  queries: readonly string[],
+  meetingIndex: number,
+): string {
+  return queries[meetingIndex] ?? "";
+}
+
 export function timeValueToMinute(value: string): number {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
   if (!match) throw new RangeError("Choose a valid time.");
@@ -259,6 +280,12 @@ export function getFacilityOptionsStatus({
   facilityCount: number;
 }): { message: string; tone: "muted" | "warning" } | null {
   if (source === "cache" && facilityCount > 0) {
+    if (loading && !error) {
+      return {
+        message: "Showing saved campus facilities while refreshing…",
+        tone: "muted",
+      };
+    }
     return {
       message: "Showing saved campus facilities while offline.",
       tone: "warning",

@@ -95,3 +95,37 @@ test("schedule dialog exposes real loading and unavailable combobox states once"
   );
   assert.doesNotMatch(source, /suppressResults=\{\s*Boolean\(facilitiesError\)/);
 });
+
+test("schedule facility input owns visible validation, focus, and query reactivation", async () => {
+  const comboboxSource = await readFile(
+    new URL("./facility-search-combobox.tsx", import.meta.url),
+    "utf8",
+  );
+  const dialogSource = await readFile(
+    new URL("../schedule/course-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  for (const prop of ["inputRef", "ariaInvalid", "ariaDescribedBy"]) {
+    assert.match(comboboxSource, new RegExp(prop));
+  }
+  for (const prop of ["ariaInvalid", "ariaDescribedBy"]) {
+    assert.match(dialogSource, new RegExp(prop));
+  }
+  assert.match(dialogSource, /onFocusChange=\{\(focused\) =>/);
+  assert.match(dialogSource, /onFacilityQueryChange\(\s*getActiveFacilityQuery/);
+  assert.match(dialogSource, /focusFacilityInput\(missingFacility\)/);
+  assert.match(dialogSource, /document\.getElementById\(`facility-\$\{index\}`\)\?\.focus\(\)/);
+  assert.doesNotMatch(dialogSource, /inputRef=\{form\.register/);
+});
+
+test("schedule defers the lifted room-search query without delaying visible text", async () => {
+  const source = await readFile(
+    new URL("../schedule/schedule-page-client.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /setTimeout\(\(\) => setDeferredFacilityQuery\(facilityQuery\), 250\)/);
+  assert.match(source, /query: deferredFacilityQuery/);
+  assert.match(source, /onFacilityQueryChange=\{setFacilityQuery\}/);
+});
