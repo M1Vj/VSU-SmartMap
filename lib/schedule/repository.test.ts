@@ -11,8 +11,17 @@ import {
   ScheduleCourseLimitError,
   ScheduleRepository,
   ScheduleStorageError,
-  type ScheduleStore,
+  type ScopedScheduleStore,
 } from "./repository";
+import {
+  GUEST_SCHEDULE_SCOPE,
+  accountScheduleScope,
+  type ScheduleScope,
+} from "./scope";
+import {
+  scopedCourseKey,
+  type StoredScopedScheduleCourse,
+} from "./local-types";
 
 const COURSE_ID = "123e4567-e89b-42d3-a456-426614174000";
 const OTHER_ID = "123e4567-e89b-42d3-a456-426614174002";
@@ -43,53 +52,85 @@ function courseId(index: number): string {
   return `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
 }
 
-class FakeStore implements ScheduleStore {
-  rows: unknown[];
+class FakeStore implements ScopedScheduleStore {
+  rows: StoredScopedScheduleCourse[];
   replaceCalls = 0;
 
-  constructor(rows: unknown[] = []) {
-    this.rows = structuredClone(rows);
+  constructor(
+    rows: unknown[] = [],
+    scope: ScheduleScope = GUEST_SCHEDULE_SCOPE,
+  ) {
+    this.rows = rows.map((course) => {
+      const id =
+        typeof course === "object" && course !== null && "id" in course
+          ? String(course.id)
+          : "corrupt";
+      return {
+        key: scopedCourseKey(scope, id),
+        scope,
+        id,
+        course: structuredClone(course) as ScheduleCourse,
+      };
+    });
   }
 
-  async list(): Promise<unknown[]> {
-    return structuredClone(this.rows);
-  }
-
-  async put(course: ScheduleCourse, maximumCourses: number): Promise<void> {
-    const index = this.rows.findIndex(
-      (row) => typeof row === "object" && row !== null && "id" in row && row.id === course.id,
+  async list(scope: ScheduleScope): Promise<unknown[]> {
+    return structuredClone(
+      this.rows.filter((row) => row.scope === scope).map((row) => row.course),
     );
-    if (index >= 0) this.rows[index] = structuredClone(course);
+  }
+
+  async put(
+    scope: ScheduleScope,
+    course: ScheduleCourse,
+    maximumCourses: number,
+  ): Promise<void> {
+    const key = scopedCourseKey(scope, course.id);
+    const index = this.rows.findIndex((row) => row.key === key);
+    if (index >= 0) {
+      this.rows[index] = { key, scope, id: course.id, course: structuredClone(course) };
+    }
     else {
-      if (this.rows.length >= maximumCourses) {
+      if (this.rows.filter((row) => row.scope === scope).length >= maximumCourses) {
         throw new ScheduleCourseLimitError();
       }
-      this.rows.push(structuredClone(course));
+      this.rows.push({ key, scope, id: course.id, course: structuredClone(course) });
     }
   }
 
-  async remove(id: string): Promise<void> {
-    this.rows = this.rows.filter(
-      (row) => !(typeof row === "object" && row !== null && "id" in row && row.id === id),
-    );
+  async remove(scope: ScheduleScope, id: string): Promise<void> {
+    const key = scopedCourseKey(scope, id);
+    this.rows = this.rows.filter((row) => row.key !== key);
   }
 
-  async clear(): Promise<void> {
-    this.rows = [];
+  async clear(scope: ScheduleScope): Promise<void> {
+    this.rows = this.rows.filter((row) => row.scope !== scope);
   }
 
-  async replaceAll(courses: ScheduleCourse[], maximumCourses: number): Promise<void> {
+  async replaceAll(
+    scope: ScheduleScope,
+    courses: ScheduleCourse[],
+    maximumCourses: number,
+  ): Promise<void> {
     if (courses.length > maximumCourses) {
       throw new ScheduleCourseLimitError();
     }
     this.replaceCalls += 1;
-    this.rows = structuredClone(courses);
+    this.rows = this.rows.filter((row) => row.scope !== scope);
+    this.rows.push(
+      ...courses.map((course) => ({
+        key: scopedCourseKey(scope, course.id),
+        scope,
+        id: course.id,
+        course: structuredClone(course),
+      })),
+    );
   }
 }
 
 test("CRUD methods persist normalized courses and await completion", async () => {
   const store = new FakeStore();
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
   const saved = await repository.put({
     ...storedCourse(),
     code: "  CS 101  ",
@@ -110,7 +151,7 @@ test("CRUD methods persist normalized courses and await completion", async () =>
 
 test("put validates before writing", async () => {
   const store = new FakeStore();
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
 
   await assert.rejects(
     repository.put({ ...storedCourse(), code: "" }),
@@ -125,7 +166,7 @@ test("put refuses a new course at the shared limit but still permits editing", a
       storedCourse(courseId(index)),
     ),
   );
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
 
   await assert.rejects(
     repository.put(storedCourse(courseId(MAX_SCHEDULE_COURSES))),
@@ -143,7 +184,7 @@ test("put refuses a new course at the shared limit but still permits editing", a
 
 test("list parses stored rows without changing persisted timestamps", async () => {
   const store = new FakeStore([storedCourse()]);
-  const result = await new ScheduleRepository(() => store).list();
+  const result = await new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store).list();
 
   assert.equal(result[0]?.createdAt, CREATED_AT);
   assert.equal(result[0]?.updatedAt, UPDATED_AT);
@@ -151,7 +192,7 @@ test("list parses stored rows without changing persisted timestamps", async () =
 
 test("replaceAll validates all courses before one atomic store call", async () => {
   const store = new FakeStore([storedCourse()]);
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
 
   const result = await repository.replaceAll([
     storedCourse(COURSE_ID),
@@ -159,7 +200,7 @@ test("replaceAll validates all courses before one atomic store call", async () =
   ]);
 
   assert.equal(store.replaceCalls, 1);
-  assert.deepEqual(store.rows, result);
+  assert.deepEqual(await repository.list(), result);
 });
 
 test("invalid or duplicate replacement makes no store call and leaves data unchanged", async () => {
@@ -169,18 +210,18 @@ test("invalid or duplicate replacement makes no store call and leaves data uncha
   ]) {
     const original = [storedCourse(OTHER_ID)];
     const store = new FakeStore(original);
-    const repository = new ScheduleRepository(() => store);
+    const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
 
     await assert.rejects(repository.replaceAll(replacement), ScheduleValidationError);
     assert.equal(store.replaceCalls, 0);
-    assert.deepEqual(store.rows, original);
+    assert.deepEqual(await repository.list(), original);
   }
 });
 
 test("replaceAll rejects schedules above the shared course limit atomically", async () => {
   const original = [storedCourse(OTHER_ID)];
   const store = new FakeStore(original);
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
   const oversized = Array.from(
     { length: MAX_SCHEDULE_COURSES + 1 },
     (_, index) => storedCourse(courseId(index)),
@@ -191,11 +232,12 @@ test("replaceAll rejects schedules above the shared course limit atomically", as
     ScheduleCourseLimitError,
   );
   assert.equal(store.replaceCalls, 0);
-  assert.deepEqual(store.rows, original);
+  assert.deepEqual(await repository.list(), original);
 });
 
 test("malformed stored rows become a safe corrupt storage error", async () => {
   const repository = new ScheduleRepository(
+    GUEST_SCHEDULE_SCOPE,
     () => new FakeStore([{ secret: "must not leak" }]),
   );
 
@@ -222,7 +264,7 @@ test("storage failures have stable quota, unavailable, and unknown classificatio
     };
 
     await assert.rejects(
-      new ScheduleRepository(() => store).list(),
+      new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store).list(),
       (error: unknown) => {
         assert.ok(error instanceof ScheduleStorageError);
         assert.equal(error.code, code);
@@ -267,7 +309,7 @@ test("nested Dexie bulk failures retain quota and unavailable classifications", 
     };
 
     await assert.rejects(
-      new ScheduleRepository(() => store).replaceAll([storedCourse()]),
+      new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store).replaceAll([storedCourse()]),
       (error: unknown) => {
         assert.ok(error instanceof ScheduleStorageError);
         assert.equal(error.code, code);
@@ -280,13 +322,13 @@ test("nested Dexie bulk failures retain quota and unavailable classifications", 
 
 test("remove rejects invalid IDs without touching storage", async () => {
   const store = new FakeStore([storedCourse()]);
-  const repository = new ScheduleRepository(() => store);
+  const repository = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
 
   await assert.rejects(repository.remove("not-a-uuid"), ScheduleValidationError);
-  assert.deepEqual(store.rows, [storedCourse()]);
+  assert.deepEqual(await repository.list(), [storedCourse()]);
 });
 
-test("database schema adds only the exact version 10 schedule table declaration", async () => {
+test("database schema preserves v10 and adds one v11 declaration", async () => {
   const source = await readFile(new URL("../db.ts", import.meta.url), "utf8");
   const version10 = source.match(
     /this\.version\(10\)\.stores\(\{\s*schedule_courses:\s*["']id, code, updatedAt["'],?\s*\}\);/,
@@ -295,4 +337,30 @@ test("database schema adds only the exact version 10 schedule table declaration"
   assert.ok(version10, "expected exact schedule_courses v10 schema");
   assert.match(source, /this\.version\(9\)\.stores\(\{\s*boarding_houses:\s*["']id, name, slug["'],?\s*\}\);/);
   assert.equal((source.match(/this\.version\(10\)/g) ?? []).length, 1);
+  assert.equal((source.match(/this\.version\(11\)/g) ?? []).length, 1);
+});
+
+test("repositories sharing one store isolate guest and account CRUD", async () => {
+  const store = new FakeStore();
+  const accountScope = accountScheduleScope(
+    "11111111-1111-4111-8111-111111111111",
+  );
+  const guest = new ScheduleRepository(GUEST_SCHEDULE_SCOPE, () => store);
+  const account = new ScheduleRepository(accountScope, () => store);
+
+  await guest.put(storedCourse());
+  await account.put({ ...storedCourse(), title: "Account title" });
+  assert.equal((await guest.list())[0]?.title, "Introduction to Computing");
+  assert.equal((await account.list())[0]?.title, "Account title");
+  assert.deepEqual(
+    store.rows.map((row) => row.key).sort(),
+    [
+      scopedCourseKey(GUEST_SCHEDULE_SCOPE, COURSE_ID),
+      scopedCourseKey(accountScope, COURSE_ID),
+    ].sort(),
+  );
+
+  await guest.clear();
+  assert.deepEqual(await guest.list(), []);
+  assert.equal((await account.list())[0]?.title, "Account title");
 });

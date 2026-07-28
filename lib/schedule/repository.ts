@@ -9,6 +9,14 @@ import {
   normalizeScheduleCourse,
   parseStoredScheduleCourse,
 } from "./validation";
+import {
+  GUEST_SCHEDULE_SCOPE,
+  type ScheduleScope,
+} from "./scope";
+import {
+  scopedCourseKey,
+  type StoredScopedScheduleCourse,
+} from "./local-types";
 
 export type ScheduleStorageErrorCode =
   | "unavailable"
@@ -42,15 +50,23 @@ export class ScheduleCourseLimitError extends Error {
   }
 }
 
-export interface ScheduleStore {
-  list(): Promise<unknown[]>;
-  put(course: ScheduleCourse, maximumCourses: number): Promise<void>;
-  remove(id: string): Promise<void>;
-  clear(): Promise<void>;
-  replaceAll(courses: ScheduleCourse[], maximumCourses: number): Promise<void>;
+export interface ScopedScheduleStore {
+  list(scope: ScheduleScope): Promise<unknown[]>;
+  put(
+    scope: ScheduleScope,
+    course: ScheduleCourse,
+    maximumCourses: number,
+  ): Promise<void>;
+  remove(scope: ScheduleScope, id: string): Promise<void>;
+  clear(scope: ScheduleScope): Promise<void>;
+  replaceAll(
+    scope: ScheduleScope,
+    courses: ScheduleCourse[],
+    maximumCourses: number,
+  ): Promise<void>;
 }
 
-export type ScheduleStoreFactory = () => ScheduleStore;
+export type ScopedScheduleStoreFactory = () => ScopedScheduleStore;
 
 const QUOTA_ERROR_NAMES = new Set([
   "QuotaExceededError",
@@ -120,51 +136,74 @@ function storageError(error: unknown): ScheduleStorageError {
   return new ScheduleStorageError("unknown");
 }
 
-function productionStore(): ScheduleStore {
+function productionStore(): ScopedScheduleStore {
   if (typeof window === "undefined" || !db) {
     throw new ScheduleStorageError("unavailable");
   }
 
   return {
-    async list() {
-      return db.schedule_courses.toArray();
+    async list(scope) {
+      const rows = await db.schedule_scoped_courses
+        .where("scope")
+        .equals(scope)
+        .toArray();
+      return rows.map((row) => row.course);
     },
-    async put(course, maximumCourses) {
-      await db.transaction("rw", db.schedule_courses, async () => {
-        const existing = await db.schedule_courses.get(course.id);
+    async put(scope, course, maximumCourses) {
+      await db.transaction("rw", db.schedule_scoped_courses, async () => {
+        const key = scopedCourseKey(scope, course.id);
+        const existing = await db.schedule_scoped_courses.get(key);
         if (
           existing === undefined &&
-          (await db.schedule_courses.count()) >= maximumCourses
+          (await db.schedule_scoped_courses.where("scope").equals(scope).count()) >=
+            maximumCourses
         ) {
           throw new ScheduleCourseLimitError();
         }
-        await db.schedule_courses.put(course);
+        await db.schedule_scoped_courses.put({
+          key,
+          scope,
+          id: course.id,
+          course,
+          ...(existing?.serverRevision === undefined
+            ? {}
+            : { serverRevision: existing.serverRevision }),
+        });
       });
     },
-    async remove(id) {
-      await db.schedule_courses.delete(id);
+    async remove(scope, id) {
+      await db.schedule_scoped_courses.delete(scopedCourseKey(scope, id));
     },
-    async clear() {
-      await db.schedule_courses.clear();
+    async clear(scope) {
+      await db.schedule_scoped_courses.where("scope").equals(scope).delete();
     },
-    async replaceAll(courses, maximumCourses) {
+    async replaceAll(scope, courses, maximumCourses) {
       if (courses.length > maximumCourses) {
         throw new ScheduleCourseLimitError();
       }
-      await db.transaction("rw", db.schedule_courses, async () => {
-        await db.schedule_courses.clear();
-        await db.schedule_courses.bulkAdd(courses);
+      await db.transaction("rw", db.schedule_scoped_courses, async () => {
+        await db.schedule_scoped_courses.where("scope").equals(scope).delete();
+        const rows: StoredScopedScheduleCourse[] = courses.map((course) => ({
+          key: scopedCourseKey(scope, course.id),
+          scope,
+          id: course.id,
+          course,
+        }));
+        await db.schedule_scoped_courses.bulkAdd(rows);
       });
     },
   };
 }
 
 export class ScheduleRepository {
-  constructor(private readonly storeFactory: ScheduleStoreFactory = productionStore) {}
+  constructor(
+    private readonly scope: ScheduleScope = GUEST_SCHEDULE_SCOPE,
+    private readonly storeFactory: ScopedScheduleStoreFactory = productionStore,
+  ) {}
 
   async list(): Promise<ScheduleCourse[]> {
     try {
-      const rows = await this.storeFactory().list();
+      const rows = await this.storeFactory().list(this.scope);
       try {
         return rows.map(parseStoredScheduleCourse);
       } catch (error) {
@@ -181,7 +220,7 @@ export class ScheduleRepository {
   async put(value: unknown): Promise<ScheduleCourse> {
     const course = normalizeScheduleCourse(value);
     try {
-      await this.storeFactory().put(course, MAX_SCHEDULE_COURSES);
+      await this.storeFactory().put(this.scope, course, MAX_SCHEDULE_COURSES);
       return course;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;
@@ -196,7 +235,7 @@ export class ScheduleRepository {
       ]);
     }
     try {
-      await this.storeFactory().remove(id.trim().toLowerCase());
+      await this.storeFactory().remove(this.scope, id.trim().toLowerCase());
     } catch (error) {
       throw storageError(error);
     }
@@ -204,7 +243,7 @@ export class ScheduleRepository {
 
   async clear(): Promise<void> {
     try {
-      await this.storeFactory().clear();
+      await this.storeFactory().clear(this.scope);
     } catch (error) {
       throw storageError(error);
     }
@@ -226,7 +265,11 @@ export class ScheduleRepository {
     }
 
     try {
-      await this.storeFactory().replaceAll(courses, MAX_SCHEDULE_COURSES);
+      await this.storeFactory().replaceAll(
+        this.scope,
+        courses,
+        MAX_SCHEDULE_COURSES,
+      );
       return courses;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;
