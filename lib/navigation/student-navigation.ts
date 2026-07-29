@@ -119,3 +119,7 @@ export function studentDestinationForPath(pathname: string): StudentDestinationI
 export function studentDestinationRoute(destinationId: StudentDestinationId): string {
   return STUDENT_DESTINATIONS.find(({ id }) => id === destinationId)?.route ?? "/";
 }
+
+export function shouldShowStudentNavigation(pathname: string): boolean {
+  return pathname !== "/info";
+}

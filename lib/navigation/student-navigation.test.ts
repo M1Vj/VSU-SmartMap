@@ -12,6 +12,7 @@ import {
   readVisibleStudentDestinationsFromProvider,
   resetVisibleStudentDestinations,
   serializeVisibleStudentDestinations,
+  shouldShowStudentNavigation,
   studentDestinationForPath,
   studentDestinationRoute,
   toggleVisibleStudentDestination,
@@ -66,6 +67,12 @@ test("studentDestinationForPath recognizes exact and nested destination routes",
 test("studentDestinationRoute returns the centralized route", () => {
   assert.equal(studentDestinationRoute("schedule"), "/schedule");
   assert.equal(studentDestinationRoute("map"), "/");
+});
+
+test("student navigation visibility matches routes that render the shared tabs", () => {
+  assert.equal(shouldShowStudentNavigation("/"), true);
+  assert.equal(shouldShowStudentNavigation("/schedule"), true);
+  assert.equal(shouldShowStudentNavigation("/info"), false);
 });
 
 test("every default-visible destination resolves to a student page", () => {
