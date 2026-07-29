@@ -1,5 +1,8 @@
 import type { ScheduleSyncState } from "../local-types";
 import type { ScheduleScope } from "../scope";
+import { isSupabasePublicConfigValid } from "@/lib/supabase/public-config";
+
+export { isSupabasePublicConfigValid as isScheduleSupabasePublicConfigValid };
 
 export type ScheduleAuthUser = { id: string; email?: string };
 
@@ -50,33 +53,12 @@ function missingSession(error: unknown): boolean {
   );
 }
 
-export function isScheduleSupabasePublicConfigValid(
-  url: string | undefined,
-  key: string | undefined,
-): boolean {
-  if (
-    !url ||
-    url !== url.trim() ||
-    !key ||
-    key !== key.trim()
-  ) return false;
-  try {
-    const parsed = new URL(url);
-    return (
-      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      Boolean(parsed.hostname)
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function createScheduleAuthClient<T>(
   url: string | undefined,
   key: string | undefined,
   factory: () => T,
 ): { kind: "ready"; client: T } | { kind: "unavailable" } {
-  if (!isScheduleSupabasePublicConfigValid(url, key)) {
+  if (!isSupabasePublicConfigValid(url, key)) {
     return { kind: "unavailable" };
   }
   try {
