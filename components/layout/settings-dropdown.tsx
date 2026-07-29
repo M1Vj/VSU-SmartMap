@@ -274,14 +274,14 @@ export function SettingsDropdown() {
           {isCompactSettings && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="justify-center p-0 text-[10px] text-muted-foreground">
+              <DropdownMenuItem asChild className="justify-center p-0 text-[10px] text-muted-foreground md:hidden">
                 <a
                   href="https://github.com/M1Vj"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full justify-center py-1 text-center"
                 >
-                  Developed by M1Vj
+                  Developed by Vj F Mabansag
                 </a>
               </DropdownMenuItem>
             </>
