@@ -17,7 +17,7 @@ test("the public map places the developer link inside Leaflet attribution", asyn
   assert.match(source, /<DeveloperAttribution \/>/);
 });
 
-test("mobile attribution stays above the fixed student navigation", async () => {
+test("mobile attribution meets the top edge of the fixed student navigation", async () => {
   const source = await readMapWrapperSource();
 
   assert.match(
@@ -26,7 +26,7 @@ test("mobile attribution stays above the fixed student navigation", async () => 
   );
   assert.match(
     source,
-    /\.leaflet-bottom\.leaflet-right\s*\{[\s\S]*margin-bottom:\s*calc\(5\.25rem \+ env\(safe-area-inset-bottom\)\)/,
+    /\.leaflet-bottom\.leaflet-right\s*\{[\s\S]*margin-bottom:\s*calc\(4\.5625rem \+ env\(safe-area-inset-bottom\)\)/,
   );
 });
 
