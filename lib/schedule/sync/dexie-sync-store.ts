@@ -100,7 +100,6 @@ export function createDexieScheduleSyncLocalStore(
   ) => {
     const key = scopedCourseKey(scope, mutation.courseId);
     const existing = await database.schedule_conflicts.get(key);
-    if (existing) return;
     let remoteCourse;
     if (remote?.payload) {
       try {
@@ -108,6 +107,16 @@ export function createDexieScheduleSyncLocalStore(
       } catch {
         remoteCourse = undefined;
       }
+    }
+    if (existing) {
+      if (!remote) return;
+      await database.schedule_conflicts.put({
+        ...existing,
+        ...(remoteCourse ? { remote: remoteCourse } : { remote: undefined }),
+        remoteDeleted: remote.payload === null,
+        serverRevision: remote.revision,
+      });
+      return;
     }
     const row = await database.schedule_scoped_courses.get(key);
     await database.schedule_conflicts.put({
@@ -186,6 +195,9 @@ export function createDexieScheduleSyncLocalStore(
           const current = await currentMutation(scope, mutation.courseId);
           if (current?.mutationId !== mutation.mutationId) return;
           await storeConflict(scope, current, result?.remote);
+          if (current.sequence !== undefined) {
+            await database.schedule_outbox.delete(current.sequence);
+          }
         },
       );
     },
@@ -219,6 +231,28 @@ export function createDexieScheduleSyncLocalStore(
             const key = scopedCourseKey(scope, cloud.id);
             const local = await database.schedule_scoped_courses.get(key);
             const pending = await currentMutation(scope, cloud.id);
+            const existingReview = await database.schedule_conflicts.get(key);
+            if (
+              existingReview &&
+              existingReview.reviewKind !== "quarantine"
+            ) {
+              await storeConflict(
+                scope,
+                pending ?? {
+                  scope,
+                  courseId: cloud.id,
+                  mutationId: "00000000-0000-4000-8000-000000000000",
+                  expectedRevision: existingReview.serverRevision,
+                  operation: existingReview.local ? "upsert" : "delete",
+                  ...(existingReview.local
+                    ? { course: existingReview.local }
+                    : {}),
+                  createdAt: cloud.updatedAt,
+                },
+                cloud,
+              );
+              continue;
+            }
             const decision = resolve({
               accountLocal: local
                 ? {

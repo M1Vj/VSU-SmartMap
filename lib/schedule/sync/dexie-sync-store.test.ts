@@ -110,8 +110,9 @@ test("ongoing local conflict resolution clears review and queues one rebased ups
   await database.delete();
 });
 
-test("push conflict preserves the pending mutation and later pull cannot overwrite local", async () => {
+test("push conflict pauses the mutation while later pull preserves local review data", async () => {
   const database = new VSUDatabase();
+  const laterId = "99999999-9999-4999-8999-999999999999";
   const local = course("Unsynced local");
   const mutation = {
     scope, courseId: id, mutationId, expectedRevision: 2,
@@ -122,6 +123,13 @@ test("push conflict preserves the pending mutation and later pull cannot overwri
     key: scopedCourseKey(scope, id), scope, id, course: local, serverRevision: 2,
   });
   await database.schedule_outbox.add(mutation);
+  await database.schedule_outbox.add({
+    ...mutation,
+    sequence: undefined,
+    courseId: laterId,
+    mutationId: "88888888-8888-4888-8888-888888888888",
+    course: { ...local, id: laterId, title: "Later course" },
+  });
   const store = createDexieScheduleSyncLocalStore(database);
   await store.recordPushConflict(scope, mutation, {
     kind: "conflict", courseId: id, remote: {
@@ -136,8 +144,16 @@ test("push conflict preserves the pending mutation and later pull cannot overwri
     updatedAt: "2026-01-01T00:00:00.000Z",
   }], 3, resolvePulledRow);
   assert.equal(await store.pendingCount(scope), 1);
+  assert.deepEqual(
+    (await store.listOutbox(scope)).map(({ courseId }) => courseId),
+    [laterId],
+  );
   assert.equal((await database.schedule_scoped_courses.get(scopedCourseKey(scope, id)))?.course.title, "Unsynced local");
   assert.equal((await store.reviewCounts(scope)).conflicts, 1);
+  assert.equal(
+    (await database.schedule_conflicts.get(scopedCourseKey(scope, id)))?.remote?.title,
+    "Remote",
+  );
   await database.delete();
 });
 
