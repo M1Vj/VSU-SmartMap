@@ -39,8 +39,9 @@ test("site credit remains transparent over every public page", async () => {
 
   assert.match(source, /bg-transparent/);
   assert.match(source, /-mt-5/);
-  assert.match(source, /pathname === "\/"/);
-  assert.match(source, /-translate-y-5/);
+  assert.match(source, /if \(pathname === "\/"\)/);
+  assert.match(source, /aria-hidden="true"/);
+  assert.match(source, /shrink-0 md:hidden/);
   assert.doesNotMatch(source, /\bbg-background\b/);
   assert.doesNotMatch(source, /\bborder-t\b/);
 });

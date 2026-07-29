@@ -15,6 +15,9 @@ import type { LatLngBoundsExpression } from "leaflet";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 
+const DEVELOPER_ATTRIBUTION =
+  '<a href="https://github.com/M1Vj" target="_blank" rel="noopener noreferrer">Developed by Vj F Mabansag</a>';
+
 type MapWrapperProps = {
   children?: React.ReactNode;
   className?: string;
@@ -22,6 +25,20 @@ type MapWrapperProps = {
 };
 
 // Component to handle bounds changes
+function DeveloperAttribution() {
+  const map = useMap();
+
+  useEffect(() => {
+    map.attributionControl.addAttribution(DEVELOPER_ATTRIBUTION);
+
+    return () => {
+      map.attributionControl.removeAttribution(DEVELOPER_ATTRIBUTION);
+    };
+  }, [map]);
+
+  return null;
+}
+
 function MapBoundsHandler({ bounds }: { bounds: LatLngBoundsExpression | null }) {
   const map = useMap();
   
@@ -178,6 +195,7 @@ export function MapWrapper({ children, className, bounds }: MapWrapperProps) {
         ) : (
           <OpenFreeMapVectorLayer key={mapStyleUrl} styleUrl={mapStyleUrl} />
         )}
+        <DeveloperAttribution />
         <SmoothZoomControl position="bottomleft" />
         <SmoothWheelZoom />
         <MapBoundsHandler bounds={bounds ?? null} />
