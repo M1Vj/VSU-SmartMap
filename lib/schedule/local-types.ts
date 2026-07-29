@@ -25,6 +25,8 @@ export interface ScheduleSyncState {
   cursor?: number;
   consentEnabled?: boolean;
   reconciliationCompleted?: boolean;
+  lastSuccessfulSyncAt?: string;
+  lastError?: "sync-failed";
 }
 
 export interface StoredScheduleConflict {
@@ -34,6 +36,7 @@ export interface StoredScheduleConflict {
   local?: ScheduleCourse;
   remote?: ScheduleCourse;
   serverRevision: number;
+  reviewKind?: "conflict" | "quarantine";
 }
 
 export const scopedCourseKey = (scope: ScheduleScope, id: string): string =>
