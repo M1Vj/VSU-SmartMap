@@ -72,12 +72,19 @@ test("chat input keeps mobile composer status readable without overlap", async (
 
   assert.match(
     source,
-    /<div className="relative flex-1">[\s\S]*?<textarea[\s\S]*?<div className="absolute right-3 top-2[^"]*">[\s\S]*?\{remaining > 0 \? `\$\{remaining\} chats left` : "Limit reached"\}[\s\S]*?<\/div>[\s\S]*?<div className="absolute bottom-2 right-3[^"]*">[\s\S]*?\{value\.length\}\/\{maxLength\}[\s\S]*?<\/div>/,
+    /<div className="relative flex-1[^"]*">[\s\S]*?<div className="flex items-center justify-between gap-2">[\s\S]*?<label\s+htmlFor="chat-message"[^>]*>[\s\S]*?\{isLimitReached \? "Daily chat limit reached" : placeholder\}[\s\S]*?<\/label>[\s\S]*?\{typeof remaining === "number" && \([\s\S]*?<span className="[^"]*\bfont-medium\b[^"]*\btext-foreground\b[^"]*">[\s\S]*?\{remaining > 0 \? `\$\{remaining\} chats left` : "Limit reached"\}[\s\S]*?<\/span>[\s\S]*?<\/div>[\s\S]*?<textarea[\s\S]*?\bid="chat-message"/,
   );
-  assert.match(textareaClasses, /\bmin-h-14\b/);
-  assert.match(textareaClasses, /\bpr-24\b/);
-  assert.match(textareaClasses, /\bpb-6\b/);
+  assert.doesNotMatch(textareaClasses, /\bpr-24\b/);
   assert.match(textareaClasses, /\btext-base\b/);
+  assert.match(source, /<label\s+htmlFor="chat-message"/);
+  assert.match(
+    source,
+    /<div className="absolute bottom-2 right-3[^"]*\btext-foreground\b[^"]*">\s*\{value\.length\}\/\{maxLength\}\s*<\/div>/,
+  );
+  assert.doesNotMatch(
+    source,
+    /(?:chats left|Limit reached)[\s\S]{0,200}\btext-muted-foreground\b/,
+  );
   assert.match(source, /className="h-11 w-11 shrink-0"/);
   assert.match(
     source,
