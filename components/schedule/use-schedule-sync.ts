@@ -221,8 +221,10 @@ export function useScheduleSync(input: {
       throw new Error("Schedule sync scope changed.");
     }
     const active = runtime.current;
-    runtime.current = undefined;
-    if (active) await active.stopAndDrain();
+    if (active) {
+      await active.stopAndDrain();
+      if (runtime.current === active) runtime.current = undefined;
+    }
   }, [input.scope]);
   const syncNow = useCallback(() => {
     if (runtime.current) runtime.current.syncNow();

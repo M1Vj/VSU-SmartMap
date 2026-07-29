@@ -143,3 +143,69 @@ test("stopAndDrain rejects on timeout instead of clearing through a hanging sync
   assert.equal(runtime.start(), true);
   await assert.rejects(runtime.stopAndDrain(), /timed out/i);
 });
+
+test("stopAndDrain rejects every unsafe resolved sync result", async () => {
+  const unsafeResults = [
+    { kind: "failed" as const, scope: "user:33333333-3333-4333-8333-333333333333" as const, runToken: 1, pending: 1 },
+    { kind: "offline" as const, scope: "user:33333333-3333-4333-8333-333333333333" as const },
+    { kind: "auth-required" as const, scope: "user:33333333-3333-4333-8333-333333333333" as const, runToken: 1, pending: 1 },
+    { kind: "pending" as const, scope: "user:33333333-3333-4333-8333-333333333333" as const, runToken: 1, pending: 1 },
+    { kind: "needs-review" as const, scope: "user:33333333-3333-4333-8333-333333333333" as const, runToken: 1, pending: 1, conflicts: 1, quarantined: 0 },
+  ];
+  for (const result of unsafeResults) {
+    const runtime = createScheduleSyncRuntimeController({
+      scope: result.scope,
+      enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+      createCoordinator: () => ({ sync: async () => result }),
+    });
+    assert.equal(runtime.start(), true);
+    await assert.rejects(runtime.stopAndDrain(), /could not finish/i);
+  }
+});
+
+test("stopAndDrain retry rechecks the original unsafe late completion after timeout", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let completions = 0;
+  const scope = "user:33333333-3333-4333-8333-333333333333" as const;
+  const runtime = createScheduleSyncRuntimeController({
+    scope,
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    drainTimeoutMs: 5,
+    createCoordinator: () => ({
+      async sync() {
+        await blocked;
+        completions += 1;
+        return { kind: "failed" as const, scope, runToken: 1, pending: 1 };
+      },
+    }),
+  });
+  runtime.start();
+  await assert.rejects(runtime.stopAndDrain(), /timed out/i);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(runtime.stopAndDrain(), /could not finish/i);
+  assert.equal(completions, 1);
+});
+
+test("stopAndDrain retry accepts the original safe late completion after timeout", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const scope = "user:33333333-3333-4333-8333-333333333333" as const;
+  const runtime = createScheduleSyncRuntimeController({
+    scope,
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    drainTimeoutMs: 5,
+    createCoordinator: () => ({
+      async sync() {
+        await blocked;
+        return { kind: "synced" as const, scope, runToken: 1, pending: 0, conflicts: 0 };
+      },
+    }),
+  });
+  runtime.start();
+  await assert.rejects(runtime.stopAndDrain(), /timed out/i);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  await runtime.stopAndDrain();
+});

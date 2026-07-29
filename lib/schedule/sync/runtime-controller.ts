@@ -35,6 +35,7 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
   let coordinator: SyncCoordinator | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const activeRuns = new Set<Promise<SyncRunResult>>();
+  let drainCompletion: Promise<void> | undefined;
   const gateway = () => (coordinator ??= options.createCoordinator());
   const run = () => {
     if (!active || disposed) return false;
@@ -103,12 +104,21 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
     },
     async stopAndDrain() {
       quiesce();
-      if (activeRuns.size === 0) return;
+      drainCompletion ??= Promise.all([...activeRuns]).then((results) => {
+        const safe = results.every((result) =>
+          result.kind === "skipped" ||
+          (
+            result.kind === "synced" &&
+            result.pending === 0 &&
+            result.conflicts === 0
+          ));
+        if (!safe) throw new Error("Schedule sync could not finish safely.");
+      });
       const timeoutMs = options.drainTimeoutMs ?? 15_000;
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          Promise.all([...activeRuns]),
+          drainCompletion,
           new Promise<never>((_, reject) => {
             timeout = setTimeout(
               () => reject(new Error("Schedule sync drain timed out.")),
