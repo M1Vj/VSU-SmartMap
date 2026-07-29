@@ -103,10 +103,11 @@ test("synchronous coordinator construction failure is recoverable and leaves no 
   assert.equal(listeners.size, 0);
 });
 
-test("stopAndDrain waits for the active scoped sync before resolving", async () => {
+test("stopAndDrain quiesces without cancelling and waits for the active scoped sync", async () => {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   let settled = false;
+  let cancellations = 0;
   const runtime = createScheduleSyncRuntimeController({
     scope: "user:33333333-3333-4333-8333-333333333333",
     enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
@@ -116,11 +117,29 @@ test("stopAndDrain waits for the active scoped sync before resolving", async () 
         settled = true;
         return { kind: "synced" as const, scope, runToken: 1, pending: 0, conflicts: 0 };
       },
-      cancel() { release(); },
+      cancel() { cancellations += 1; },
     }),
   });
   assert.equal(runtime.start(), true);
   const draining = runtime.stopAndDrain();
+  await Promise.resolve();
+  assert.equal(cancellations, 0);
+  assert.equal(settled, false);
+  release();
   await draining;
   assert.equal(settled, true);
+});
+
+test("stopAndDrain rejects on timeout instead of clearing through a hanging sync", async () => {
+  const runtime = createScheduleSyncRuntimeController({
+    scope: "user:33333333-3333-4333-8333-333333333333",
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    createCoordinator: () => ({
+      sync: async () => new Promise<never>(() => undefined),
+      cancel() { throw new Error("destructive drain must not cancel"); },
+    }),
+    drainTimeoutMs: 5,
+  });
+  assert.equal(runtime.start(), true);
+  await assert.rejects(runtime.stopAndDrain(), /timed out/i);
 });

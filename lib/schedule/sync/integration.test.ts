@@ -115,6 +115,9 @@ test("local account removal drains accepted push acknowledgement before atomic c
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const pushStarted = new Promise<void>((resolve) => { started = resolve; });
   const cloud = new Map<string, ScheduleCourse>();
+  let clientAborted = false;
+  let serverCompleted = false;
+  let cleared = false;
   const localStore = createDexieScheduleSyncLocalStore(database, {
     mutationId: () => "88888888-8888-4888-8888-888888888888",
     now: () => new Date("2026-02-02T00:00:00.000Z"),
@@ -125,10 +128,18 @@ test("local account removal drains accepted push acknowledgement before atomic c
     createCoordinator: () => new ScheduleSyncCoordinator({
       store: localStore,
       gateway: {
-        async push(mutation) {
-          if (mutation.course) cloud.set(mutation.courseId, mutation.course);
+        async push(mutation, signal) {
           started();
-          await blocked;
+          await Promise.race([
+            blocked.then(() => {
+              if (mutation.course) cloud.set(mutation.courseId, mutation.course);
+              serverCompleted = true;
+            }),
+            new Promise<never>((_, reject) => signal?.addEventListener("abort", () => {
+              clientAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            }, { once: true })),
+          ]);
           return {
             kind: "accepted", status: "upserted",
             row: {
@@ -144,10 +155,17 @@ test("local account removal drains accepted push acknowledgement before atomic c
   runtime.start();
   await pushStarted;
   const draining = runtime.stopAndDrain();
+  await Promise.resolve();
+  assert.equal(clientAborted, false);
+  assert.equal(serverCompleted, false);
   release();
   await draining;
   await removeLocalScheduleAccountData(database, scope);
+  cleared = true;
   await assertScopeEmpty(database);
+  assert.equal(serverCompleted, true);
+  assert.equal(clientAborted, false);
+  assert.equal(cleared, true);
   assert.deepEqual([...cloud.keys()], [firstId]);
   await database.delete();
 });
@@ -188,5 +206,41 @@ test("local account removal drains pull application before atomic clear", async 
   await draining;
   await removeLocalScheduleAccountData(database, scope);
   await assertScopeEmpty(database);
+  await database.delete();
+});
+
+test("timed-out local account removal leaves courses and consent intact", async () => {
+  const database = new VSUDatabase();
+  const repository = new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+  );
+  await repository.put(course(firstId, "Keep on timeout"));
+  await database.schedule_sync_state.put({
+    scope, consentEnabled: true, reconciliationCompleted: true,
+  });
+  let started!: () => void;
+  const pushStarted = new Promise<void>((resolve) => { started = resolve; });
+  const runtime = createScheduleSyncRuntimeController({
+    scope,
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    drainTimeoutMs: 5,
+    createCoordinator: () => new ScheduleSyncCoordinator({
+      store: createDexieScheduleSyncLocalStore(database),
+      gateway: {
+        async push() {
+          started();
+          return new Promise<never>(() => undefined);
+        },
+        async pull() { return []; },
+      },
+    }),
+  });
+  runtime.start();
+  await pushStarted;
+  await assert.rejects(runtime.stopAndDrain(), /timed out/i);
+  assert.equal(await database.schedule_scoped_courses.where("scope").equals(scope).count(), 1);
+  assert.equal(await database.schedule_outbox.where("scope").equals(scope).count(), 1);
+  assert.equal((await database.schedule_sync_state.get(scope))?.consentEnabled, true);
   await database.delete();
 });

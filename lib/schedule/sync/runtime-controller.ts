@@ -19,6 +19,7 @@ type RuntimeOptions = {
   onOnlineChanged?: (online: boolean) => void;
   onSynchronousError?: () => void;
   debounceMs?: number;
+  drainTimeoutMs?: number;
   eventTarget?: Pick<Window, "addEventListener" | "removeEventListener">;
   documentTarget?: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
 };
@@ -63,14 +64,17 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
   const visible = () => {
     if (options.documentTarget?.visibilityState === "visible") run();
   };
-  const dispose = () => {
+  const quiesce = () => {
     disposed = true;
-    coordinator?.cancel?.();
     if (timer) clearTimeout(timer);
     timer = undefined;
     options.eventTarget?.removeEventListener("online", online);
     options.eventTarget?.removeEventListener("offline", offline);
     options.documentTarget?.removeEventListener("visibilitychange", visible);
+  };
+  const dispose = () => {
+    quiesce();
+    coordinator?.cancel?.();
   };
 
   return {
@@ -98,8 +102,23 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
       dispose();
     },
     async stopAndDrain() {
-      dispose();
-      await Promise.allSettled([...activeRuns]);
+      quiesce();
+      if (activeRuns.size === 0) return;
+      const timeoutMs = options.drainTimeoutMs ?? 15_000;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.all([...activeRuns]),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("Schedule sync drain timed out.")),
+              timeoutMs,
+            );
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
     },
   };
 }
