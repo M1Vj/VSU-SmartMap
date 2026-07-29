@@ -42,6 +42,50 @@ function connectivityFailure(error: unknown, online: boolean): boolean {
   );
 }
 
+function missingSession(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "AuthSessionMissingError"
+  );
+}
+
+export function isScheduleSupabasePublicConfigValid(
+  url: string | undefined,
+  key: string | undefined,
+): boolean {
+  if (
+    !url ||
+    url !== url.trim() ||
+    !key ||
+    key !== key.trim()
+  ) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      Boolean(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function createScheduleAuthClient<T>(
+  url: string | undefined,
+  key: string | undefined,
+  factory: () => T,
+): { kind: "ready"; client: T } | { kind: "unavailable" } {
+  if (!isScheduleSupabasePublicConfigValid(url, key)) {
+    return { kind: "unavailable" };
+  }
+  try {
+    return { kind: "ready", client: factory() };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
 export async function resolveScheduleAuth(
   enabled: boolean,
   adapter: ScheduleAuthAdapter,
@@ -58,6 +102,9 @@ export async function resolveScheduleAuth(
     return result.user
       ? authenticated(result.user, true)
       : { kind: "guest" };
+  }
+  if (!result.user && missingSession(result.error)) {
+    return { kind: "guest" };
   }
   if (!connectivityFailure(result.error, online)) {
     return { kind: "guest", authRequired: true };

@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   createScheduleAccountGeneration,
+  createScheduleAuthClient,
+  isScheduleSupabasePublicConfigValid,
   readScopedScheduleConsent,
   resolveScheduleAuth,
   signOutGuestFirst,
@@ -33,6 +35,74 @@ test("verified getUser is authoritative and never reads cached session", async (
     kind: "authenticated", userId: A.id, email: A.email, offlineVerified: true,
   });
   assert.equal(sessionCalls, 0);
+});
+
+test("a normal missing Supabase session is an ordinary guest without cache fallback", async () => {
+  let sessionCalls = 0;
+  const state = await resolveScheduleAuth(true, {
+    async getUser() {
+      return {
+        user: null,
+        error: Object.assign(new Error("missing"), {
+          name: "AuthSessionMissingError",
+          status: 400,
+        }),
+      };
+    },
+    async getSessionUser() { sessionCalls += 1; return A; },
+  }, true);
+  assert.deepEqual(state, { kind: "guest" });
+  assert.equal(sessionCalls, 0);
+});
+
+test("a missing-session name is not accepted when a user is unexpectedly present", async () => {
+  const state = await resolveScheduleAuth(true, {
+    async getUser() {
+      return {
+        user: A,
+        error: Object.assign(new Error("bad"), { name: "AuthSessionMissingError" }),
+      };
+    },
+    async getSessionUser() { return B; },
+  }, true);
+  assert.deepEqual(state, { kind: "guest", authRequired: true });
+});
+
+test("public Supabase config accepts only absolute HTTP(S) URLs and nonblank keys", () => {
+  for (const [url, key] of [
+    ["https://example.supabase.co", "anon-key"],
+    ["http://127.0.0.1:54321", "local-key"],
+    ["http://localhost:54321", "local-key"],
+  ]) assert.equal(isScheduleSupabasePublicConfigValid(url, key), true);
+
+  for (const [url, key] of [
+    [undefined, "key"],
+    ["not-a-url", "key"],
+    [" https://example.test", "key"],
+    ["ftp://example.test", "key"],
+    ["/relative", "key"],
+    ["https://example.test", undefined],
+    ["https://example.test", ""],
+    ["https://example.test", "   "],
+    ["https://example.test", " key "],
+  ]) assert.equal(isScheduleSupabasePublicConfigValid(url, key), false);
+});
+
+test("malformed config and throwing client factories fail closed without listeners", () => {
+  let factoryCalls = 0;
+  const malformed = createScheduleAuthClient("not-a-url", "key", () => {
+    factoryCalls += 1;
+    return { auth: "unexpected" };
+  });
+  assert.deepEqual(malformed, { kind: "unavailable" });
+  assert.equal(factoryCalls, 0);
+
+  const thrown = createScheduleAuthClient("https://example.test", "key", () => {
+    factoryCalls += 1;
+    throw new Error("constructor detail");
+  });
+  assert.deepEqual(thrown, { kind: "unavailable" });
+  assert.equal(factoryCalls, 1);
 });
 
 for (const authError of [

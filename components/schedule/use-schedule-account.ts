@@ -9,6 +9,7 @@ import { removeLocalScheduleAccountData } from "@/lib/schedule/account-local-dat
 import { accountScheduleScope, GUEST_SCHEDULE_SCOPE, type ScheduleScope } from "@/lib/schedule/scope";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import {
+  createScheduleAuthClient,
   createScheduleAccountGeneration,
   readScopedScheduleConsent,
   resolveScheduleAuth,
@@ -27,6 +28,7 @@ export function useScheduleAccount(enabled: boolean) {
   );
   const [consentEnabled, setConsentEnabled] = useState(false);
   const [authError, setAuthError] = useState("");
+  const authErrorKind = useRef<"none" | "oauth" | "auth" | "unavailable" | "signout">("none");
   const authGeneration = useRef(0);
   const consentGeneration = useRef(createScheduleAccountGeneration());
   const consentToken = useRef(0);
@@ -44,17 +46,24 @@ export function useScheduleAccount(enabled: boolean) {
       search.get("auth_error") === "oauth" ||
       search.get("error") === "oauth"
     ) {
+      authErrorKind.current = "oauth";
       setAuthError("Google sign-in failed. Please try again. Your local schedule is unchanged.");
     }
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) {
+    const clientResult = createScheduleAuthClient(
+      url,
+      key,
+      getSupabaseBrowserClient,
+    );
+    if (clientResult.kind === "unavailable") {
       setAccount({ kind: "guest" });
+      authErrorKind.current = "unavailable";
       setAuthError(GENERIC_AUTH_ERROR);
       return;
     }
 
-    const client = getSupabaseBrowserClient();
+    const client = clientResult.client;
     const consentGate = consentGeneration.current;
     let alive = true;
     const resolve = async (cachedSession?: Session | null) => {
@@ -83,9 +92,17 @@ export function useScheduleAccount(enabled: boolean) {
       if (next.kind !== "authenticated") {
         consentGate.invalidate();
         if (next.kind === "guest" && next.authRequired) {
+          authErrorKind.current = "auth";
           setAuthError("Your Google session needs to be verified again.");
+        } else if (authErrorKind.current === "auth") {
+          authErrorKind.current = "none";
+          setAuthError("");
         }
         return;
+      }
+      if (authErrorKind.current === "auth") {
+        authErrorKind.current = "none";
+        setAuthError("");
       }
       const nextScope = accountScheduleScope(next.userId);
       const token = consentGate.begin(nextScope);
@@ -123,10 +140,12 @@ export function useScheduleAccount(enabled: boolean) {
       : GUEST_SCHEDULE_SCOPE;
 
   const startGoogleSignIn = useCallback(async () => {
+    authErrorKind.current = "none";
     setAuthError("");
     try {
       await signInWithGoogle("/schedule");
     } catch {
+      authErrorKind.current = "unavailable";
       setAuthError(GENERIC_AUTH_ERROR);
     }
   }, []);
@@ -151,10 +170,15 @@ export function useScheduleAccount(enabled: boolean) {
           setConsentEnabled(false);
           authGeneration.current += 1;
           consentGeneration.current.invalidate();
+          if (authErrorKind.current === "auth") {
+            authErrorKind.current = "none";
+            setAuthError("");
+          }
         },
         () => getSupabaseBrowserClient().auth.signOut(),
       );
     } catch {
+      authErrorKind.current = "signout";
       setAuthError("Sign out could not be completed. Please try again.");
     }
   }, []);
