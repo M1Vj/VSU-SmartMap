@@ -419,6 +419,7 @@ export class ScheduleRepository {
     private readonly storeFactory: ScopedScheduleStoreFactory = productionStore,
     private readonly mutationDependencies: ScheduleMutationDependencies =
       defaultScheduleMutationDependencies,
+    private readonly onLocalMutation?: (scope: ScheduleScope) => void,
   ) {}
 
   async list(): Promise<ScheduleCourse[]> {
@@ -451,6 +452,7 @@ export class ScheduleRepository {
           this.mutationDependencies,
         );
       }
+      if (this.scope !== GUEST_SCHEDULE_SCOPE) this.onLocalMutation?.(this.scope);
       return course;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;
@@ -472,6 +474,7 @@ export class ScheduleRepository {
       } else {
         await store.accountRemove(this.scope, canonicalId, this.mutationDependencies);
       }
+      if (this.scope !== GUEST_SCHEDULE_SCOPE) this.onLocalMutation?.(this.scope);
     } catch (error) {
       throw storageError(error);
     }
@@ -485,6 +488,7 @@ export class ScheduleRepository {
       } else {
         await store.accountClear(this.scope, this.mutationDependencies);
       }
+      if (this.scope !== GUEST_SCHEDULE_SCOPE) this.onLocalMutation?.(this.scope);
     } catch (error) {
       throw storageError(error);
     }
@@ -517,6 +521,7 @@ export class ScheduleRepository {
           this.mutationDependencies,
         );
       }
+      if (this.scope !== GUEST_SCHEDULE_SCOPE) this.onLocalMutation?.(this.scope);
       return courses;
     } catch (error) {
       if (error instanceof ScheduleCourseLimitError) throw error;

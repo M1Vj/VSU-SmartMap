@@ -33,6 +33,7 @@ import { ScheduleAccountPanel } from "./schedule-account-panel";
 import { ScheduleReconciliationDialog } from "./schedule-reconciliation-dialog";
 import { useScheduleAccount } from "./use-schedule-account";
 import { useScheduleReconciliation } from "./use-schedule-reconciliation";
+import { useScheduleSync } from "./use-schedule-sync";
 
 type Confirmation =
   | { kind: "delete"; course: ScheduleCourse; scope: ScheduleScope }
@@ -44,10 +45,6 @@ export function SchedulePageClient() {
   const router = useRouter();
   const accountSyncEnabled = isScheduleAccountSyncEnabled();
   const scheduleAccount = useScheduleAccount(accountSyncEnabled);
-  const scheduleRepository = useMemo(
-    () => new ScheduleRepository(scheduleAccount.scope),
-    [scheduleAccount.scope],
-  );
   const [loadedCourses, setLoadedCourses] = useState<{
     scope: ScheduleScope;
     courses: ScheduleCourse[];
@@ -105,6 +102,25 @@ export function SchedulePageClient() {
     consentEnabled: scheduleAccount.consentEnabled,
     onApplied: reconciliationApplied,
   });
+  const scheduleSync = useScheduleSync({
+    enabled: accountSyncEnabled,
+    scope: scheduleAccount.scope,
+    authenticated: scheduleAccount.account.kind === "authenticated",
+    offlineVerified:
+      scheduleAccount.account.kind === "authenticated" &&
+      scheduleAccount.account.offlineVerified,
+    consentEnabled: scheduleAccount.consentEnabled,
+    reconciliationVersion: reloadKey,
+  });
+  const scheduleRepository = useMemo(
+    () => new ScheduleRepository(
+      scheduleAccount.scope,
+      undefined,
+      undefined,
+      scheduleSync.requestSync,
+    ),
+    [scheduleAccount.scope, scheduleSync.requestSync],
+  );
 
   useEffect(() => {
     const timeout = setTimeout(() => setDeferredFacilityQuery(facilityQuery), 250);
@@ -189,7 +205,11 @@ export function SchedulePageClient() {
         operation !== actionGeneration.current ||
         origin !== currentScopeRef.current
       ) return;
-      toast.success(editing.course ? "Course updated" : "Course added");
+      toast.success(
+        scheduleAccount.scope === "guest"
+          ? editing.course ? "Course updated on this device" : "Course added on this device"
+          : "Saved on this device; sync queued",
+      );
       setEditing(undefined);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save the course.");
@@ -197,7 +217,7 @@ export function SchedulePageClient() {
     } finally {
       if (operation === actionGeneration.current) setBusy(false);
     }
-  }, [editing, scheduleRepository]);
+  }, [editing, scheduleAccount.scope, scheduleRepository]);
 
   const confirmAction = async () => {
     if (!confirmation) return;
@@ -231,6 +251,8 @@ export function SchedulePageClient() {
       toast.success(
         confirmation.kind === "remove-local-account"
           ? "Local account schedule removed"
+          : scheduleAccount.scope !== "guest"
+            ? "Saved on this device; sync queued"
           : confirmation.kind === "delete"
             ? "Course deleted"
             : confirmation.kind === "clear"
@@ -273,8 +295,10 @@ export function SchedulePageClient() {
           account={scheduleAccount.account}
           consentEnabled={scheduleAccount.consentEnabled}
           authError={scheduleAccount.authError}
+          syncStatus={scheduleSync.status}
           onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
           onEnable={() => { void scheduleAccount.enableConsent(); }}
+          onSyncNow={scheduleSync.syncNow}
           onSignOut={() => { void scheduleAccount.signOut(); }}
           onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
           onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
