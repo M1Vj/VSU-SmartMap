@@ -29,8 +29,9 @@ test("site credit stays above the fixed mobile navigation safe area", async () =
   assert.match(source, /reserveMobileNavigation/);
   assert.match(
     source,
-    /mb-\[calc\(5\.25rem\+env\(safe-area-inset-bottom\)\)\]/,
+    /mb-\[calc\(4\.5625rem\+env\(safe-area-inset-bottom\)\)\]/,
   );
+  assert.doesNotMatch(source, /5\.25rem/);
   assert.match(source, /md:mb-0/);
 });
 

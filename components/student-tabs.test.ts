@@ -8,7 +8,12 @@ async function readStudentTabsSource() {
 
 test("mobile student navigation stays above map loading and error overlays", async () => {
   const source = await readStudentTabsSource();
+  const mobileWrapperMatch = source.match(
+    /const wrapperClasses = isInline\s*\?\s*"[^"]*"[^\n]*\n\s*:\s*"([^"]*)"/,
+  );
 
   assert.match(source, /fixed inset-x-0 bottom-0 z-50/);
   assert.doesNotMatch(source, /fixed inset-x-0 bottom-0 z-20/);
+  assert.ok(mobileWrapperMatch, "Expected to find the non-inline wrapper classes");
+  assert.doesNotMatch(mobileWrapperMatch[1], /\bborder-t\b/);
 });
