@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 export default function ChatPage() {
   return (
-    <div className="h-full pb-20 md:pb-0">
+    <div className="h-full pb-5 md:pb-0">
       <ChatView />
     </div>
   );

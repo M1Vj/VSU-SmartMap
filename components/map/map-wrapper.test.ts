@@ -26,8 +26,9 @@ test("mobile attribution meets the top edge of the fixed student navigation", as
   );
   assert.match(
     source,
-    /\.leaflet-bottom\.leaflet-right\s*\{[\s\S]*margin-bottom:\s*calc\(4\.5625rem \+ env\(safe-area-inset-bottom\)\)/,
+    /\.leaflet-bottom\.leaflet-right\s*\{[\s\S]*margin-bottom:\s*calc\(var\(--student-mobile-nav-height\) \+ env\(safe-area-inset-bottom, 0px\)\)/,
   );
+  assert.doesNotMatch(source, /4\.5625rem/);
 });
 
 test("route fitting reserves fixed mobile navigation and its safe area", async () => {

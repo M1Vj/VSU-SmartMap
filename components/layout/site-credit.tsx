@@ -20,7 +20,7 @@ export function SiteCredit({
       className={cn(
         "relative z-20 -mt-5 flex h-5 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-muted-foreground md:mb-0",
         hasMobileNavigation &&
-          "mb-[calc(5.25rem+env(safe-area-inset-bottom))]",
+          "mb-[calc(var(--student-mobile-nav-height)+env(safe-area-inset-bottom,0px))]",
       )}
     >
       <a

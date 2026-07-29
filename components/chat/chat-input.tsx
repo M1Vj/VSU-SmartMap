@@ -54,13 +54,7 @@ export function ChatInput({
   const isLimitReached = remaining === 0;
 
   return (
-    <div className="relative border-t bg-background p-3">
-      <div className="absolute bottom-full left-0 mb-2 w-full px-4 text-center">
-        <span className="inline-block rounded-full bg-background/80 px-3 py-1 text-xs text-red-500/80 backdrop-blur-sm">
-          ⚠️ AI may generate incorrect information
-        </span>
-      </div>
-
+    <div className="border-t bg-background p-3">
       <form onSubmit={handleSubmit} className="flex gap-2">
         <div className="relative flex-1">
           <textarea
@@ -73,7 +67,7 @@ export function ChatInput({
             disabled={disabled || isLimitReached}
             maxLength={maxLength}
             rows={1}
-            className="w-full resize-none rounded-lg border bg-background px-3 py-2 pr-12 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-11 w-full resize-none rounded-lg border bg-background px-3 py-2.5 pr-12 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
           />
           <div className="absolute bottom-2 right-2 text-[10px] text-muted-foreground">
             {value.length}/{maxLength}
@@ -84,26 +78,23 @@ export function ChatInput({
           type="submit"
           size="icon"
           disabled={disabled || !value.trim() || isLimitReached}
-          className="shrink-0"
+          className="h-11 w-11 shrink-0"
         >
           <Send className="h-4 w-4" />
           <span className="sr-only">Send message</span>
         </Button>
       </form>
 
-      {typeof remaining === "number" && typeof limit === "number" && (
-        <div className="mt-1 text-center text-[10px] text-muted-foreground">
-          {remaining > 0 ? (
-            <span>
-              {remaining} / {limit} free chats remaining today
-            </span>
-          ) : (
-            <span className="text-destructive">
-              Daily limit reached. Please try again tomorrow.
-            </span>
-          )}
-        </div>
-      )}
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>AI answers may be inaccurate. Verify important details.</span>
+        {typeof remaining === "number" && typeof limit === "number" && (
+          <span className={isLimitReached ? "text-destructive" : undefined}>
+            {remaining > 0
+              ? `${remaining} of ${limit} chats left today`
+              : "Daily chat limit reached. Try again tomorrow."}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
