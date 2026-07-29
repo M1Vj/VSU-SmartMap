@@ -59,7 +59,7 @@ export function ChatInput({
           <div className="flex items-center justify-between gap-2">
             <label
               htmlFor="chat-message"
-              className="truncate text-xs text-muted-foreground"
+              className="truncate text-xs text-foreground"
             >
               {isLimitReached ? "Daily chat limit reached" : placeholder}
             </label>

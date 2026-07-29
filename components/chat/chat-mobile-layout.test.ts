@@ -65,6 +65,11 @@ test("chat input keeps mobile composer status readable without overlap", async (
     /<textarea\b[\s\S]*?\bclassName="([^"]*)"/,
     "the textarea class list",
   )[1];
+  const promptLabelClasses = requiredMatch(
+    source,
+    /<label\s+htmlFor="chat-message"\s+className="([^"]*)"/,
+    "the visible prompt label class list",
+  )[1];
   const disclaimerRegionClasses = enclosingJsxClasses(
     source,
     "AI answers may be inaccurate. Verify important details.",
@@ -76,6 +81,8 @@ test("chat input keeps mobile composer status readable without overlap", async (
   );
   assert.doesNotMatch(textareaClasses, /\bpr-24\b/);
   assert.match(textareaClasses, /\btext-base\b/);
+  assert.match(promptLabelClasses, /\btext-foreground\b/);
+  assert.doesNotMatch(promptLabelClasses, /\btext-muted-foreground\b/);
   assert.match(source, /<label\s+htmlFor="chat-message"/);
   assert.match(
     source,
