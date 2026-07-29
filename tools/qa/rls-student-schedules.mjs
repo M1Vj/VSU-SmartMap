@@ -385,6 +385,7 @@ async function main() {
             "upsert",
             { id, title: "Total row boundary" },
             totalBoundaryMutations[index],
+            userCId,
           ),
         ),
       ),
@@ -438,6 +439,7 @@ async function main() {
               title: "Total row boundary",
             },
             totalBoundaryMutations[acceptedBoundaryIndex],
+            userCId,
           ),
         );
     check(
@@ -450,7 +452,7 @@ async function main() {
     const cappedMissingDeleteId = randomUUID();
     const cappedMissingDelete = await userC.rpc(
       "apply_student_schedule_mutation",
-      mutation(cappedMissingDeleteId, 0, "delete", null),
+      mutation(cappedMissingDeleteId, 0, "delete", null, undefined, userCId),
     );
     const countAfterCappedMissingDelete = await userC
       .from("student_schedule_courses")
