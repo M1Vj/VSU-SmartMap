@@ -17,7 +17,6 @@ export function ChatInput({
   disabled = false,
   placeholder = "Ask about a location...",
   remaining,
-  limit,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -67,10 +66,15 @@ export function ChatInput({
             disabled={disabled || isLimitReached}
             maxLength={maxLength}
             rows={1}
-            className="min-h-11 w-full resize-none rounded-lg border bg-background px-3 py-2.5 pr-12 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            className="min-h-16 w-full resize-none rounded-lg border bg-background px-3 pb-7 pt-2.5 pr-12 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
           />
-          <div className="absolute bottom-2 right-2 text-[10px] text-muted-foreground">
-            {value.length}/{maxLength}
+          <div className="absolute inset-x-3 bottom-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            {typeof remaining === "number" && (
+              <span>{remaining > 0 ? `${remaining} chats left` : "Limit reached"}</span>
+            )}
+            <span className="ml-auto">
+              {value.length}/{maxLength}
+            </span>
           </div>
         </div>
 
@@ -85,15 +89,8 @@ export function ChatInput({
         </Button>
       </form>
 
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span>AI answers may be inaccurate. Verify important details.</span>
-        {typeof remaining === "number" && typeof limit === "number" && (
-          <span className={isLimitReached ? "text-destructive" : undefined}>
-            {remaining > 0
-              ? `${remaining} of ${limit} chats left today`
-              : "Daily chat limit reached. Try again tomorrow."}
-          </span>
-        )}
+      <div className="mt-1.5 text-xs text-muted-foreground">
+        AI answers may be inaccurate. Verify important details.
       </div>
     </div>
   );

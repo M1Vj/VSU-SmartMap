@@ -40,11 +40,14 @@ function enclosingJsxClasses(source: string, text: string) {
   return stack.map((entry) => entry.classes).join(" ");
 }
 
-test("chat page reserves only compact mobile bottom padding", async () => {
+test("chat page reserves the fixed mobile navigation height", async () => {
   const source = await readSource("../../app/(student)/chat/page.tsx");
 
-  assert.match(source, /\bpb-5\b/);
-  assert.doesNotMatch(source, /\bpb-20\b/);
+  assert.match(
+    source,
+    /h-full pb-\[calc\(var\(--student-mobile-nav-height\)\+env\(safe-area-inset-bottom,0px\)\)\] md:pb-0/,
+  );
+  assert.doesNotMatch(source, /\bpb-5\b/);
 });
 
 test("chat welcome fills the available space with the concise prompt", async () => {
@@ -55,7 +58,7 @@ test("chat welcome fills the available space with the concise prompt", async () 
   assert.doesNotMatch(source, /Welcome to Campus SmartMap for VSU/);
 });
 
-test("chat input uses mobile-safe text and an inline neutral disclaimer", async () => {
+test("chat input keeps mobile composer status readable without overlap", async () => {
   const source = await readSource("./chat-input.tsx");
   const textareaClasses = requiredMatch(
     source,
@@ -64,10 +67,19 @@ test("chat input uses mobile-safe text and an inline neutral disclaimer", async 
   )[1];
   const disclaimerRegionClasses = enclosingJsxClasses(
     source,
-    "AI answers may be inaccurate",
+    "AI answers may be inaccurate. Verify important details.",
   );
 
+  assert.match(source, /\{remaining > 0 \? `\$\{remaining\} chats left` : "Limit reached"\}/);
+  assert.match(source, /absolute[\s\S]*\{value\.length\}\/\{maxLength\}/);
+  assert.match(textareaClasses, /\bmin-h-16\b/);
+  assert.match(textareaClasses, /\bpb-7\b/);
   assert.match(textareaClasses, /\btext-base\b/);
+  assert.match(source, /className="h-11 w-11 shrink-0"/);
   assert.doesNotMatch(disclaimerRegionClasses, /\b(?:absolute|fixed)\b/);
   assert.doesNotMatch(disclaimerRegionClasses, /\btext-red(?:-\S+)?\b/);
+  assert.doesNotMatch(
+    disclaimerRegionClasses,
+    /\b(?:items-center|justify-between|flex-wrap)\b/,
+  );
 });
