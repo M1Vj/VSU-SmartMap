@@ -1,6 +1,5 @@
-const CACHE_NAME = 'vsu-smartmap-v15';
+const CACHE_NAME = 'vsu-smartmap-v16';
 const TILE_CACHE_NAME = 'map-tiles-v1';
-const API_CACHE_NAME = 'api-cache-v2';
 const TILE_CACHE_MAX_ENTRIES = 400;
 const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
@@ -20,25 +19,6 @@ const STATIC_ASSETS = [
   '/icons/icon-192x192.png?v=20260709',
   '/icons/icon-512x512.png?v=20260709',
 ];
-
-const CACHEABLE_API_PATTERNS = [
-  '/rest/v1/facilities',
-  '/rest/v1/rooms',
-  '/rest/v1/map_nodes',
-  '/rest/v1/map_edges',
-  '/rest/v1/boarding_house_listings',
-  '/rest/v1/boarding_house_offerings',
-  '/rest/v1/boarding_house_photos',
-];
-
-const OFFLINE_CHAT_RESPONSE =
-  "data: " + JSON.stringify({
-    type: "final",
-    content:
-      "You are offline right now. I can still show the pages and conversations saved on this device, but I cannot answer a new AI question until the app reconnects.",
-    followUp: null,
-  }) + "\n\n" +
-  "data: [DONE]\n\n";
 
 const OFFLINE_CACHE_MARKER_SCRIPT = `
 <script>
@@ -99,11 +79,12 @@ async function trimTileCache(cache) {
   );
 }
 
-function isCacheableApiRequest(url, request) {
-  if (request.method !== 'GET') return false;
-  if (!url.hostname.includes('supabase.co')) return false;
-  if (request.headers.get('Authorization')) return false;
-  return CACHEABLE_API_PATTERNS.some(pattern => url.pathname.includes(pattern));
+function isNetworkOnlyRequest(url, request) {
+  if (request.method !== 'GET') return true;
+  if (url.origin === self.location.origin) {
+    return url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/');
+  }
+  return url.pathname.includes('/rest/v1/') || url.pathname.includes('/rpc/');
 }
 
 function isSameOriginGet(url, request) {
@@ -283,7 +264,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME, API_CACHE_NAME];
+  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       const deleteCaches = Promise.all(
@@ -312,16 +293,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.origin === self.location.origin && url.pathname === '/api/chat' && request.method === 'POST') {
-    event.respondWith(
-      fetch(request).catch(() => new Response(OFFLINE_CHAT_RESPONSE, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache',
-        },
-      }))
-    );
+  if (isNetworkOnlyRequest(url, request)) {
+    event.respondWith(fetch(request));
     return;
   }
 
@@ -375,40 +348,6 @@ self.addEventListener('fetch', (event) => {
             return new Response('', { status: 204 });
           });
         });
-      })
-    );
-    return;
-  }
-
-  // Stale-While-Revalidate for cacheable API endpoints
-  if (isCacheableApiRequest(url, request)) {
-    event.respondWith(
-      caches.open(API_CACHE_NAME).then(async (cache) => {
-        const cachedResponse = await cache.match(request);
-
-        const networkFetch = fetch(request).then((response) => {
-          if (response.ok) {
-            cache.put(request, response.clone());
-          }
-          return response;
-        }).catch(() => {
-          // Network failed, nothing to do. 
-          // If we returned cachedResponse, user is fine.
-          // If we didn't, the return networkFetch below will bubble the error (or we can handle it there).
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        });
-
-        if (cachedResponse) {
-          // Return cached immediately, update in background
-          event.waitUntil(networkFetch);
-          return cachedResponse;
-        }
-
-        // No cache, wait for network
-        return networkFetch;
       })
     );
     return;

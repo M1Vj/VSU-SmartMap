@@ -23,7 +23,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Turn-by-turn walking navigation on a campus path graph, with nearest-gate handoff to real road routing for off-campus starts
 - Boarding houses: owner-submitted, admin-verified off-campus listings with multi-room offerings, photos, amenities/safety checklists, reviews, price-anomaly flagging, routed walk times, and student filters
 - Directory with search/filter and map handoff; campus events calendar
-- Private, device-only weekly schedule with conflict warnings, next-class guidance, campus-facility handoff, JSON backup/restore, and ICS export
+- Private, offline-first weekly schedule with optional account-owned cross-device sync, conflict warnings, next-class guidance, campus-facility handoff, JSON backup/restore, and ICS export
 - AI chat assistant (Gemini via Genkit) with API-key rotation, model fallback ladder, answer caching, per-IP rate limits, and boarding-house awareness
 - Interactive per-page guides (spotlight tours) for students, owners, and admins
 - User suggestions (add/edit) with admin review and approval
@@ -71,6 +71,37 @@ move it aside before bootstrapping; the script will not overwrite it.
 - `npm run qa:seed` refreshes synthetic boarding-house fixtures; it refuses hosted Supabase URLs.
 - See `docs/storage-bucket.md` for the exact public/private bucket contract.
 
+### Google identity for schedule sync
+
+Schedule sign-in uses Google only as a Supabase Auth identity provider. It
+requests identity scopes (`openid`, email, and profile); it does not read or
+write Google Calendar. This OAuth client is separate from the Gmail OAuth
+credentials used for notification email.
+
+Keep the client secret out of git. For local Supabase, set
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` and
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET` in the local CLI environment. In
+Google Cloud, configure:
+
+- Authorized JavaScript origin: `http://127.0.0.1:57321`
+- Authorized redirect URI: `http://127.0.0.1:57321/auth/v1/callback`
+
+For a hosted Supabase project, replace `<project-ref>` and configure:
+
+- Authorized JavaScript origin: `https://<project-ref>.supabase.co`
+- Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
+
+Then configure Supabase Auth URL Configuration. Local development allows the
+exact application callback `http://127.0.0.1:3000/auth/callback`. Production
+uses Site URL `https://vsumap.vercel.app` and the exact redirect
+`https://vsumap.vercel.app/auth/callback`. If preview authentication is
+intentional, add the narrow Vercel pattern
+`https://*-<vercel-team-or-account-slug>.vercel.app/auth/callback`, replacing
+the placeholder with the actual slug; do not use a global `**` wildcard.
+Preview and production settings must be configured in their corresponding
+Supabase projects. These instructions describe required setup and do not imply
+that any hosted project is already configured.
+
 ## Environment Variables
 Notes:
 - Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser.
@@ -80,6 +111,9 @@ Notes:
 NEXT_PUBLIC_SUPABASE_URL=...           # Supabase project URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...      # Supabase anon/publishable key
 SUPABASE_SERVICE_ROLE_KEY=...          # Service role key (admin actions)
+NEXT_PUBLIC_SCHEDULE_ACCOUNT_SYNC_ENABLED=false # Missing/non-true disables account sync
+SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID=...      # Local Supabase Auth provider
+SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET=...  # Local only; never expose to browser
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=...     # Cloudflare Turnstile site key
 TURNSTILE_SECRET_KEY=...               # Cloudflare Turnstile server secret
 ABUSE_RATE_LIMIT_PEPPER=...            # Long random server-only value
@@ -131,10 +165,11 @@ through whichever gate minimizes total detour.
 - `public/sw.js` — custom service worker for offline caching
 
 ## Offline & PWA
-- Service worker caches static assets, map tiles (OpenFreeMap/OSM/CARTO/Esri hosts), and public Supabase facility/room endpoints
-- The `/schedule` shell works offline, while personal courses remain only in IndexedDB and are never copied into service-worker caches or Supabase
+- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts). API, auth, Supabase REST/RPC, and non-GET requests are always network-only.
+- The `/schedule` shell works offline. Personal course payloads remain in account-scoped IndexedDB and are never copied into service-worker Cache Storage.
 - Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
-- Schedule data does not sync between devices; use the in-app JSON backup/restore controls before clearing browser data, and use ICS export for a calendar copy
+- Guest schedules make no schedule network requests. Optional account sync stores courses in private, account-owned Supabase rows for cross-device use; it does not share them with Google or Google Calendar.
+- JSON backup and ICS exports contain schedule details. Store and share them as sensitive files, and export a JSON backup before clearing browser data or deleting account data.
 - Offline page at `/offline` with retry/back-to-map actions
 - Facilities and chat history cached locally (with TTL/quotas)
 - Manifest/icons included for installability; theme color matches brand green
@@ -173,6 +208,37 @@ through whichever gate minimizes total detour.
 - Ensure env vars are set in the hosting platform (Supabase + Gemini; routing key optional)
 - Turbopack root is pinned in `next.config.ts` to avoid multi-lockfile resolution issues
 - Use `npm run build && npm run start` for production runs
+
+### Schedule sync rollout, privacy, and rollback
+
+`NEXT_PUBLIC_SCHEDULE_ACCOUNT_SYNC_ENABLED` is disabled-first: missing values
+and every value other than the literal `true` keep the local guest planner.
+Apply the schedule migration and pass RLS isolation checks before enabling a
+preview. Keep production set to `false` for the first compatible application
+deployment, apply and verify the production schema separately, and enable it
+only in a later deliberate deployment. Do not treat this repository
+configuration as evidence that production OAuth, schema, or flags are active.
+
+Guest schedules stay on the current device unless the student explicitly signs
+in and consents to copying or reconciling them with an account. Signing in alone
+does not upload the guest schedule. Students can remove the local account copy
+from a shared browser without deleting the cloud copy. Deleting an account
+schedule clears active cloud payloads and retains only content-free
+synchronization tombstones so offline devices cannot resurrect deleted courses;
+account deletion must invoke the same schedule deletion path before the auth
+user is removed. A JSON backup should be offered before destructive deletion.
+
+Forward rollback means deploying the compatible app with account sync disabled,
+not reverting the database migration. This revokes browser access to the sync
+path while retaining private user rows and tombstones for a later re-enable or
+controlled deletion. Keep RLS in force during rollback.
+
+The daily retention endpoint also requires server-only `CRON_SECRET`,
+`NEXT_PUBLIC_SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`. Vercel Cron must
+send the exact bearer secret. The service-role key must never enter client
+bundles; it is required for bounded retention and account-deletion operations.
+After deployment, verify the scheduled job and its logs rather than assuming
+cleanup is active.
 
 ## License
 

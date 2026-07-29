@@ -7,6 +7,8 @@
 - Add Settings controls for student navigation visibility; Map, Schedule, Directory, and Chat are enabled by default
 - Prevent stale route requests and competing map camera transitions during rapid navigation handoffs
 - Make service-worker installation bounded and resilient, precache `/schedule`, and keep personal schedule data out of Cache Storage
+- Add disabled-first, private account schedule sync setup and disclose explicit consent, sensitive exports, deletion tombstones, and rollback requirements
+- Keep auth, API, Supabase REST/RPC, and non-GET requests network-only in the service worker
 
 ## v1.5.0
 - Add boarding-house discovery with map/list views, listing details, reviews, and room options
