@@ -56,7 +56,7 @@ Update `site-credit.test.ts` to require:
 ```ts
 assert.match(
   source,
-  /mb-\[calc\(4\.5625rem\+env\(safe-area-inset-bottom\)\)\]/,
+  /var\(--student-mobile-nav-height\)/,
 );
 assert.doesNotMatch(source, /5\.25rem/);
 ```
@@ -65,6 +65,7 @@ Update `student-tabs.test.ts` to require:
 
 ```ts
 assert.doesNotMatch(source, /border-t border-border\/80/);
+assert.match(source, /var\(--student-mobile-nav-height\)/);
 ```
 
 - [ ] **Step 3: Run the focused tests and verify they fail**
@@ -86,7 +87,14 @@ Expected: FAIL on the old `pb-20`, `5.25rem`, navigation border, welcome copy, f
 
 - [ ] **Step 1: Correct the shared measurements**
 
-Use:
+Define the shared base height once:
+
+```css
+/* app/globals.css */
+--student-mobile-nav-height: 4.5625rem;
+```
+
+Then use:
 
 ```tsx
 // app/(student)/chat/page.tsx
@@ -95,7 +103,7 @@ Use:
 
 ```tsx
 // components/layout/site-credit.tsx
-"mb-[calc(4.5625rem+env(safe-area-inset-bottom))]"
+"mb-[calc(var(--student-mobile-nav-height)+env(safe-area-inset-bottom,0px))]"
 ```
 
 - [ ] **Step 2: Remove the mobile seam**
@@ -103,8 +111,12 @@ Use:
 Change the bottom-navigation wrapper to:
 
 ```tsx
-"md:hidden fixed inset-x-0 bottom-0 z-50 bg-background/95 backdrop-blur pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-2 transition-transform duration-300"
+"md:hidden fixed inset-x-0 bottom-0 z-50 min-h-[calc(var(--student-mobile-nav-height)+env(safe-area-inset-bottom,0px))] bg-background/95 backdrop-blur pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-2 transition-transform duration-300"
 ```
+
+Use the same token and safe-area fallback for the map's right-side Leaflet
+attribution. Keep the left-side map controls at their existing `5rem`
+clearance.
 
 - [ ] **Step 3: Run the focused shell tests**
 

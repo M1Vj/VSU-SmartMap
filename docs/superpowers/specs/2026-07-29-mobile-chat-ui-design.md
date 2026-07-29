@@ -1,8 +1,8 @@
 # Mobile Chat UI Design
 
-**Date:** 2026-07-29  
-**Status:** Approved autonomously by the product owner  
-**Primary implementation repo:** `M1Vj/VSU-SmartMap`  
+**Date:** 2026-07-29
+**Status:** Approved autonomously by the product owner
+**Primary implementation repo:** `M1Vj/VSU-SmartMap`
 **Mirror:** `M1Vj/VSU-SmartMap-private-history`
 
 ## Problem
@@ -76,8 +76,11 @@ the detailed explanation.
 ## Credit and navigation contract
 
 - The developer credit remains visible and links to `https://github.com/M1Vj`.
-- Its mobile bottom margin is exactly
-  `calc(4.5625rem + env(safe-area-inset-bottom))`, matching the navigation.
+- A single global `--student-mobile-nav-height: 4.5625rem` token defines the
+  borderless navigation's base height.
+- The navigation minimum height, credit bottom margin, and map's right-side
+  attribution margin all consume that token with
+  `env(safe-area-inset-bottom, 0px)`.
 - The Chat page reserves only the credit row (`1.25rem`), not another
   navigation-height block.
 - The mobile navigation has no top border or shadow that can render as a seam.
@@ -106,10 +109,10 @@ composer spans the same content width as the conversation.
 
 ## Verification
 
-- Add source-level regression tests for the exact shared credit/navigation
-  measurement, absence of the mobile navigation seam, compact Chat route
-  reservation, non-floating accuracy copy, mobile input size, and bounded
-  suggestion layout.
+- Add source-level regression tests for the shared navigation-height token,
+  its three consumers, absence of raw duplicate height values, absence of the
+  mobile navigation seam, compact Chat route reservation, non-floating
+  accuracy copy, mobile input size, and bounded suggestion layout.
 - Run focused tests, full tests, typecheck, lint, and production build.
 - Verify the actual app in a browser at 375x667, 390x844, and desktop width,
   including a simulated 34px safe area.
