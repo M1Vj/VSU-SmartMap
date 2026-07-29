@@ -121,5 +121,9 @@ export function studentDestinationRoute(destinationId: StudentDestinationId): st
 }
 
 export function shouldShowStudentNavigation(pathname: string): boolean {
-  return pathname !== "/info";
+  return STUDENT_DESTINATIONS.some(({ route }) =>
+    route === "/"
+      ? pathname === route
+      : pathname === route || pathname.startsWith(`${route}/`),
+  );
 }

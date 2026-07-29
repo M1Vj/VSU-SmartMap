@@ -72,7 +72,11 @@ test("studentDestinationRoute returns the centralized route", () => {
 test("student navigation visibility matches routes that render the shared tabs", () => {
   assert.equal(shouldShowStudentNavigation("/"), true);
   assert.equal(shouldShowStudentNavigation("/schedule"), true);
+  assert.equal(shouldShowStudentNavigation("/boarding-houses/campus-view"), true);
   assert.equal(shouldShowStudentNavigation("/info"), false);
+  assert.equal(shouldShowStudentNavigation("/offline"), false);
+  assert.equal(shouldShowStudentNavigation("/admin/events"), false);
+  assert.equal(shouldShowStudentNavigation("/owner"), false);
 });
 
 test("every default-visible destination resolves to a student page", () => {
