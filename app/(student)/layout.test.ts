@@ -4,7 +4,7 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./layout.tsx", import.meta.url), "utf8");
 
-test("student routes share one developer credit above the mobile navigation", () => {
+test("student routes keep one global desktop credit before mobile navigation", () => {
   assert.match(
     source,
     /import \{ SiteCredit \} from "@\/components\/layout\/site-credit";/,
@@ -13,6 +13,6 @@ test("student routes share one developer credit above the mobile navigation", ()
   assert.ok(
     source.indexOf("<SiteCredit />") <
       source.indexOf('<StudentTabs placement="bottom" />'),
-    "developer credit must render before the fixed mobile navigation",
+    "global desktop credit must retain its single ownership before mobile navigation",
   );
 });
