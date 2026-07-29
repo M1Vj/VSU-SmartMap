@@ -26,6 +26,10 @@ import type {
   ReconciliationSource,
 } from "@/lib/schedule/sync/types";
 import { ScheduleConflictDialog } from "./schedule-conflict-dialog";
+import {
+  shouldResetReconciliationDialog,
+  type ReconciliationDialogLifecycle,
+} from "./schedule-reconciliation-dialog-state";
 
 const SOURCE_LABEL: Record<ReconciliationSource, string> = {
   guest: "Guest device",
@@ -59,6 +63,10 @@ export function ScheduleReconciliationDialog({
   onCancel: () => void;
 }) {
   const initialFocus = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  const lifecycleRef = useRef<ReconciliationDialogLifecycle | undefined>(
+    undefined,
+  );
   const [reviewing, setReviewing] = useState(false);
   const [destructiveConfirmation, setDestructiveConfirmation] = useState<
     "replace-cloud" | "use-cloud" | undefined
@@ -78,13 +86,26 @@ export function ScheduleReconciliationDialog({
   };
 
   useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    const nextLifecycle = { open, scope, activeScope, snapshot };
+    const previousLifecycle = lifecycleRef.current;
+    lifecycleRef.current = nextLifecycle;
+    if (
+      previousLifecycle &&
+      !shouldResetReconciliationDialog(previousLifecycle, nextLifecycle)
+    ) {
+      return;
+    }
     setReviewing(false);
     setDestructiveConfirmation(undefined);
     setChoices({});
     setValidation(undefined);
     setFocusedConflictId(undefined);
-    if (open && scope !== activeScope) onCancel();
-  }, [activeScope, onCancel, open, scope]);
+    if (open && scope !== activeScope) onCancelRef.current();
+  }, [activeScope, open, scope, snapshot]);
 
   const cancel = () => {
     setReviewing(false);
