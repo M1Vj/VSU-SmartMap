@@ -12,11 +12,13 @@ export function SiteCredit({
   const pathname = usePathname();
   const hasMobileNavigation =
     reserveMobileNavigation && shouldShowStudentNavigation(pathname);
+  const isMapPage = pathname === "/";
 
   return (
     <footer
       className={cn(
-        "flex h-5 shrink-0 items-center justify-center border-t bg-background px-3 text-center text-[10px] leading-none text-muted-foreground md:mb-0",
+        "relative z-20 -mt-5 flex h-5 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-muted-foreground md:mb-0",
+        isMapPage && "-translate-y-5",
         hasMobileNavigation &&
           "mb-[calc(5.25rem+env(safe-area-inset-bottom))]",
       )}

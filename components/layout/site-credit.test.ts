@@ -33,3 +33,14 @@ test("site credit stays above the fixed mobile navigation safe area", async () =
   );
   assert.match(source, /md:mb-0/);
 });
+
+test("site credit remains transparent over every public page", async () => {
+  const source = await readCreditSource();
+
+  assert.match(source, /bg-transparent/);
+  assert.match(source, /-mt-5/);
+  assert.match(source, /pathname === "\/"/);
+  assert.match(source, /-translate-y-5/);
+  assert.doesNotMatch(source, /\bbg-background\b/);
+  assert.doesNotMatch(source, /\bborder-t\b/);
+});
