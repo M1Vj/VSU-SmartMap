@@ -33,7 +33,7 @@ Assert the quota copy is rendered inside the same relative wrapper as the textar
 Run:
 
 ```bash
-rtk test npx tsx --test components/chat/chat-mobile-layout.test.ts
+rtk proxy npx tsx --test components/chat/chat-mobile-layout.test.ts
 ```
 
 Expected: failures for the old `pb-5` route spacing and quota below the form.
@@ -46,14 +46,14 @@ Change the Chat route wrapper to:
 className="h-full pb-[calc(var(--student-mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0"
 ```
 
-Inside the textarea's relative wrapper, render a compact quota label at the upper-right when `remaining` and `limit` are available. Use `6 chats left` or `Limit reached`, keep the character counter at the lower-right, and give the textarea sufficient height, right padding, and bottom padding so input text and both labels remain separated.
+Inside the bordered relative field wrapper, render a compact top row with the visible prompt label on the left and quota on the right whenever `remaining` is available. Use `6 chats left` or `Limit reached`. Render the full-width textarea below that row and keep the character counter independently positioned at the lower-right with sufficient bottom padding.
 
 Keep this exact normal-flow helper after the form:
 
 ```tsx
-<p className="mt-1.5 text-xs text-muted-foreground">
+<div className="mt-1.5 text-xs text-foreground">
   AI answers may be inaccurate. Verify important details.
-</p>
+</div>
 ```
 
 - [ ] **Step 4: Run the focused test and confirm GREEN**
@@ -90,7 +90,7 @@ Assert `NavigationTabItems` is conditionally rendered inline, desktop still uses
 - [ ] **Step 2: Run the focused test and confirm RED**
 
 ```bash
-rtk test npx tsx --test components/layout/settings-dropdown.test.ts
+rtk proxy npx tsx --test components/layout/settings-dropdown.test.ts
 ```
 
 Expected: failures for missing disclosure state and mobile developer link.
@@ -113,7 +113,7 @@ After the bug-report action, add a separator and a mobile-only `DropdownMenuItem
 </a>
 ```
 
-Keep it small, centered, muted, focusable, and last in source order.
+Keep it small, centered, contrast-safe, focusable, and last in source order.
 
 - [ ] **Step 5: Run the focused test and confirm GREEN**
 
@@ -140,7 +140,7 @@ Replace the mobile-margin expectation with assertions that student-navigation ro
 - [ ] **Step 2: Run focused tests and confirm RED**
 
 ```bash
-rtk test npx tsx --test components/layout/site-credit.test.ts 'app/(student)/layout.test.ts'
+rtk proxy npx tsx --test components/layout/site-credit.test.ts 'app/(student)/layout.test.ts'
 ```
 
 Expected: failure because the current footer uses a mobile bottom margin.
@@ -168,7 +168,7 @@ rtk git commit -m "fix(layout): move mobile credit into settings"
 - [ ] **Step 1: Run focused integration tests**
 
 ```bash
-rtk test npx tsx --test components/chat/chat-mobile-layout.test.ts components/layout/settings-dropdown.test.ts components/layout/site-credit.test.ts 'app/(student)/layout.test.ts' components/student-tabs.test.ts components/map/map-wrapper.test.ts
+rtk proxy npx tsx --test components/chat/chat-mobile-layout.test.ts components/layout/settings-dropdown.test.ts components/layout/site-credit.test.ts 'app/(student)/layout.test.ts' components/student-tabs.test.ts components/map/map-wrapper.test.ts
 ```
 
 Expected: all focused tests pass.
@@ -191,7 +191,7 @@ At 320×568, 375×667, and 390×844 verify:
 
 - composer and helper sit immediately above the fixed navigation;
 - no global developer-credit strip or empty gap exists;
-- quota is inside the field and does not collide with placeholder, typed multiline text, character count, or send button;
+- quota is inside the field beside the visible prompt label and does not collide with typed multiline text, character count, or send button;
 - accuracy helper remains readable and belongs to Chat;
 - no horizontal overflow occurs.
 

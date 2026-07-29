@@ -15,12 +15,12 @@ Make the mobile Chat and Settings surfaces feel like one intentional application
 
 `ChatInput` remains the single owner of message entry, rate-limit feedback, the character counter, and the accuracy helper.
 
-The textarea sits inside a relative field wrapper. When quota data is available, a short usage label appears inside the field at the upper-right:
+The bordered relative field wrapper starts with a compact row containing a persistent prompt label on the left. When quota data is available, a short usage label appears on the right:
 
 - Positive quota: `6 chats left`
 - Exhausted quota: `Limit reached`
 
-The textarea reserves enough right padding for the usage label and character counter. The usage label and counter occupy different vertical positions so they do not overlap. At narrow phone widths, the labels remain concise and the textarea keeps a 16px font to avoid iOS input zoom.
+The full-width textarea sits below that row, with the character counter independently positioned at the lower-right and protected by bottom padding. This preserves the full typing width instead of reserving horizontal space on every line. At narrow phone widths, the labels remain concise and the textarea keeps a 16px font to avoid iOS input zoom.
 
 The exact helper text, `AI answers may be inaccurate. Verify important details.`, stays in normal flow immediately below the form. It is the last row owned by the Chat composer and never uses fixed or absolute page positioning. This keeps it visually attached to Chat while the fixed navigation remains a separate application control.
 
@@ -49,7 +49,7 @@ Desktop pages retain the existing tiny, centered, transparent global credit. The
 
 - The disclosure is a real button-like dropdown item with an accessible expanded state.
 - The expanded controls remain keyboard reachable.
-- The quota is supporting text, while exhausted quota remains represented by the disabled input state and descriptive placeholder.
+- The prompt is a real label associated with the textarea. Quota is supporting text, while exhausted quota is represented by the disabled input state and the dynamic `Daily chat limit reached` label.
 - The developer link has a visible focus state and descriptive text.
 - Existing 44px mobile send target and 16px textarea font remain unchanged.
 
