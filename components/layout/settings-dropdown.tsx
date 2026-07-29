@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Settings, Moon, Sun, Laptop, Bug, Info, Globe, Map, Footprints, Car, Navigation, Route, HelpCircle, PanelTop } from "lucide-react";
+import { Settings, Moon, Sun, Laptop, Bug, Info, Globe, Map, Footprints, Car, Navigation, Route, HelpCircle, PanelTop, ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +81,7 @@ function NavigationTabItems({
 export function SettingsDropdown() {
   const [mounted, setMounted] = useState(false);
   const [isCompactSettings, setIsCompactSettings] = useState(false);
+  const [mobileNavigationTabsOpen, setMobileNavigationTabsOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const {
     mapStyle,
@@ -206,15 +207,27 @@ export function SettingsDropdown() {
           {isCompactSettings ? (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="flex items-center gap-2 text-xs text-muted-foreground">
-                <PanelTop className="h-4 w-4" aria-hidden="true" />
-                Navigation tabs
-              </DropdownMenuLabel>
-              <NavigationTabItems
-                visibleStudentDestinations={visibleStudentDestinations}
-                toggleStudentDestination={toggleStudentDestination}
-                resetStudentDestinations={resetStudentDestinations}
-              />
+              <DropdownMenuItem
+                aria-expanded={mobileNavigationTabsOpen}
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setMobileNavigationTabsOpen((open) => !open);
+                }}
+              >
+                <PanelTop className="mr-2 h-4 w-4" />
+                <span>Navigation tabs</span>
+                <ChevronDown
+                  className={`ml-auto h-4 w-4 transition-transform ${mobileNavigationTabsOpen ? "rotate-180" : ""}`}
+                  aria-hidden="true"
+                />
+              </DropdownMenuItem>
+              {mobileNavigationTabsOpen && (
+                <NavigationTabItems
+                  visibleStudentDestinations={visibleStudentDestinations}
+                  toggleStudentDestination={toggleStudentDestination}
+                  resetStudentDestinations={resetStudentDestinations}
+                />
+              )}
             </>
           ) : (
             <DropdownMenuSub>
@@ -257,6 +270,22 @@ export function SettingsDropdown() {
             <Bug className="mr-2 h-4 w-4" />
             Report a Bug
           </DropdownMenuItem>
+
+          {isCompactSettings && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild className="justify-center p-0 text-[10px] text-foreground md:hidden">
+                <a
+                  href="https://github.com/M1Vj"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full justify-center py-1 text-center"
+                >
+                  Developed by Vj F Mabansag
+                </a>
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

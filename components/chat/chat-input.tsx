@@ -17,7 +17,6 @@ export function ChatInput({
   disabled = false,
   placeholder = "Ask about a location...",
   remaining,
-  limit,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -56,20 +55,33 @@ export function ChatInput({
   return (
     <div className="border-t bg-background p-3">
       <form onSubmit={handleSubmit} className="flex gap-2">
-        <div className="relative flex-1">
+        <div className="relative flex-1 rounded-lg border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-primary">
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="chat-message"
+              className="truncate text-xs text-foreground"
+            >
+              {isLimitReached ? "Daily chat limit reached" : placeholder}
+            </label>
+            {typeof remaining === "number" && (
+              <span className="shrink-0 text-[10px] font-medium text-foreground">
+                {remaining > 0 ? `${remaining} chats left` : "Limit reached"}
+              </span>
+            )}
+          </div>
           <textarea
+            id="chat-message"
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
-            placeholder={isLimitReached ? "Daily chat limit reached" : placeholder}
             disabled={disabled || isLimitReached}
             maxLength={maxLength}
             rows={1}
-            className="min-h-11 w-full resize-none rounded-lg border bg-background px-3 py-2.5 pr-12 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            className="mt-1 min-h-10 w-full resize-none bg-transparent pb-5 text-base focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
           />
-          <div className="absolute bottom-2 right-2 text-[10px] text-muted-foreground">
+          <div className="absolute bottom-2 right-3 text-[10px] text-foreground">
             {value.length}/{maxLength}
           </div>
         </div>
@@ -85,15 +97,8 @@ export function ChatInput({
         </Button>
       </form>
 
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span>AI answers may be inaccurate. Verify important details.</span>
-        {typeof remaining === "number" && typeof limit === "number" && (
-          <span className={isLimitReached ? "text-destructive" : undefined}>
-            {remaining > 0
-              ? `${remaining} of ${limit} chats left today`
-              : "Daily chat limit reached. Try again tomorrow."}
-          </span>
-        )}
+      <div className="mt-1.5 text-xs text-foreground">
+        AI answers may be inaccurate. Verify important details.
       </div>
     </div>
   );
