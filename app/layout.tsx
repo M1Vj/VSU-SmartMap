@@ -9,6 +9,7 @@ import { TourNudge } from "@/components/help/tour-nudge";
 import { MapStyleProvider } from "@/lib/context/map-style-context";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { SyncProvider } from "@/components/providers/sync-provider";
 import { AppLoggingProvider } from "@/components/observability/app-logging-provider";
 import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "@/lib/seo";
@@ -110,6 +111,7 @@ export default function RootLayout({
               {children}
             </SyncProvider>
             {shouldEnableVercelAnalytics && <Analytics />}
+            <SpeedInsights />
           </MapStyleProvider>
         </ThemeProvider>
       </body>
