@@ -34,6 +34,7 @@ import { ScheduleReconciliationDialog } from "./schedule-reconciliation-dialog";
 import { useScheduleAccount } from "./use-schedule-account";
 import { useScheduleReconciliation } from "./use-schedule-reconciliation";
 import { useScheduleSync } from "./use-schedule-sync";
+import { ScheduleOngoingReviewDialog } from "./schedule-ongoing-review-dialog";
 
 type Confirmation =
   | { kind: "delete"; course: ScheduleCourse; scope: ScheduleScope }
@@ -299,6 +300,7 @@ export function SchedulePageClient() {
           onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
           onEnable={() => { void scheduleAccount.enableConsent(); }}
           onSyncNow={scheduleSync.syncNow}
+          onReview={scheduleSync.openReview}
           onSignOut={() => { void scheduleAccount.signOut(); }}
           onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
           onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
@@ -360,6 +362,13 @@ export function SchedulePageClient() {
           }}
         />
       ) : null}
+      <ScheduleOngoingReviewDialog
+        review={scheduleSync.review}
+        scope={scheduleAccount.scope}
+        busy={scheduleSync.reviewBusy}
+        onCancel={scheduleSync.closeReview}
+        onResolve={(choice) => { void scheduleSync.resolveReview(choice); }}
+      />
     </div>
   );
 }

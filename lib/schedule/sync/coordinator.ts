@@ -58,6 +58,7 @@ type CoordinatorOptions = {
   consent?: (scope: ScheduleScope) => boolean;
   online?: () => boolean;
   cloudVerified?: (scope: ScheduleScope) => boolean;
+  onRunStarted?: (scope: ScheduleScope, runToken: number) => void;
 };
 
 type AcknowledgementInput = {
@@ -173,6 +174,7 @@ export class ScheduleSyncCoordinator {
           kind: "failed" as const, scope, runToken, pending: 0,
         }));
     }
+    this.options.onRunStarted?.(scope, runToken);
     const promise = this.run(scope, runToken).finally(() => {
       if (this.active?.promise === promise) this.active = undefined;
     });

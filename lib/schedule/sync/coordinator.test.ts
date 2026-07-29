@@ -317,6 +317,33 @@ test("concurrent calls join by scope but reject account scope confusion", async 
   if (completed.kind === "synced") assert.equal(completed.runToken, 1);
 });
 
+test("run-start callback fires before the first gateway promise settles", async () => {
+  let started = false;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const store = new Store();
+  store.outbox = [mutation("77777777-7777-4777-8777-777777777777")];
+  const coordinator = new ScheduleSyncCoordinator({
+    store,
+    gateway: {
+      async push() {
+        await blocked;
+        return {
+          kind: "accepted" as const,
+          status: "upserted" as const,
+          row: row(1),
+        };
+      },
+      async pull() { return []; },
+    },
+    onRunStarted: () => { started = true; },
+  });
+  const result = coordinator.sync(scope);
+  assert.equal(started, true);
+  release();
+  await result;
+});
+
 test("guest, disabled consent, offline, and unverified auth exit safely", async () => {
   const store = new Store();
   const gateway = { async push() { throw new Error("unused"); }, async pull() { throw new Error("unused"); } };

@@ -266,6 +266,27 @@ test("late account A async events cannot mutate account B state", () => {
   }
 });
 
+test("an explicit hook generation remains aligned after an initialization retry", () => {
+  const accountId = "33333333-3333-4333-8333-333333333333";
+  const initialized = reduceScheduleSyncState(initialScheduleSyncState, {
+    type: "AUTH_CHANGED",
+    accountId,
+    pending: 2,
+    conflicts: 1,
+    generation: 7,
+  });
+  assert.equal(initialized.generation, 7);
+  const syncing = reduceScheduleSyncState(initialized, {
+    type: "PUSH_STARTED",
+    accountId,
+    generation: 7,
+    runToken: 1,
+  });
+  assert.equal(syncing.pushing, true);
+  assert.equal(syncing.pending, 2);
+  assert.equal(syncing.conflicts, 1);
+});
+
 test("AUTH_EXPIRED ignores a late account A run and accepts the active account B run", () => {
   let state = reduceScheduleSyncState(initialScheduleSyncState, {
     type: "AUTH_CHANGED",

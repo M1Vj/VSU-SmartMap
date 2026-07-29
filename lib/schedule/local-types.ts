@@ -35,6 +35,7 @@ export interface StoredScheduleConflict {
   courseId: string;
   local?: ScheduleCourse;
   remote?: ScheduleCourse;
+  remoteDeleted?: boolean;
   serverRevision: number;
   reviewKind?: "conflict" | "quarantine";
 }

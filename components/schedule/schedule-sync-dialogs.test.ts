@@ -47,3 +47,19 @@ test("course conflict dialog exposes source-tagged versions without a default", 
   assert.doesNotMatch(source, /version\\.course\\.notes/);
   assert.doesNotMatch(source, /version\\.course\\.instructor/);
 });
+
+test("ongoing conflict and invalid-payload quarantine have reachable review actions", async () => {
+  const page = await readFile(
+    new URL("./schedule-page-client.tsx", import.meta.url),
+    "utf8",
+  );
+  const review = await readFile(
+    new URL("./schedule-ongoing-review-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /scheduleSync\.openReview/);
+  assert.match(page, /ScheduleOngoingReviewDialog/);
+  assert.match(review, /ScheduleConflictDialog/);
+  assert.match(review, /Discard invalid cloud item/);
+  assert.doesNotMatch(review, /remote\\.notes|remote\\.instructor/);
+});

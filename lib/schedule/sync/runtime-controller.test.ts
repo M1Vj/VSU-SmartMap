@@ -49,3 +49,35 @@ test("mutation requests are debounced and disposal cancels pending work", async 
   await new Promise((resolve) => setTimeout(resolve, 15));
   assert.equal(syncs, 1);
 });
+
+test("offline events publish offline immediately and reconnect runs sync", async () => {
+  const listeners = new Map<string, () => void>();
+  const states: boolean[] = [];
+  let syncs = 0;
+  const runtime = createScheduleSyncRuntimeController({
+    scope: "user:33333333-3333-4333-8333-333333333333",
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    createCoordinator: () => ({
+      sync: async (scope) => {
+        syncs += 1;
+        return { kind: "offline" as const, scope };
+      },
+    }),
+    onOnlineChanged: (online) => states.push(online),
+    eventTarget: {
+      addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+        listeners.set(type, listener as () => void),
+      removeEventListener: (type: string) => { listeners.delete(type); },
+    },
+  });
+  runtime.start();
+  await Promise.resolve();
+  assert.deepEqual(states, [false]);
+  listeners.get("offline")?.();
+  assert.deepEqual(states, [false, false]);
+  listeners.get("online")?.();
+  await Promise.resolve();
+  assert.equal(syncs, 2);
+  runtime.dispose();
+  assert.equal(listeners.size, 0);
+});

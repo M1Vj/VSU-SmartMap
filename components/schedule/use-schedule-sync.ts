@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { db } from "@/lib/db";
+import type { StoredScheduleConflict } from "@/lib/schedule/local-types";
 import { GUEST_SCHEDULE_SCOPE, type ScheduleScope } from "@/lib/schedule/scope";
 import { SupabaseScheduleGateway } from "@/lib/schedule/sync/cloud-gateway";
 import { ScheduleSyncCoordinator, type SyncRunResult } from "@/lib/schedule/sync/coordinator";
-import { createDexieScheduleSyncLocalStore } from "@/lib/schedule/sync/dexie-sync-store";
+import { createDexieScheduleSyncLocalStore, resolveDexieScheduleReview } from "@/lib/schedule/sync/dexie-sync-store";
 import { createScheduleSyncRuntimeController, type ScheduleSyncRuntimeController } from "@/lib/schedule/sync/runtime-controller";
 import {
   initialScheduleSyncState,
@@ -24,32 +25,46 @@ export function useScheduleSync(input: {
 }) {
   const [state, dispatch] = useReducer(reduceScheduleSyncState, initialScheduleSyncState);
   const [quarantined, setQuarantined] = useState(0);
+  const [review, setReview] = useState<StoredScheduleConflict>();
+  const [reviewBusy, setReviewBusy] = useState(false);
   const runtime = useRef<ScheduleSyncRuntimeController | undefined>(undefined);
   const generationRef = useRef(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const quarantinedRef = useRef(quarantined);
+  quarantinedRef.current = quarantined;
 
   useEffect(() => {
     runtime.current?.dispose();
     runtime.current = undefined;
     let alive = true;
+    const generation = ++generationRef.current;
     const accountId =
       input.scope === GUEST_SCHEDULE_SCOPE ? undefined : input.scope.slice(5);
     void (async () => {
+      const prior = stateRef.current;
+      const sameAccount = prior.accountId === accountId;
       const [syncState, pending, review] = accountId
         ? await Promise.all([
-            db.schedule_sync_state.get(input.scope),
-            db.schedule_outbox.where("scope").equals(input.scope).count(),
+            db.schedule_sync_state.get(input.scope).catch(() => undefined),
+            db.schedule_outbox.where("scope").equals(input.scope).count()
+              .catch(() => sameAccount ? prior.pending : 0),
             db.schedule_conflicts.where("scope").equals(input.scope).toArray()
               .then((rows) => ({
                 conflicts: rows.filter((row) => row.reviewKind !== "quarantine").length,
                 quarantined: rows.filter((row) => row.reviewKind === "quarantine").length,
+              }))
+              .catch(() => ({
+                conflicts: sameAccount ? Math.max(0, prior.conflicts - quarantinedRef.current) : 0,
+                quarantined: sameAccount ? quarantinedRef.current : 0,
               })),
           ])
         : [undefined, 0, { conflicts: 0, quarantined: 0 }] as const;
       if (!alive) return;
-      const generation = ++generationRef.current;
       dispatch({
         type: "AUTH_CHANGED",
         accountId,
+        generation,
         pending,
         conflicts: review.conflicts + review.quarantined,
         ...(syncState?.lastSuccessfulSyncAt
@@ -68,12 +83,15 @@ export function useScheduleSync(input: {
       ) return;
       const localStore = createDexieScheduleSyncLocalStore(db);
       const onResult = (result: SyncRunResult) => {
+        if (result.kind === "offline") {
+          dispatch({ type: "OFFLINE" });
+          return;
+        }
         if (
           !("runToken" in result) ||
           typeof result.runToken !== "number" ||
           !accountId
         ) return;
-        dispatch({ type: "PUSH_STARTED", accountId, generation, runToken: result.runToken });
         if (result.kind === "synced" || result.kind === "pending") {
           const now = new Date().toISOString();
           dispatch({
@@ -119,8 +137,18 @@ export function useScheduleSync(input: {
             consent: () => input.consentEnabled,
             online: () => navigator.onLine,
             cloudVerified: () => input.offlineVerified,
+            onRunStarted: (_scope, runToken) => {
+              dispatch({
+                type: "PUSH_STARTED",
+                accountId,
+                generation,
+                runToken,
+              });
+            },
           }),
         onResult,
+        onOnlineChanged: (online) =>
+          dispatch({ type: online ? "ONLINE" : "OFFLINE" }),
         eventTarget: window,
         documentTarget: document,
       });
@@ -130,11 +158,7 @@ export function useScheduleSync(input: {
       }
       runtime.current = next;
       next.start();
-    })().catch(() => {
-      if (alive && accountId) {
-        dispatch({ type: "AUTH_CHANGED", accountId, pending: 0, conflicts: 0 });
-      }
-    });
+    })().catch(() => undefined);
     return () => {
       alive = false;
       runtime.current?.dispose();
@@ -155,6 +179,24 @@ export function useScheduleSync(input: {
     }
   }, [input.scope]);
   const syncNow = useCallback(() => runtime.current?.syncNow(), []);
+  const openReview = useCallback(() => {
+    void db.schedule_conflicts.where("scope").equals(input.scope).sortBy("key")
+      .then((rows) => setReview(rows[0]));
+  }, [input.scope]);
+  const closeReview = useCallback(() => setReview(undefined), []);
+  const resolveReview = useCallback(async (
+    choice: "local" | "remote" | "discard-quarantine",
+  ) => {
+    if (!review || review.scope !== input.scope) return;
+    setReviewBusy(true);
+    try {
+      await resolveDexieScheduleReview(db, input.scope, review.key, choice);
+      setReview(undefined);
+      runtime.current?.requestSync();
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [input.scope, review]);
 
   return {
     status: scheduleSyncStatus(state),
@@ -163,5 +205,10 @@ export function useScheduleSync(input: {
     quarantined,
     requestSync,
     syncNow,
+    review,
+    reviewBusy,
+    openReview,
+    closeReview,
+    resolveReview,
   };
 }

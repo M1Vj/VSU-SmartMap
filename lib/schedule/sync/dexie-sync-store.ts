@@ -18,6 +18,71 @@ import { decideScheduleAcknowledgement } from "./coordinator";
 const quarantineKey = (scope: ScheduleScope, courseId: string) =>
   `${scope}|quarantine|${courseId}`;
 
+export async function resolveDexieScheduleReview(
+  database: VSUDatabase,
+  scope: ScheduleScope,
+  key: string,
+  choice: "local" | "remote" | "discard-quarantine",
+  dependencies: ScheduleMutationDependencies = defaultScheduleMutationDependencies,
+): Promise<void> {
+  await database.transaction(
+    "rw",
+    database.schedule_scoped_courses,
+    database.schedule_outbox,
+    database.schedule_conflicts,
+    async () => {
+      const review = await database.schedule_conflicts.get(key);
+      if (!review || review.scope !== scope) {
+        throw new Error("Schedule review is no longer available.");
+      }
+      if (review.reviewKind === "quarantine") {
+        if (choice !== "discard-quarantine") {
+          throw new Error("Invalid quarantine resolution.");
+        }
+        await database.schedule_conflicts.delete(key);
+        return;
+      }
+      if (choice === "discard-quarantine") {
+        throw new Error("Invalid conflict resolution.");
+      }
+      const selected = choice === "local" ? review.local : review.remote;
+      if (choice === "local" && !selected) {
+        throw new Error("Local schedule version is unavailable.");
+      }
+      if (choice === "remote" && !selected && !review.remoteDeleted) {
+        throw new Error("Cloud schedule version is unavailable.");
+      }
+      const courseKey = scopedCourseKey(scope, review.courseId);
+      await database.schedule_outbox
+        .where("[scope+courseId]")
+        .equals([scope, review.courseId])
+        .delete();
+      if (selected) {
+        await database.schedule_scoped_courses.put({
+          key: courseKey,
+          scope,
+          id: review.courseId,
+          course: parseStoredScheduleCourse(selected),
+          serverRevision: review.serverRevision,
+        });
+      } else {
+        await database.schedule_scoped_courses.delete(courseKey);
+      }
+      if (choice === "local") {
+        await database.schedule_outbox.add(createScheduleMutation({
+          scope,
+          courseId: review.courseId,
+          expectedRevision: review.serverRevision,
+          operation: "upsert",
+          course: parseStoredScheduleCourse(selected),
+          ...dependencies,
+        }));
+      }
+      await database.schedule_conflicts.delete(key);
+    },
+  );
+}
+
 export function createDexieScheduleSyncLocalStore(
   database: VSUDatabase,
   dependencies: ScheduleMutationDependencies = defaultScheduleMutationDependencies,
@@ -53,6 +118,7 @@ export function createDexieScheduleSyncLocalStore(
         ? { local: row?.course ?? mutation.course }
         : {}),
       ...(remoteCourse ? { remote: remoteCourse } : {}),
+      ...(remote?.payload === null ? { remoteDeleted: true } : {}),
       serverRevision: remote?.revision ?? mutation.expectedRevision,
       reviewKind: "conflict",
     });
@@ -120,9 +186,6 @@ export function createDexieScheduleSyncLocalStore(
           const current = await currentMutation(scope, mutation.courseId);
           if (current?.mutationId !== mutation.mutationId) return;
           await storeConflict(scope, current, result?.remote);
-          if (current.sequence !== undefined) {
-            await database.schedule_outbox.delete(current.sequence);
-          }
         },
       );
     },
@@ -147,6 +210,11 @@ export function createDexieScheduleSyncLocalStore(
         database.schedule_conflicts,
         database.schedule_sync_state,
         async () => {
+          const currentCursor =
+            (await database.schedule_sync_state.get(scope))?.cursor ?? 0;
+          if (nextCursor < currentCursor) {
+            throw new Error("Stale schedule pull cursor.");
+          }
           for (const cloud of rows) {
             const key = scopedCourseKey(scope, cloud.id);
             const local = await database.schedule_scoped_courses.get(key);
@@ -180,6 +248,9 @@ export function createDexieScheduleSyncLocalStore(
               await database.schedule_conflicts.put(review);
               continue;
             }
+            await database.schedule_conflicts.delete(
+              quarantineKey(scope, cloud.id),
+            );
             if (decision.kind === "replace-local") {
               await database.schedule_scoped_courses.put({
                 key, scope, id: cloud.id,
@@ -207,9 +278,6 @@ export function createDexieScheduleSyncLocalStore(
               }
             } else if (decision.kind === "conflict" && pending) {
               await storeConflict(scope, pending, cloud);
-              if (pending.sequence !== undefined) {
-                await database.schedule_outbox.delete(pending.sequence);
-              }
             }
           }
           if (

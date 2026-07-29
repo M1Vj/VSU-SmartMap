@@ -38,7 +38,7 @@ export function reduceScheduleSyncState(
         failed: false,
         pending: count(event.pending),
         conflicts: count(event.conflicts),
-        generation: state.generation + 1,
+        generation: event.generation ?? state.generation + 1,
         lastRunToken: 0,
         ...(event.lastSyncedAt ? { lastSyncedAt: event.lastSyncedAt } : {}),
       };

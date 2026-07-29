@@ -184,6 +184,7 @@ export type ScheduleSyncEvent =
       accountId: string | undefined;
       pending: number;
       conflicts: number;
+      generation?: number;
       lastSyncedAt?: string;
     }
   | { type: "ONLINE" }
