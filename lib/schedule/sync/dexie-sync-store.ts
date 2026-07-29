@@ -45,14 +45,25 @@ export async function resolveDexieScheduleReview(
       if (choice === "discard-quarantine") {
         throw new Error("Invalid conflict resolution.");
       }
-      const selected = choice === "local" ? review.local : review.remote;
+      const courseKey = scopedCourseKey(scope, review.courseId);
+      const currentRow = await database.schedule_scoped_courses.get(courseKey);
+      const currentMutation = await database.schedule_outbox
+        .where("[scope+courseId]")
+        .equals([scope, review.courseId])
+        .first();
+      const selected = choice === "local"
+        ? currentMutation?.operation === "delete"
+          ? undefined
+          : currentMutation?.course ?? currentRow?.course ?? review.local
+        : review.remote;
       if (choice === "local" && !selected) {
-        throw new Error("Local schedule version is unavailable.");
+        if (currentMutation?.operation !== "delete") {
+          throw new Error("Local schedule version is unavailable.");
+        }
       }
       if (choice === "remote" && !selected && !review.remoteDeleted) {
         throw new Error("Cloud schedule version is unavailable.");
       }
-      const courseKey = scopedCourseKey(scope, review.courseId);
       await database.schedule_outbox
         .where("[scope+courseId]")
         .equals([scope, review.courseId])
@@ -73,8 +84,10 @@ export async function resolveDexieScheduleReview(
           scope,
           courseId: review.courseId,
           expectedRevision: review.serverRevision,
-          operation: "upsert",
-          course: parseStoredScheduleCourse(selected),
+          operation: selected ? "upsert" : "delete",
+          ...(selected
+            ? { course: parseStoredScheduleCourse(selected) }
+            : {}),
           ...dependencies,
         }));
       }

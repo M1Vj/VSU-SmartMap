@@ -315,6 +315,11 @@ export function SchedulePageClient() {
             {scheduleReconciliation.error}
           </p>
         ) : null}
+        {scheduleSync.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {scheduleSync.error}
+          </p>
+        ) : null}
 
         {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading || scheduleAccount.account.kind === "loading" || loadedCourses?.scope !== scheduleAccount.scope ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (
           <>

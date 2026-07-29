@@ -4,6 +4,7 @@ import Dexie from "dexie";
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import { VSUDatabase } from "../../db";
 import { scopedCourseKey } from "../local-types";
+import { createDexieScopedScheduleStore, ScheduleRepository } from "../repository";
 import { accountScheduleScope } from "../scope";
 import type { ScheduleCourse } from "../types";
 import { createDexieScheduleSyncLocalStore, resolveDexieScheduleReview } from "./dexie-sync-store";
@@ -185,5 +186,74 @@ test("a repaired valid row clears its prior quarantine metadata", async () => {
     updatedAt: "2026-01-01T00:00:00.000Z",
   }], 2, resolvePulledRow);
   assert.deepEqual(await store.reviewCounts(scope), { conflicts: 0, quarantined: 0 });
+  await database.delete();
+});
+
+test("choosing local after a repository edit keeps the newer canonical edit", async () => {
+  const database = new VSUDatabase();
+  await database.schedule_scoped_courses.put({
+    key: scopedCourseKey(scope, id), scope, id,
+    course: course("Old local"), serverRevision: 2,
+  });
+  await database.schedule_conflicts.put({
+    key: scopedCourseKey(scope, id), scope, courseId: id,
+    local: course("Old local"), remote: course("Remote V2"),
+    serverRevision: 2, reviewKind: "conflict",
+  });
+  const repository = new ScheduleRepository(
+    scope,
+    () => createDexieScopedScheduleStore(database),
+    {
+      mutationId: () => "77777777-7777-4777-8777-777777777777",
+      now: () => new Date("2026-02-01T00:00:00.000Z"),
+    },
+  );
+  await repository.put(course("Newer local edit"));
+  await resolveDexieScheduleReview(
+    database,
+    scope,
+    scopedCourseKey(scope, id),
+    "local",
+    {
+      mutationId: () => "88888888-8888-4888-8888-888888888888",
+      now: () => new Date("2026-02-02T00:00:00.000Z"),
+    },
+  );
+  const row = await database.schedule_scoped_courses.get(scopedCourseKey(scope, id));
+  const pending = await database.schedule_outbox.where("scope").equals(scope).first();
+  assert.equal(row?.course.title, "Newer local edit");
+  assert.equal(pending?.course?.title, "Newer local edit");
+  assert.equal(pending?.expectedRevision, 2);
+  await database.delete();
+});
+
+test("choosing remote uses the latest cloud row observed while review is open", async () => {
+  const database = new VSUDatabase();
+  await database.schedule_scoped_courses.put({
+    key: scopedCourseKey(scope, id), scope, id,
+    course: course("Local"), serverRevision: 1,
+  });
+  await database.schedule_conflicts.put({
+    key: scopedCourseKey(scope, id), scope, courseId: id,
+    local: course("Local"), remote: course("Remote V2"),
+    serverRevision: 2, reviewKind: "conflict",
+  });
+  const store = createDexieScheduleSyncLocalStore(database);
+  await store.applyPull(scope, [{
+    id, payload: course("Remote V3"), revision: 3, serverVersion: 3,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-03-01T00:00:00.000Z",
+  }], 3, resolvePulledRow);
+  await resolveDexieScheduleReview(
+    database,
+    scope,
+    scopedCourseKey(scope, id),
+    "remote",
+  );
+  const row = await database.schedule_scoped_courses.get(scopedCourseKey(scope, id));
+  assert.equal(row?.course.title, "Remote V3");
+  assert.equal(row?.serverRevision, 3);
+  assert.equal(await store.cursorFor(scope), 3);
+  assert.equal(await database.schedule_outbox.where("scope").equals(scope).count(), 0);
   await database.delete();
 });

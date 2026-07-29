@@ -63,3 +63,17 @@ test("ongoing conflict and invalid-payload quarantine have reachable review acti
   assert.match(review, /Discard invalid cloud item/);
   assert.doesNotMatch(review, /remote\\.notes|remote\\.instructor/);
 });
+
+test("ongoing review and initialization failures are scope-safe and recoverable", async () => {
+  const hook = await readFile(
+    new URL("./use-schedule-sync.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(hook, /initializationRetry/);
+  assert.match(hook, /setInitializationRetry/);
+  assert.match(hook, /GENERIC_SYNC_SETUP_ERROR/);
+  assert.match(hook, /reviewGeneration/);
+  assert.match(hook, /generationRef\.current !==/);
+  assert.ok(hook.includes("catch(() => {"));
+  assert.ok(!hook.includes("catch(() => undefined)"));
+});

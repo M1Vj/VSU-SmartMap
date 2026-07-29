@@ -15,6 +15,11 @@ import {
 } from "@/lib/schedule/sync/state";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
+const GENERIC_SYNC_SETUP_ERROR =
+  "Private schedule sync could not start. Select Sync now to retry.";
+const GENERIC_REVIEW_ERROR =
+  "This schedule review could not be completed. Try again.";
+
 export function useScheduleSync(input: {
   enabled: boolean;
   scope: ScheduleScope;
@@ -27,8 +32,14 @@ export function useScheduleSync(input: {
   const [quarantined, setQuarantined] = useState(0);
   const [review, setReview] = useState<StoredScheduleConflict>();
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [initializationError, setInitializationError] = useState("");
+  const [initializationRetry, setInitializationRetry] = useState(0);
   const runtime = useRef<ScheduleSyncRuntimeController | undefined>(undefined);
   const generationRef = useRef(0);
+  const reviewGeneration = useRef(0);
+  const scopeRef = useRef(input.scope);
+  scopeRef.current = input.scope;
   const stateRef = useRef(state);
   stateRef.current = state;
   const quarantinedRef = useRef(quarantined);
@@ -37,6 +48,10 @@ export function useScheduleSync(input: {
   useEffect(() => {
     runtime.current?.dispose();
     runtime.current = undefined;
+    setReview(undefined);
+    setReviewBusy(false);
+    setReviewError("");
+    setInitializationError("");
     let alive = true;
     const generation = ++generationRef.current;
     const accountId =
@@ -44,9 +59,11 @@ export function useScheduleSync(input: {
     void (async () => {
       const prior = stateRef.current;
       const sameAccount = prior.accountId === accountId;
-      const [syncState, pending, review] = accountId
+      const [syncStateResult, pending, review] = accountId
         ? await Promise.all([
-            db.schedule_sync_state.get(input.scope).catch(() => undefined),
+            db.schedule_sync_state.get(input.scope)
+              .then((value) => ({ ok: true as const, value }))
+              .catch(() => ({ ok: false as const })),
             db.schedule_outbox.where("scope").equals(input.scope).count()
               .catch(() => sameAccount ? prior.pending : 0),
             db.schedule_conflicts.where("scope").equals(input.scope).toArray()
@@ -59,8 +76,9 @@ export function useScheduleSync(input: {
                 quarantined: sameAccount ? quarantinedRef.current : 0,
               })),
           ])
-        : [undefined, 0, { conflicts: 0, quarantined: 0 }] as const;
+        : [{ ok: true as const, value: undefined }, 0, { conflicts: 0, quarantined: 0 }] as const;
       if (!alive) return;
+      const syncState = syncStateResult.ok ? syncStateResult.value : undefined;
       dispatch({
         type: "AUTH_CHANGED",
         accountId,
@@ -72,6 +90,10 @@ export function useScheduleSync(input: {
           : {}),
       });
       setQuarantined(review.quarantined);
+      if (!syncStateResult.ok) {
+        setInitializationError(GENERIC_SYNC_SETUP_ERROR);
+        return;
+      }
       const reconciled = syncState?.reconciliationCompleted === true;
       if (
         !input.enabled ||
@@ -158,7 +180,9 @@ export function useScheduleSync(input: {
       }
       runtime.current = next;
       next.start();
-    })().catch(() => undefined);
+    })().catch(() => {
+      if (alive) setInitializationError(GENERIC_SYNC_SETUP_ERROR);
+    });
     return () => {
       alive = false;
       runtime.current?.dispose();
@@ -171,6 +195,7 @@ export function useScheduleSync(input: {
     input.offlineVerified,
     input.reconciliationVersion,
     input.scope,
+    initializationRetry,
   ]);
 
   const requestSync = useCallback((scope: ScheduleScope) => {
@@ -178,23 +203,64 @@ export function useScheduleSync(input: {
       runtime.current?.requestSync();
     }
   }, [input.scope]);
-  const syncNow = useCallback(() => runtime.current?.syncNow(), []);
+  const syncNow = useCallback(() => {
+    if (runtime.current) runtime.current.syncNow();
+    else setInitializationRetry((value) => value + 1);
+  }, []);
   const openReview = useCallback(() => {
+    const generation = generationRef.current;
+    const scope = input.scope;
+    reviewGeneration.current = generation;
+    setReviewError("");
     void db.schedule_conflicts.where("scope").equals(input.scope).sortBy("key")
-      .then((rows) => setReview(rows[0]));
+      .then((rows) => {
+        if (
+          generationRef.current !== generation ||
+          scopeRef.current !== scope
+        ) return;
+        setReview(rows[0]);
+      })
+      .catch(() => {
+        if (
+          generationRef.current === generation &&
+          scopeRef.current === scope
+        ) setReviewError(GENERIC_REVIEW_ERROR);
+      });
   }, [input.scope]);
-  const closeReview = useCallback(() => setReview(undefined), []);
+  const closeReview = useCallback(() => {
+    setReview(undefined);
+    setReviewError("");
+  }, []);
   const resolveReview = useCallback(async (
     choice: "local" | "remote" | "discard-quarantine",
   ) => {
     if (!review || review.scope !== input.scope) return;
+    const generation = reviewGeneration.current;
+    const scope = input.scope;
+    if (
+      generationRef.current !== generation ||
+      scopeRef.current !== scope
+    ) return;
     setReviewBusy(true);
+    setReviewError("");
     try {
-      await resolveDexieScheduleReview(db, input.scope, review.key, choice);
+      await resolveDexieScheduleReview(db, scope, review.key, choice);
+      if (
+        generationRef.current !== generation ||
+        scopeRef.current !== scope
+      ) return;
       setReview(undefined);
       runtime.current?.requestSync();
+    } catch {
+      if (
+        generationRef.current === generation &&
+        scopeRef.current === scope
+      ) setReviewError(GENERIC_REVIEW_ERROR);
     } finally {
-      setReviewBusy(false);
+      if (
+        generationRef.current === generation &&
+        scopeRef.current === scope
+      ) setReviewBusy(false);
     }
   }, [input.scope, review]);
 
@@ -210,5 +276,6 @@ export function useScheduleSync(input: {
     openReview,
     closeReview,
     resolveReview,
+    error: reviewError || initializationError,
   };
 }
