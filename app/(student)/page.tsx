@@ -350,9 +350,9 @@ function MapTab() {
         </div>
 
         {/* Floating Action Button (Submit) */}
-        {/* Adjusted bottom position to clear mobile tabs (approx 4rem/64px + 1rem buffer = bottom-20 or bottom-24) */}
+        {/* Preserve the same gap above mobile tabs on home-indicator devices. */}
         {/* Desktop remains bottom-8 */}
-        <div className="absolute right-6 bottom-24 z-30 md:right-8 md:bottom-8">
+        <div className="absolute right-6 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-30 md:right-8 md:bottom-8">
           <Button
             type="button"
             size="default"
@@ -811,7 +811,7 @@ function MapView({
         />
 
         {!hasResults && !error && !isLoading && hasActiveFilters && (
-          <div className="pointer-events-none absolute bottom-12 left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur">
+          <div className="pointer-events-none absolute bottom-[calc(6.5rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur md:bottom-12">
             <p className="text-sm font-medium text-foreground">No locations found.</p>
           </div>
         )}

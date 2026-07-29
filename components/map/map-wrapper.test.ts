@@ -20,5 +20,21 @@ test("the public map places the developer link inside Leaflet attribution", asyn
 test("mobile attribution stays above the fixed student navigation", async () => {
   const source = await readMapWrapperSource();
 
-  assert.doesNotMatch(source, /\.leaflet-bottom\.leaflet-right/);
+  assert.match(
+    source,
+    /\.leaflet-bottom\.leaflet-left\s*\{[\s\S]*margin-bottom:\s*calc\(5rem \+ env\(safe-area-inset-bottom\)\)/,
+  );
+  assert.match(
+    source,
+    /\.leaflet-bottom\.leaflet-right\s*\{[\s\S]*margin-bottom:\s*calc\(5\.25rem \+ env\(safe-area-inset-bottom\)\)/,
+  );
+});
+
+test("route fitting reserves fixed mobile navigation and its safe area", async () => {
+  const source = await readMapWrapperSource();
+
+  assert.match(source, /function getSafeAreaInsetBottom/);
+  assert.match(source, /paddingTopLeft:\s*\[36,\s*36\]/);
+  assert.match(source, /paddingBottomRight:\s*\[36,\s*mobileBottomPadding\]/);
+  assert.doesNotMatch(source, /padding:\s*\[36,\s*36\]/);
 });

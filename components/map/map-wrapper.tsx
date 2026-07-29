@@ -24,7 +24,19 @@ type MapWrapperProps = {
   bounds?: LatLngBoundsExpression | null;
 };
 
-// Component to handle bounds changes
+function getSafeAreaInsetBottom() {
+  const probe = document.createElement("div");
+  probe.style.position = "fixed";
+  probe.style.visibility = "hidden";
+  probe.style.paddingBottom = "env(safe-area-inset-bottom, 0px)";
+  document.body.appendChild(probe);
+
+  const inset =
+    Number.parseFloat(window.getComputedStyle(probe).paddingBottom) || 0;
+  probe.remove();
+  return inset;
+}
+
 function DeveloperAttribution() {
   const map = useMap();
 
@@ -44,13 +56,18 @@ function MapBoundsHandler({ bounds }: { bounds: LatLngBoundsExpression | null })
   
   useEffect(() => {
     if (bounds) {
+      const isMobile = window.matchMedia("(max-width: 768px)").matches;
+      const mobileBottomPadding = isMobile
+        ? 120 + getSafeAreaInsetBottom()
+        : 36;
       const policy = getMapCameraPolicy({
         owner: "route",
         navigationOwnsViewport: true,
         reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       });
       map.fitBounds(bounds, {
-        padding: [36, 36],
+        paddingTopLeft: [36, 36],
+        paddingBottomRight: [36, mobileBottomPadding],
         maxZoom: 18,
         animate: policy.animate,
       });
@@ -155,7 +172,11 @@ export function MapWrapper({ children, className, bounds }: MapWrapperProps) {
       <style>{`
         @media (max-width: 768px) {
           .map-wrapper .leaflet-bottom.leaflet-left {
-            margin-bottom: 5rem;
+            margin-bottom: calc(5rem + env(safe-area-inset-bottom));
+          }
+
+          .map-wrapper .leaflet-bottom.leaflet-right {
+            margin-bottom: calc(5.25rem + env(safe-area-inset-bottom));
           }
         }
       `}</style>

@@ -222,7 +222,10 @@ export function UserLocationControl({ className, destination, selectedFacility, 
         isAcquiring={isTracking && !position}
         hasHeading={heading !== null}
         onLocate={handleLocate}
-        className={className || "left-[12px] bottom-40 md:bottom-[80px]"}
+        className={
+          className ||
+          "left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-[80px]"
+        }
       />
 
       <ConfirmDialog
