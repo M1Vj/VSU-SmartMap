@@ -10,18 +10,7 @@ export function SiteCredit({
   reserveMobileNavigation?: boolean;
 }) {
   const pathname = usePathname();
-  if (pathname === "/") {
-    return (
-      <div
-        aria-hidden="true"
-        className={cn(
-          "shrink-0 md:hidden",
-          reserveMobileNavigation &&
-            "mb-[calc(5.25rem+env(safe-area-inset-bottom))]",
-        )}
-      />
-    );
-  }
+  if (pathname === "/") return null;
 
   const hasMobileNavigation =
     reserveMobileNavigation && shouldShowStudentNavigation(pathname);

@@ -66,7 +66,7 @@ export function StudentTabs({
   // Desktop: Clean nav links, Mobile: Fixed bottom bar
   const wrapperClasses = isInline
     ? "hidden md:block" // Removed borders/bg for header integration
-    : "md:hidden fixed inset-x-0 bottom-0 z-20 border-t border-border/80 bg-background/95 backdrop-blur pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-2 transition-transform duration-300";
+    : "md:hidden fixed inset-x-0 bottom-0 z-50 border-t border-border/80 bg-background/95 backdrop-blur pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-2 transition-transform duration-300";
 
   const innerClasses = isInline
     ? "flex items-center gap-0.5"
