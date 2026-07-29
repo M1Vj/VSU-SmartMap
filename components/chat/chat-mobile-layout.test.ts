@@ -70,12 +70,19 @@ test("chat input keeps mobile composer status readable without overlap", async (
     "AI answers may be inaccurate. Verify important details.",
   );
 
-  assert.match(source, /\{remaining > 0 \? `\$\{remaining\} chats left` : "Limit reached"\}/);
-  assert.match(source, /absolute[\s\S]*\{value\.length\}\/\{maxLength\}/);
-  assert.match(textareaClasses, /\bmin-h-16\b/);
-  assert.match(textareaClasses, /\bpb-7\b/);
+  assert.match(
+    source,
+    /<div className="relative flex-1">[\s\S]*?<textarea[\s\S]*?<div className="absolute right-3 top-2[^"]*">[\s\S]*?\{remaining > 0 \? `\$\{remaining\} chats left` : "Limit reached"\}[\s\S]*?<\/div>[\s\S]*?<div className="absolute bottom-2 right-3[^"]*">[\s\S]*?\{value\.length\}\/\{maxLength\}[\s\S]*?<\/div>/,
+  );
+  assert.match(textareaClasses, /\bmin-h-14\b/);
+  assert.match(textareaClasses, /\bpr-24\b/);
+  assert.match(textareaClasses, /\bpb-6\b/);
   assert.match(textareaClasses, /\btext-base\b/);
   assert.match(source, /className="h-11 w-11 shrink-0"/);
+  assert.match(
+    source,
+    /<\/form>\s*<div className="mt-1\.5 text-xs text-muted-foreground">\s*AI answers may be inaccurate\. Verify important details\.\s*<\/div>\s*<\/div>\s*\);\s*}/,
+  );
   assert.doesNotMatch(disclaimerRegionClasses, /\b(?:absolute|fixed)\b/);
   assert.doesNotMatch(disclaimerRegionClasses, /\btext-red(?:-\S+)?\b/);
   assert.doesNotMatch(

@@ -66,15 +66,15 @@ export function ChatInput({
             disabled={disabled || isLimitReached}
             maxLength={maxLength}
             rows={1}
-            className="min-h-16 w-full resize-none rounded-lg border bg-background px-3 pb-7 pt-2.5 pr-12 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            className="min-h-14 w-full resize-none rounded-lg border bg-background px-3 pb-6 pr-24 pt-2.5 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
           />
-          <div className="absolute inset-x-3 bottom-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-            {typeof remaining === "number" && (
-              <span>{remaining > 0 ? `${remaining} chats left` : "Limit reached"}</span>
-            )}
-            <span className="ml-auto">
-              {value.length}/{maxLength}
-            </span>
+          {typeof remaining === "number" && (
+            <div className="absolute right-3 top-2 text-[10px] text-muted-foreground">
+              {remaining > 0 ? `${remaining} chats left` : "Limit reached"}
+            </div>
+          )}
+          <div className="absolute bottom-2 right-3 text-[10px] text-muted-foreground">
+            {value.length}/{maxLength}
           </div>
         </div>
 
