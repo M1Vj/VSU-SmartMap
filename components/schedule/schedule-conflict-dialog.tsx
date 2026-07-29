@@ -75,11 +75,10 @@ export function ScheduleConflictDialog({
     >
       <DialogScaffoldContent
         className="w-[calc(100%-1rem)] sm:max-w-2xl"
-        aria-describedby="schedule-conflict-description"
       >
         <DialogScaffoldHeader>
           <DialogTitle>Review schedule conflict</DialogTitle>
-          <DialogDescription id="schedule-conflict-description">
+          <DialogDescription>
             Choose the exact version to keep. No version is selected
             automatically.
           </DialogDescription>
@@ -141,7 +140,7 @@ export function ScheduleConflictDialog({
                         data.
                       </span>
                     )}
-                    {version.source === "cloud" ? (
+                    {version.revision !== undefined ? (
                       <span className="block text-xs text-muted-foreground">
                         Server revision {version.revision}
                       </span>
@@ -171,7 +170,9 @@ export function ScheduleConflictDialog({
               variant="outline"
               onClick={() => resolve("cloud")}
             >
-              Keep cloud version
+              {versions.some((version) => version.kind === "tombstone")
+                ? "Keep cloud deletion"
+                : "Keep cloud version"}
             </Button>
           ) : null}
           <Button

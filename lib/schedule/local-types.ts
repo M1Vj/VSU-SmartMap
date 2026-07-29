@@ -24,6 +24,7 @@ export interface ScheduleSyncState {
   scope: ScheduleScope;
   cursor?: number;
   consentEnabled?: boolean;
+  reconciliationCompleted?: boolean;
 }
 
 export interface StoredScheduleConflict {

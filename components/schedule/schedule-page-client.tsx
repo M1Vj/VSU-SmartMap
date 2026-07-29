@@ -30,7 +30,9 @@ import { ScheduleAgenda } from "./schedule-agenda";
 import { ScheduleWeekGrid } from "./schedule-week-grid";
 import { ScheduleTransferDialog } from "./schedule-transfer-dialog";
 import { ScheduleAccountPanel } from "./schedule-account-panel";
+import { ScheduleReconciliationDialog } from "./schedule-reconciliation-dialog";
 import { useScheduleAccount } from "./use-schedule-account";
+import { useScheduleReconciliation } from "./use-schedule-reconciliation";
 
 type Confirmation =
   | { kind: "delete"; course: ScheduleCourse; scope: ScheduleScope }
@@ -53,6 +55,7 @@ export function SchedulePageClient() {
   const currentScopeRef = useRef(scheduleAccount.scope);
   const loadedScopeRef = useRef<ScheduleScope | undefined>(undefined);
   const actionGeneration = useRef(0);
+  const reconciliationTriggerRef = useRef<HTMLButtonElement>(null);
   if (currentScopeRef.current !== scheduleAccount.scope) {
     currentScopeRef.current = scheduleAccount.scope;
     loadedScopeRef.current = undefined;
@@ -89,6 +92,19 @@ export function SchedulePageClient() {
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const reconciliationApplied = useCallback(
+    () => setReloadKey((key) => key + 1),
+    [],
+  );
+  const scheduleReconciliation = useScheduleReconciliation({
+    enabled: accountSyncEnabled,
+    scope: scheduleAccount.scope,
+    accountVerified:
+      scheduleAccount.account.kind === "authenticated" &&
+      scheduleAccount.account.offlineVerified,
+    consentEnabled: scheduleAccount.consentEnabled,
+    onApplied: reconciliationApplied,
+  });
 
   useEffect(() => {
     const timeout = setTimeout(() => setDeferredFacilityQuery(facilityQuery), 250);
@@ -262,7 +278,13 @@ export function SchedulePageClient() {
           onSignOut={() => { void scheduleAccount.signOut(); }}
           onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
           onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
+          reconciliationTriggerRef={reconciliationTriggerRef}
         />
+        {scheduleReconciliation.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {scheduleReconciliation.error}
+          </p>
+        ) : null}
 
         {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading || scheduleAccount.account.kind === "loading" || loadedCourses?.scope !== scheduleAccount.scope ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (
           <>
@@ -298,6 +320,22 @@ export function SchedulePageClient() {
       />
       <ScheduleTransferDialog open={transferScope === scheduleAccount.scope && loadedCourses?.scope === scheduleAccount.scope} courses={courses} busy={busy} onClose={() => setTransferScope(undefined)} onRestoreReady={(backup) => { const origin = transferScope; if (!origin || !canRunScheduleScopeAction(origin, currentScopeRef.current, loadedScopeRef.current)) { toast.error("The account changed. Reopen the schedule action and try again."); return; } setTransferScope(transitionRestoreDialogs("transfer", "restore-ready") === "transfer" ? origin : undefined); setConfirmation({ kind: "restore", backup, scope: origin }); }} />
       <ConfirmDialog contentClassName="[&_button]:min-h-11 [&_button]:min-w-11" open={confirmation?.scope === scheduleAccount.scope} title={confirmation?.kind === "delete" ? `Delete ${confirmation.course.code}?` : confirmation?.kind === "restore" ? "Replace current schedule?" : confirmation?.kind === "remove-local-account" ? "Remove this account schedule from this device?" : "Clear the entire schedule?"} description={confirmation?.kind === "restore" ? `This validated backup contains ${confirmation.backup.courses.length} courses. Replacing is atomic, but it will overwrite the current local schedule.` : confirmation?.kind === "remove-local-account" ? "This removes only this signed-in account’s local courses, pending changes, sync consent, and review items. It does not remove guest, other-account, or cloud data." : "This action changes only the schedule stored on this device."} confirmLabel={confirmation?.kind === "restore" ? "Replace schedule" : confirmation?.kind === "delete" ? "Delete course" : confirmation?.kind === "remove-local-account" ? "Remove local account data" : "Clear schedule"} loading={busy} onCancel={() => { const reopen = confirmation?.kind === "restore" && transitionRestoreDialogs("confirm", "cancel") === "transfer"; const origin = confirmation?.scope; setConfirmation(undefined); setTransferScope(reopen ? origin : undefined); }} onConfirm={() => { void confirmAction(); }} />
+      {scheduleReconciliation.snapshot ? (
+        <ScheduleReconciliationDialog
+          open
+          scope={scheduleAccount.scope}
+          activeScope={scheduleAccount.scope}
+          snapshot={scheduleReconciliation.snapshot}
+          busy={scheduleReconciliation.busy}
+          returnFocusRef={reconciliationTriggerRef}
+          onCancel={scheduleReconciliation.cancel}
+          onChoice={(choice) => {
+            if (!scheduleReconciliation.busy) {
+              void scheduleReconciliation.choose(choice);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

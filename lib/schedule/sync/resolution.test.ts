@@ -5,6 +5,7 @@ import {
   applyScheduleResolution,
   buildCourseResolutionPlan,
   buildReconciliationResolutionPlan,
+  createValidatedScheduleReconciliationSnapshot,
   validateReconciliationChoice,
   type AtomicScheduleResolutionStore,
 } from "./resolution";
@@ -20,7 +21,13 @@ function course(id: string, title: string): ScheduleCourse {
     code: title.slice(0, 8),
     title,
     color: "blue",
-    meetings: [],
+    meetings: [{
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      days: [1],
+      startMinute: 480,
+      endMinute: 540,
+      locationLabel: "Room 1",
+    }],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -39,6 +46,23 @@ function conflict(): Extract<ScheduleSourceReconciliation, { kind: "conflict" }>
       ],
     }],
   };
+}
+
+function snapshot() {
+  return createValidatedScheduleReconciliationSnapshot({
+    guest: [course(ID_A, "Guest")],
+    accountLocal: [
+      { course: course(ID_A, "Local"), serverRevision: 3 },
+    ],
+    cloud: [{
+      id: ID_A,
+      payload: course(ID_A, "Cloud"),
+      revision: 7,
+      serverVersion: 7,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+  });
 }
 
 test("review merge requires every conflict and rejects absent sources", () => {
@@ -94,7 +118,7 @@ test("invalid and 201-course reconciliation stay in explicit review", () => {
 test("guest choice produces one upsert at latest cloud revision", () => {
   const result = buildCourseResolutionPlan({
     scope: SCOPE,
-    conflict: conflict().conflicts[0]!,
+    snapshot: snapshot(),
     resolution: { kind: "choose-source", courseId: ID_A, source: "guest" },
   });
   assert.equal(result.kind, "ready");
@@ -108,7 +132,7 @@ test("guest choice produces one upsert at latest cloud revision", () => {
 test("active cloud replaces local while a cloud tombstone deletes it", () => {
   const active = buildCourseResolutionPlan({
     scope: SCOPE,
-    conflict: conflict().conflicts[0]!,
+    snapshot: snapshot(),
     resolution: { kind: "choose-source", courseId: ID_A, source: "cloud" },
   });
   assert.equal(active.kind, "ready");
@@ -117,15 +141,22 @@ test("active cloud replaces local while a cloud tombstone deletes it", () => {
     assert.equal(active.plan.mutation, undefined);
     assert.equal(active.plan.serverRevision, 7);
   }
+  const tombstoneSnapshot = createValidatedScheduleReconciliationSnapshot({
+    guest: [],
+    accountLocal: [{ course: course(ID_A, "Local") }],
+    cloud: [{
+      id: ID_A,
+      payload: null,
+      revision: 9,
+      serverVersion: 9,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      deletedAt: "2026-01-01T00:00:00.000Z",
+    }],
+  });
   const tombstone = buildCourseResolutionPlan({
     scope: SCOPE,
-    conflict: {
-      courseId: ID_A,
-      versions: [
-        { kind: "active", source: "account-local", course: course(ID_A, "Local") },
-        { kind: "tombstone", source: "cloud", courseId: ID_A, revision: 9 },
-      ],
-    },
+    snapshot: tombstoneSnapshot,
     resolution: { kind: "choose-source", courseId: ID_A, source: "cloud" },
   });
   assert.equal(tombstone.kind, "ready");
@@ -146,7 +177,7 @@ test("cancel performs zero writes and one store call is the atomic boundary", as
   assert.equal(calls, 0);
   const ready = buildCourseResolutionPlan({
     scope: SCOPE,
-    conflict: conflict().conflicts[0]!,
+    snapshot: snapshot(),
     resolution: { kind: "choose-source", courseId: ID_A, source: "account-local" },
   });
   assert.equal(ready.kind, "ready");
@@ -164,7 +195,7 @@ test("atomic store failure is surfaced without a partial retry", async () => {
   };
   const ready = buildCourseResolutionPlan({
     scope: SCOPE,
-    conflict: conflict().conflicts[0]!,
+    snapshot: snapshot(),
     resolution: { kind: "choose-source", courseId: ID_A, source: "guest" },
   });
   assert.equal(ready.kind, "ready");
@@ -176,16 +207,24 @@ test("atomic store failure is surfaced without a partial retry", async () => {
 test("replace cloud creates a bounded desired set against latest revisions", () => {
   const result = buildReconciliationResolutionPlan({
     scope: SCOPE,
-    reconciliation: conflict(),
+    snapshot: createValidatedScheduleReconciliationSnapshot({
+      guest: [course(ID_A, "Guest")],
+      accountLocal: [{ course: course(ID_B, "Local B") }],
+      cloud: [
+        {
+          id: ID_A, payload: course(ID_A, "Cloud"), revision: 7,
+          serverVersion: 7, createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: ID_B, payload: null, revision: 4, serverVersion: 8,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }),
     choice: { kind: "replace-cloud" },
-    deviceCourses: [
-      { source: "guest", course: course(ID_A, "Guest") },
-      { source: "account-local", course: course(ID_B, "Local B") },
-    ],
-    cloud: [
-      { kind: "active", source: "cloud", course: course(ID_A, "Cloud"), revision: 7 },
-      { kind: "tombstone", source: "cloud", courseId: ID_B, revision: 4 },
-    ],
   });
   assert.equal(result.kind, "ready");
   if (result.kind !== "ready" || result.plan.kind !== "replace-cloud") return;
@@ -203,13 +242,24 @@ test("replace cloud creates a bounded desired set against latest revisions", () 
 test("use cloud atomically replaces local and carries explicit tombstones", () => {
   const result = buildReconciliationResolutionPlan({
     scope: SCOPE,
-    reconciliation: conflict(),
+    snapshot: createValidatedScheduleReconciliationSnapshot({
+      guest: [],
+      accountLocal: [],
+      cloud: [
+        {
+          id: ID_A, payload: course(ID_A, "Cloud"), revision: 7,
+          serverVersion: 7, createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: ID_B, payload: null, revision: 4, serverVersion: 8,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }),
     choice: { kind: "use-cloud" },
-    deviceCourses: [],
-    cloud: [
-      { kind: "active", source: "cloud", course: course(ID_A, "Cloud"), revision: 7 },
-      { kind: "tombstone", source: "cloud", courseId: ID_B, revision: 4 },
-    ],
   });
   assert.equal(result.kind, "ready");
   if (result.kind !== "ready" || result.plan.kind !== "use-cloud") return;
@@ -224,8 +274,65 @@ test("use cloud atomically replaces local and carries explicit tombstones", () =
 test("resolution plans reject guest scope before any account mutation", () => {
   const result = buildCourseResolutionPlan({
     scope: "guest",
-    conflict: conflict().conflicts[0]!,
+    snapshot: snapshot(),
     resolution: { kind: "choose-source", courseId: ID_A, source: "guest" },
   });
   assert.equal(result.kind, "invalid-resolution");
+});
+
+test("builders reject fabricated or mutated snapshots", () => {
+  const fabricated = {
+    reconciliation: conflict(),
+    guest: [{ source: "guest", course: course(ID_A, "Guest") }],
+    accountLocal: [],
+    cloud: [],
+  };
+  assert.equal(
+    buildReconciliationResolutionPlan({
+      scope: SCOPE,
+      snapshot: fabricated as never,
+      choice: { kind: "use-cloud" },
+    }).kind,
+    "invalid-resolution",
+  );
+  const valid = snapshot();
+  assert.throws(() => {
+    (valid.cloud as unknown as Array<unknown>).push({});
+  });
+});
+
+test("snapshot factory rejects invalid local revisions and preserves invalid cloud review", () => {
+  assert.throws(() =>
+    createValidatedScheduleReconciliationSnapshot({
+      guest: [],
+      accountLocal: [{ course: course(ID_A, "Local"), serverRevision: -1 }],
+      cloud: [],
+    }),
+  );
+  const invalid = createValidatedScheduleReconciliationSnapshot({
+    guest: [],
+    accountLocal: [],
+    cloud: [{
+      id: ID_A,
+      payload: { ...course(ID_A, "Cloud"), id: ID_B },
+      revision: 1,
+      serverVersion: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+  });
+  assert.equal(invalid.reconciliation.kind, "invalid");
+  assert.equal(invalid.cloud.length, 0);
+});
+
+test("replace cloud blocks divergent guest and account-local same-ID data", () => {
+  const result = buildReconciliationResolutionPlan({
+    scope: SCOPE,
+    snapshot: snapshot(),
+    choice: { kind: "replace-cloud" },
+  });
+  assert.deepEqual(result, {
+    kind: "invalid-resolution",
+    reason: "review-required",
+  });
 });

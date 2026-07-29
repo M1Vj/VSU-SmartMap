@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import { Cloud, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ export function ScheduleAccountPanel({
   onSignOut,
   onBackup,
   onRemoveLocalData,
+  reconciliationTriggerRef,
 }: {
   enabled: boolean;
   account: ScheduleAccountState;
@@ -40,6 +42,7 @@ export function ScheduleAccountPanel({
   onSignOut: () => void;
   onBackup: () => void;
   onRemoveLocalData: () => void;
+  reconciliationTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   if (!enabled || account.kind === "guest") {
     return (
@@ -67,7 +70,7 @@ export function ScheduleAccountPanel({
         {!consentEnabled ? (
           <div className="space-y-2">
             <p className="text-sm">{account.offlineVerified ? "Signing in alone does not enable schedule sync." : "This cached account can use only its local schedule while offline. Reconnect and verify the account before enabling private sync."}</p>
-            <Button type="button" onClick={onEnable} disabled={!account.offlineVerified}>Enable private sync</Button>
+            <Button ref={reconciliationTriggerRef} type="button" onClick={onEnable} disabled={!account.offlineVerified}>Enable private sync</Button>
           </div>
         ) : (
           <div className="space-y-2" aria-live="polite">

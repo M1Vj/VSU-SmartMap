@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,15 +14,18 @@ import {
   DialogScaffoldHeader,
 } from "@/components/ui/dialog-scaffold";
 import type { ScheduleScope } from "@/lib/schedule/scope";
+import { formatMinuteOfDay, formatWeekdays } from "@/lib/schedule/time";
 import {
   validateReconciliationChoice,
+  type ValidatedScheduleReconciliationSnapshot,
   type ChoiceValidation,
 } from "@/lib/schedule/sync/resolution";
 import type {
+  PerCourseResolution,
   ReconciliationChoice,
   ReconciliationSource,
-  ScheduleSourceReconciliation,
 } from "@/lib/schedule/sync/types";
+import { ScheduleConflictDialog } from "./schedule-conflict-dialog";
 
 const SOURCE_LABEL: Record<ReconciliationSource, string> = {
   guest: "Guest device",
@@ -38,40 +41,55 @@ export function ScheduleReconciliationDialog({
   open,
   scope,
   activeScope,
-  reconciliation,
-  sourceCounts,
+  snapshot,
+  busy = false,
+  returnFocusRef,
   onChoice,
   onCancel,
 }: {
   open: boolean;
   scope: ScheduleScope;
   activeScope: ScheduleScope;
-  reconciliation: ScheduleSourceReconciliation;
-  sourceCounts: ReconciliationSourceCounts;
+  snapshot: ValidatedScheduleReconciliationSnapshot;
+  busy?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onChoice: (choice: ReconciliationChoice) => void;
   onCancel: () => void;
 }) {
   const initialFocus = useRef<HTMLButtonElement>(null);
   const [reviewing, setReviewing] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [destructiveConfirmation, setDestructiveConfirmation] = useState<
+    "replace-cloud" | "use-cloud" | undefined
+  >();
   const [choices, setChoices] = useState<
     Record<string, ReconciliationSource>
   >({});
   const [validation, setValidation] = useState<ChoiceValidation>();
+  const [focusedConflictId, setFocusedConflictId] = useState<string | undefined>(
+    undefined,
+  );
+  const reconciliation = snapshot.reconciliation;
+  const sourceCounts: ReconciliationSourceCounts = {
+    guest: snapshot.guest.length,
+    "account-local": snapshot.accountLocal.length,
+    cloud: snapshot.cloud.filter((candidate) => candidate.kind === "active").length,
+  };
 
   useEffect(() => {
     setReviewing(false);
-    setConfirmReplace(false);
+    setDestructiveConfirmation(undefined);
     setChoices({});
     setValidation(undefined);
+    setFocusedConflictId(undefined);
     if (open && scope !== activeScope) onCancel();
   }, [activeScope, onCancel, open, scope]);
 
   const cancel = () => {
     setReviewing(false);
-    setConfirmReplace(false);
+    setDestructiveConfirmation(undefined);
     setChoices({});
     setValidation(undefined);
+    setFocusedConflictId(undefined);
     onCancel();
   };
 
@@ -89,20 +107,24 @@ export function ScheduleReconciliationDialog({
     <Dialog
       open={open && scope === activeScope}
       onOpenChange={(next) => {
-        if (!next) cancel();
+        if (!next && !busy) cancel();
       }}
     >
       <DialogScaffoldContent
         className="w-[calc(100%-1rem)] sm:max-w-2xl"
-        aria-describedby="schedule-reconciliation-description"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           initialFocus.current?.focus();
         }}
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusRef?.current) return;
+          event.preventDefault();
+          returnFocusRef.current.focus();
+        }}
       >
         <DialogScaffoldHeader>
           <DialogTitle>Choose how to start private sync</DialogTitle>
-          <DialogDescription id="schedule-reconciliation-description">
+          <DialogDescription>
             Nothing is chosen by timestamps. Review the validated schedules and
             decide what this account should keep.
           </DialogDescription>
@@ -126,33 +148,39 @@ export function ScheduleReconciliationDialog({
             ))}
           </dl>
 
-          {confirmReplace ? (
+          {destructiveConfirmation ? (
             <section
               aria-labelledby="confirm-replacement-title"
               className="space-y-3 rounded-lg border border-destructive p-4"
             >
               <h3 id="confirm-replacement-title" className="font-semibold">
-                Confirm replacement
+                Confirm {destructiveConfirmation === "use-cloud" ? "cloud schedule" : "replacement"}
               </h3>
               <p className="text-sm">
-                Replace {sourceCounts.cloud} cloud course
-                {sourceCounts.cloud === 1 ? "" : "s"} with this device’s
-                schedule? This creates an explicit bounded set of cloud changes.
+                {destructiveConfirmation === "use-cloud"
+                  ? `Replace ${sourceCounts["account-local"]} account-local courses with ${sourceCounts.cloud} cloud courses? Guest courses remain unchanged.`
+                  : `Replace ${sourceCounts.cloud} cloud courses with the combined guest and account-local device schedules? Divergent device versions must be reviewed first.`}
               </p>
               <div className="flex flex-wrap gap-2 [&_button]:min-h-11 [&_button]:min-w-11">
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setConfirmReplace(false)}
+                  disabled={busy}
+                  onClick={() => setDestructiveConfirmation(undefined)}
                 >
                   Go back
                 </Button>
                 <Button
                   type="button"
                   variant="destructive"
-                  onClick={() => onChoice({ kind: "replace-cloud" })}
+                  disabled={busy}
+                  onClick={() =>
+                    onChoice({ kind: destructiveConfirmation })
+                  }
                 >
-                  Yes, replace cloud
+                  {destructiveConfirmation === "use-cloud"
+                    ? "Yes, use cloud schedule"
+                    : "Yes, replace cloud"}
                 </Button>
               </div>
             </section>
@@ -196,13 +224,38 @@ export function ScheduleReconciliationDialog({
                         }
                         className="h-5 w-5"
                       />
-                      <span>
+                      <span className="space-y-1">
                         {version.kind === "tombstone"
-                          ? "Deleted in cloud"
+                          ? `Deleted in cloud · revision ${version.revision}`
                           : `${SOURCE_LABEL[version.source]}: ${version.course.code} — ${version.course.title}`}
+                        {version.kind === "active" ? (
+                          <>
+                            {version.course.meetings.map((meeting) => (
+                              <span key={meeting.id} className="block text-sm text-muted-foreground">
+                                {formatWeekdays(meeting.days)}{" "}
+                                {formatMinuteOfDay(meeting.startMinute)}–
+                                {formatMinuteOfDay(meeting.endMinute)} ·{" "}
+                                {meeting.locationLabel ?? "TBA"}
+                              </span>
+                            ))}
+                            {version.revision !== undefined ? (
+                              <span className="block text-xs text-muted-foreground">
+                                Server revision {version.revision}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
                       </span>
                     </label>
                   ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() => setFocusedConflictId(conflict.courseId)}
+                  >
+                    Open focused comparison
+                  </Button>
                 </fieldset>
               ))}
               {reconciliation.kind === "invalid" ? (
@@ -227,32 +280,35 @@ export function ScheduleReconciliationDialog({
           )}
         </DialogScaffoldBody>
         <DialogScaffoldFooter className="[&_button]:min-h-11 [&_button]:min-w-11">
-          <Button type="button" variant="ghost" onClick={cancel}>
+          <Button type="button" variant="ghost" onClick={cancel} disabled={busy}>
             Not now
           </Button>
           {reviewing ? (
-            <Button type="button" onClick={submitReview}>
+            <Button type="button" onClick={submitReview} disabled={busy}>
               Apply reviewed merge
             </Button>
-          ) : !confirmReplace ? (
+          ) : !destructiveConfirmation ? (
             <>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onChoice({ kind: "use-cloud" })}
+                disabled={busy}
+                onClick={() => setDestructiveConfirmation("use-cloud")}
               >
                 Use cloud schedule
               </Button>
               <Button
                 type="button"
                 variant="destructive"
-                onClick={() => setConfirmReplace(true)}
+                disabled={busy}
+                onClick={() => setDestructiveConfirmation("replace-cloud")}
               >
                 Replace cloud with this device
               </Button>
               <Button
                 ref={initialFocus}
                 type="button"
+                disabled={busy}
                 onClick={() => setReviewing(true)}
               >
                 Review and merge
@@ -261,6 +317,30 @@ export function ScheduleReconciliationDialog({
           ) : null}
         </DialogScaffoldFooter>
       </DialogScaffoldContent>
+      {focusedConflictId ? (
+        <ScheduleConflictDialog
+          open
+          scope={scope}
+          activeScope={activeScope}
+          courseId={focusedConflictId}
+          versions={
+            (reconciliation.kind === "merge-ready"
+              ? []
+              : reconciliation.conflicts
+            ).find(({ courseId }) => courseId === focusedConflictId)?.versions ?? []
+          }
+          onResolve={(resolution: PerCourseResolution) => {
+            if (resolution.kind === "choose-source") {
+              setChoices((current) => ({
+                ...current,
+                [resolution.courseId]: resolution.source,
+              }));
+            }
+            setFocusedConflictId(undefined);
+          }}
+          onCancel={() => setFocusedConflictId(undefined)}
+        />
+      ) : null}
     </Dialog>
   );
 }

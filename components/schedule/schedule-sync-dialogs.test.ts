@@ -16,7 +16,9 @@ test("first sign-in dialog exposes explicit safe actions and confirmation", asyn
     assert.match(source, new RegExp(label));
   }
   assert.match(source, /initialFocus/);
-  assert.match(source, /Confirm replacement/);
+  assert.match(source, /destructiveConfirmation/);
+  assert.match(source, /Yes, use cloud schedule/);
+  assert.match(source, /Yes, replace cloud/);
   assert.match(source, /onCancel/);
   assert.match(source, /min-h-11/);
 });
@@ -33,6 +35,7 @@ test("course conflict dialog exposes source-tagged versions without a default", 
     "Deleted in cloud",
     "Keep this device",
     "Keep cloud version",
+    "Keep cloud deletion",
   ]) {
     assert.match(source, new RegExp(label));
   }

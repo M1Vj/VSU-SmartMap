@@ -2,7 +2,12 @@ import type { ScheduleOutboxMutation } from "../local-types";
 import type { ScheduleScope } from "../scope";
 import { MAX_SCHEDULE_COURSES, type ScheduleCourse } from "../types";
 import { isValidScheduleId } from "../validation";
+import { parseStoredScheduleCourse } from "../validation";
+import { reconcileScheduleSources } from "./reconcile";
+import { isScheduleSyncTimestamp } from "./cloud-gateway";
 import type {
+  AccountLocalScheduleVersion,
+  CloudScheduleRow,
   PerCourseResolution,
   ReconciliationCandidate,
   ReconciliationChoice,
@@ -72,6 +77,7 @@ export interface AtomicScheduleResolutionStore {
 type ValidatedDeviceVersion = {
   source: Exclude<ReconciliationSource, "cloud">;
   course: ScheduleCourse;
+  revision?: number;
 };
 
 type ValidatedCloudCandidate =
@@ -88,6 +94,118 @@ type ValidatedCloudCandidate =
       revision: number;
       deletedAt?: string;
     };
+
+export type ValidatedScheduleReconciliationSnapshot = Readonly<{
+  reconciliation: ScheduleSourceReconciliation;
+  guest: readonly ValidatedDeviceVersion[];
+  accountLocal: readonly ValidatedDeviceVersion[];
+  cloud: readonly ValidatedCloudCandidate[];
+}>;
+
+const validatedSnapshots = new WeakSet<object>();
+
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) freezeDeep(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function positiveSafe(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+export function createValidatedScheduleReconciliationSnapshot(input: {
+  guest: readonly unknown[];
+  accountLocal: readonly {
+    course: unknown;
+    serverRevision?: number;
+  }[];
+  cloud: readonly CloudScheduleRow[];
+}): ValidatedScheduleReconciliationSnapshot {
+  const guest = input.guest.map((value) => ({
+    source: "guest" as const,
+    course: parseStoredScheduleCourse(value),
+  }));
+  const accountRows: AccountLocalScheduleVersion[] = input.accountLocal.map(
+    ({ course, serverRevision }) => {
+      if (
+        serverRevision !== undefined &&
+        (!Number.isSafeInteger(serverRevision) || serverRevision < 0)
+      ) {
+        throw new Error("Invalid account-local server revision.");
+      }
+      return {
+        course: parseStoredScheduleCourse(course),
+        ...(serverRevision === undefined ? {} : { serverRevision }),
+      };
+    },
+  );
+  const accountLocal = accountRows.map(({ course, serverRevision }) => ({
+    source: "account-local" as const,
+    course,
+    ...(serverRevision === undefined ? {} : { revision: serverRevision }),
+  }));
+  const reconciliation = reconcileScheduleSources({
+    guest: guest.map(({ course }) => course),
+    accountLocal: accountRows,
+    cloud: input.cloud,
+  });
+  const cloud: ValidatedCloudCandidate[] = [];
+  const seen = new Set<string>();
+  for (const row of input.cloud) {
+    if (
+      seen.has(row.id) ||
+      !canonicalId(row.id) ||
+      !positiveSafe(row.revision) ||
+      !positiveSafe(row.serverVersion) ||
+      !isScheduleSyncTimestamp(row.createdAt) ||
+      !isScheduleSyncTimestamp(row.updatedAt)
+    ) {
+      continue;
+    }
+    seen.add(row.id);
+    if (row.payload === null) {
+      if (!isScheduleSyncTimestamp(row.deletedAt)) continue;
+      cloud.push({
+        kind: "tombstone",
+        source: "cloud",
+        courseId: row.id,
+        revision: row.revision,
+        deletedAt: row.deletedAt,
+      });
+      continue;
+    }
+    if (row.deletedAt !== undefined) continue;
+    try {
+      const course = parseStoredScheduleCourse(row.payload);
+      if (course.id !== row.id) continue;
+      cloud.push({
+        kind: "active",
+        source: "cloud",
+        course,
+        revision: row.revision,
+      });
+    } catch {
+      continue;
+    }
+  }
+  const snapshot = freezeDeep({
+    reconciliation,
+    guest,
+    accountLocal,
+    cloud,
+  }) as ValidatedScheduleReconciliationSnapshot;
+  validatedSnapshots.add(snapshot);
+  return snapshot;
+}
+
+function validSnapshot(
+  value: ValidatedScheduleReconciliationSnapshot,
+): boolean {
+  return typeof value === "object" && value !== null && validatedSnapshots.has(value);
+}
 
 function conflictsOf(
   reconciliation: ScheduleSourceReconciliation,
@@ -178,7 +296,7 @@ function latestCloudRevision(
 
 export function buildCourseResolutionPlan(input: {
   scope: ScheduleScope;
-  conflict: ReconciliationConflict;
+  snapshot: ValidatedScheduleReconciliationSnapshot;
   resolution: PerCourseResolution;
 }):
   | { kind: "ready"; plan: CourseResolutionPlan }
@@ -186,26 +304,42 @@ export function buildCourseResolutionPlan(input: {
   | { kind: "invalid-resolution" } {
   if (
     !accountScope(input.scope) ||
-    input.resolution.courseId !== input.conflict.courseId ||
-    !canonicalId(input.conflict.courseId)
+    !validSnapshot(input.snapshot) ||
+    input.snapshot.reconciliation.kind === "invalid" ||
+    !canonicalId(input.resolution.courseId)
   ) {
     return { kind: "invalid-resolution" };
   }
   if (input.resolution.kind === "cancel") return { kind: "cancel" };
+  const conflict = conflictsOf(input.snapshot.reconciliation).find(
+    ({ courseId }) => courseId === input.resolution.courseId,
+  );
+  const versions: ReconciliationCandidate[] = conflict?.versions ?? [
+    ...input.snapshot.reconciliation.courses
+      .filter(({ course }) => course.id === input.resolution.courseId)
+      .map((version) => ({ kind: "active" as const, ...version })),
+    ...input.snapshot.cloud.filter((candidate) =>
+      (candidate.kind === "active"
+        ? candidate.course.id
+        : candidate.courseId) === input.resolution.courseId
+    ),
+  ];
+  if (versions.length === 0) return { kind: "invalid-resolution" };
   const source = input.resolution.source;
-  const chosen = input.conflict.versions.find(
+  const chosen = versions.find(
     (version) => version.source === source,
   );
   if (!chosen) return { kind: "invalid-resolution" };
-  const serverRevision = latestCloudRevision(input.conflict.versions);
+  const serverRevision = latestCloudRevision(versions);
+  const courseId = input.resolution.courseId;
   if (chosen.kind === "tombstone") {
     return {
       kind: "ready",
       plan: {
         kind: "course-resolution",
         scope: input.scope,
-        courseId: input.conflict.courseId,
-        local: { kind: "delete", courseId: input.conflict.courseId },
+        courseId,
+        local: { kind: "delete", courseId },
         serverRevision: chosen.revision,
         clearSuperseded: true,
       },
@@ -217,7 +351,7 @@ export function buildCourseResolutionPlan(input: {
     plan: {
       kind: "course-resolution",
       scope: input.scope,
-      courseId: input.conflict.courseId,
+      courseId,
       local: { kind: "put", course: chosen.course },
       serverRevision: cloud ? chosen.revision ?? serverRevision : serverRevision,
       ...(cloud
@@ -255,28 +389,27 @@ function cloudRevisionById(
 
 export function buildReconciliationResolutionPlan(input: {
   scope: ScheduleScope;
-  reconciliation: ScheduleSourceReconciliation;
+  snapshot: ValidatedScheduleReconciliationSnapshot;
   choice: ReconciliationChoice;
-  deviceCourses: readonly ValidatedDeviceVersion[];
-  cloud: readonly ValidatedCloudCandidate[];
 }):
   | { kind: "ready"; plan: ScheduleResolutionPlan }
   | { kind: "cancel" }
   | { kind: "invalid-resolution"; reason: ChoiceValidation["kind"] } {
   if (input.choice.kind === "cancel") return { kind: "cancel" };
-  if (!accountScope(input.scope)) {
+  if (!accountScope(input.scope) || !validSnapshot(input.snapshot)) {
     return { kind: "invalid-resolution", reason: "invalid-choice" };
   }
   const validation = validateReconciliationChoice(
-    input.reconciliation,
+    input.snapshot.reconciliation,
     input.choice,
   );
   if (validation.kind !== "valid") {
     return { kind: "invalid-resolution", reason: validation.kind };
   }
   if (
-    input.deviceCourses.length > MAX_SCHEDULE_COURSES ||
-    input.cloud.filter((candidate) => candidate.kind === "active").length >
+    input.snapshot.guest.length + input.snapshot.accountLocal.length >
+      MAX_SCHEDULE_COURSES * 2 ||
+    input.snapshot.cloud.filter((candidate) => candidate.kind === "active").length >
       MAX_SCHEDULE_COURSES
   ) {
     return {
@@ -284,10 +417,10 @@ export function buildReconciliationResolutionPlan(input: {
       reason: "course-limit-exceeded",
     };
   }
-  const revisions = cloudRevisionById(input.cloud);
+  const revisions = cloudRevisionById(input.snapshot.cloud);
 
   if (input.choice.kind === "use-cloud") {
-    const courses = input.cloud
+    const courses = input.snapshot.cloud
       .filter(
         (candidate): candidate is Extract<ValidatedCloudCandidate, { kind: "active" }> =>
           candidate.kind === "active",
@@ -299,7 +432,7 @@ export function buildReconciliationResolutionPlan(input: {
       .sort((a, b) =>
         a.course.id < b.course.id ? -1 : a.course.id > b.course.id ? 1 : 0,
       );
-    const deletedCourseIds = input.cloud
+    const deletedCourseIds = input.snapshot.cloud
       .filter(
         (candidate): candidate is Extract<ValidatedCloudCandidate, { kind: "tombstone" }> =>
           candidate.kind === "tombstone",
@@ -319,8 +452,19 @@ export function buildReconciliationResolutionPlan(input: {
   }
 
   if (input.choice.kind === "replace-cloud") {
+    const localConflict = conflictsOf(input.snapshot.reconciliation).some(
+      ({ versions }) =>
+        versions.some((version) => version.source === "guest") &&
+        versions.some((version) => version.source === "account-local"),
+    );
+    if (localConflict) {
+      return { kind: "invalid-resolution", reason: "review-required" };
+    }
     const device = new Map<string, ValidatedDeviceVersion>();
-    for (const version of input.deviceCourses) {
+    for (const version of [
+      ...input.snapshot.guest,
+      ...input.snapshot.accountLocal,
+    ]) {
       if (!canonicalId(version.course.id)) {
         return { kind: "invalid-resolution", reason: "invalid-choice" };
       }
@@ -329,10 +473,16 @@ export function buildReconciliationResolutionPlan(input: {
         device.set(version.course.id, version);
       }
     }
-    const cloudActiveIds = input.cloud
+    const cloudActiveIds = input.snapshot.cloud
       .filter((candidate) => candidate.kind === "active")
       .map((candidate) => candidate.course.id);
     const ids = [...new Set([...device.keys(), ...cloudActiveIds])].sort();
+    if (device.size > MAX_SCHEDULE_COURSES) {
+      return {
+        kind: "invalid-resolution",
+        reason: "course-limit-exceeded",
+      };
+    }
     const desired: CourseResolutionPlan[] = ids.map((courseId) => {
       const selected = device.get(courseId);
       const expectedRevision = revisions.get(courseId) ?? 0;
@@ -372,12 +522,12 @@ export function buildReconciliationResolutionPlan(input: {
   }
 
   const desired: CourseResolutionPlan[] = [];
-  for (const version of input.reconciliation.courses) {
+  for (const version of input.snapshot.reconciliation.courses) {
     const conflict: ReconciliationConflict = {
       courseId: version.course.id,
       versions: [
         { kind: "active", ...version },
-        ...input.cloud.filter((candidate) =>
+        ...input.snapshot.cloud.filter((candidate) =>
           (candidate.kind === "active"
             ? candidate.course.id
             : candidate.courseId) === version.course.id &&
@@ -387,7 +537,7 @@ export function buildReconciliationResolutionPlan(input: {
     };
     const result = buildCourseResolutionPlan({
       scope: input.scope,
-      conflict,
+      snapshot: input.snapshot,
       resolution: {
         kind: "choose-source",
         courseId: version.course.id,
@@ -399,10 +549,10 @@ export function buildReconciliationResolutionPlan(input: {
     }
     desired.push(result.plan);
   }
-  for (const conflict of conflictsOf(input.reconciliation)) {
+  for (const conflict of conflictsOf(input.snapshot.reconciliation)) {
     const result = buildCourseResolutionPlan({
       scope: input.scope,
-      conflict,
+      snapshot: input.snapshot,
       resolution: {
         kind: "choose-source",
         courseId: conflict.courseId,
