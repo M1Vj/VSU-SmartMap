@@ -72,6 +72,41 @@ function sequenceLastValue() {
   );
 }
 
+function seedDeletedScheduleRows(userId, count) {
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      "supabase_db_vsu-smartmap",
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `
+        INSERT INTO public.student_schedule_courses (
+          user_id,
+          id,
+          payload,
+          last_mutation_id,
+          deleted_at
+        )
+        SELECT
+          '${userId}'::uuid,
+          gen_random_uuid(),
+          NULL,
+          gen_random_uuid(),
+          clock_timestamp()
+        FROM generate_series(1, ${count});
+      `,
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+}
+
 let passed = 0;
 let failed = 0;
 function check(name, ok, detail = "") {
@@ -96,7 +131,7 @@ async function main() {
   try {
     await waitForSchemaCache(anon);
     const clients = [];
-    for (const label of ["a", "b"]) {
+    for (const label of ["a", "b", "c"]) {
       const email = `schedule-${label}-${suffix}@local.smartmap.invalid`;
       const { data, error } = await service.auth.admin.createUser({
         email,
@@ -110,8 +145,8 @@ async function main() {
       if (signIn.error) throw new Error(signIn.error.message);
       clients.push(client);
     }
-    const [userA, userB] = clients;
-    const [userAId, userBId] = createdUserIds;
+    const [userA, userB, userC] = clients;
+    const [userAId, userBId, userCId] = createdUserIds;
     defaultExpectedUserId = userAId;
 
     console.log("Student schedule adversarial matrix (loopback Supabase only)\n");
@@ -337,6 +372,97 @@ async function main() {
       .select("id", { count: "exact", head: true });
     check("rejected course does not overshoot quota", afterExtra.count === 200);
 
+    seedDeletedScheduleRows(userCId, 999);
+    const totalBoundaryIds = [randomUUID(), randomUUID()];
+    const totalBoundaryMutations = [randomUUID(), randomUUID()];
+    const totalBoundaryResults = await Promise.all(
+      totalBoundaryIds.map((id, index) =>
+        userC.rpc(
+          "apply_student_schedule_mutation",
+          mutation(
+            id,
+            0,
+            "upsert",
+            { id, title: "Total row boundary" },
+            totalBoundaryMutations[index],
+          ),
+        ),
+      ),
+    );
+    check(
+      "concurrent total-row boundary accepts exactly row 1000",
+      totalBoundaryResults.filter((result) => !result.error).length === 1
+        && totalBoundaryResults.filter((result) => Boolean(result.error)).length === 1,
+      `${totalBoundaryResults.filter((result) => !result.error).length} accepted`,
+    );
+    const totalBoundaryCount = await userC
+      .from("student_schedule_courses")
+      .select("id", { count: "exact", head: true });
+    check(
+      "concurrent total-row attempts cannot create row 1001",
+      !totalBoundaryCount.error && totalBoundaryCount.count === 1000,
+      `${totalBoundaryCount.count} rows`,
+    );
+    const privilegedOverflow = await service
+      .from("student_schedule_courses")
+      .insert({
+        user_id: userCId,
+        id: randomUUID(),
+        payload: null,
+        last_mutation_id: randomUUID(),
+        deleted_at: new Date().toISOString(),
+      });
+    const countAfterPrivilegedOverflow = await userC
+      .from("student_schedule_courses")
+      .select("id", { count: "exact", head: true });
+    check(
+      "table trigger independently rejects privileged row 1001",
+      Boolean(privilegedOverflow.error)
+        && countAfterPrivilegedOverflow.count === 1000,
+      privilegedOverflow.error?.message,
+    );
+
+    const acceptedBoundaryIndex = totalBoundaryResults.findIndex(
+      (result) => !result.error,
+    );
+    const acceptedBoundaryReplay = acceptedBoundaryIndex < 0
+      ? { data: null, error: new Error("No boundary mutation was accepted.") }
+      : await userC.rpc(
+          "apply_student_schedule_mutation",
+          mutation(
+            totalBoundaryIds[acceptedBoundaryIndex],
+            0,
+            "upsert",
+            {
+              id: totalBoundaryIds[acceptedBoundaryIndex],
+              title: "Total row boundary",
+            },
+            totalBoundaryMutations[acceptedBoundaryIndex],
+          ),
+        );
+    check(
+      "row-cap enforcement preserves accepted mutation replay",
+      !acceptedBoundaryReplay.error
+        && acceptedBoundaryReplay.data?.[0]?.status === "replayed",
+      acceptedBoundaryReplay.error?.message,
+    );
+
+    const cappedMissingDeleteId = randomUUID();
+    const cappedMissingDelete = await userC.rpc(
+      "apply_student_schedule_mutation",
+      mutation(cappedMissingDeleteId, 0, "delete", null),
+    );
+    const countAfterCappedMissingDelete = await userC
+      .from("student_schedule_courses")
+      .select("id", { count: "exact", head: true });
+    check(
+      "missing delete remains a non-persisting no-op at the total cap",
+      !cappedMissingDelete.error
+        && cappedMissingDelete.data?.[0]?.status === "deleted"
+        && countAfterCappedMissingDelete.count === 1000,
+      cappedMissingDelete.error?.message,
+    );
+
   } finally {
     for (const userId of createdUserIds) {
       try {
@@ -345,6 +471,15 @@ async function main() {
           `cleanup removes local test user ${userId.slice(0, 8)}`,
           !cleanup.error,
           cleanup.error?.message,
+        );
+        const remaining = await service
+          .from("student_schedule_courses")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId);
+        check(
+          `cleanup cascades schedule rows for ${userId.slice(0, 8)}`,
+          !remaining.error && remaining.count === 0,
+          remaining.error?.message ?? `${remaining.count} rows remain`,
         );
       } catch (error) {
         check(

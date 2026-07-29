@@ -92,6 +92,7 @@ SET search_path = ''
 AS $$
 DECLARE
   v_active_count INTEGER;
+  v_total_count INTEGER;
 BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(NEW.user_id::text, 0)
@@ -113,6 +114,25 @@ BEGIN
   NEW.updated_at := pg_catalog.clock_timestamp();
   IF NEW.deleted_at IS NOT NULL THEN
     NEW.payload := NULL;
+  END IF;
+
+  IF TG_OP = 'INSERT'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.student_schedule_courses AS schedules
+      WHERE schedules.user_id = NEW.user_id
+        AND schedules.id = NEW.id
+    )
+  THEN
+    SELECT count(*)
+    INTO v_total_count
+    FROM public.student_schedule_courses AS schedules
+    WHERE schedules.user_id = NEW.user_id;
+
+    IF v_total_count >= 1000 THEN
+      RAISE EXCEPTION 'total student schedule row quota exceeded'
+        USING ERRCODE = 'P0001';
+    END IF;
   END IF;
 
   IF NEW.deleted_at IS NULL
@@ -227,6 +247,8 @@ DECLARE
   v_existing public.student_schedule_courses%ROWTYPE;
   v_result public.student_schedule_courses%ROWTYPE;
   v_active_count INTEGER;
+  v_total_count INTEGER;
+  v_exists BOOLEAN;
 BEGIN
   v_user_id := public.student_schedule_authenticated_user_id();
   IF v_user_id IS NULL THEN
@@ -272,7 +294,9 @@ BEGIN
     AND schedules.id = p_course_id
   FOR UPDATE;
 
-  IF FOUND AND v_existing.last_mutation_id = p_mutation_id THEN
+  v_exists := FOUND;
+
+  IF v_exists AND v_existing.last_mutation_id = p_mutation_id THEN
     RETURN QUERY SELECT
       'replayed'::TEXT,
       v_existing.id,
@@ -285,8 +309,8 @@ BEGIN
     RETURN;
   END IF;
 
-  IF (NOT FOUND AND p_expected_revision <> 0)
-    OR (FOUND AND v_existing.revision <> p_expected_revision)
+  IF (NOT v_exists AND p_expected_revision <> 0)
+    OR (v_exists AND v_existing.revision <> p_expected_revision)
   THEN
     RETURN QUERY SELECT
       'conflict'::TEXT,
@@ -300,7 +324,7 @@ BEGIN
     RETURN;
   END IF;
 
-  IF p_operation = 'delete' AND NOT FOUND AND p_expected_revision = 0 THEN
+  IF p_operation = 'delete' AND NOT v_exists AND p_expected_revision = 0 THEN
     RETURN QUERY SELECT
       'deleted'::TEXT,
       p_course_id,
@@ -314,7 +338,19 @@ BEGIN
   END IF;
 
   IF p_operation = 'upsert' THEN
-    IF NOT FOUND OR v_existing.deleted_at IS NOT NULL THEN
+    IF NOT v_exists THEN
+      SELECT count(*)
+      INTO v_total_count
+      FROM public.student_schedule_courses AS schedules
+      WHERE schedules.user_id = v_user_id;
+
+      IF v_total_count >= 1000 THEN
+        RAISE EXCEPTION 'total student schedule row quota exceeded'
+          USING ERRCODE = 'P0001';
+      END IF;
+    END IF;
+
+    IF NOT v_exists OR v_existing.deleted_at IS NOT NULL THEN
       SELECT count(*)
       INTO v_active_count
       FROM public.student_schedule_courses AS schedules

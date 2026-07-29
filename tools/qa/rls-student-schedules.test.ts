@@ -110,8 +110,10 @@ test("mutation RPC is revision-aware, idempotent, bounded, and operation-limited
     "count(*)",
     "deleted_at is null",
     ">= 200",
+    "total student schedule row quota exceeded",
+    ">= 1000",
     "'conflict'::text",
-    "p_operation = 'delete' and not found and p_expected_revision = 0",
+    "p_operation = 'delete' and not v_exists and p_expected_revision = 0",
     "'deleted'::text",
     "raise exception",
   ]) {
@@ -123,10 +125,12 @@ test("mutation RPC is revision-aware, idempotent, bounded, and operation-limited
   )?.[0];
   assert.ok(triggerDefinition, "missing schedule trigger function");
   assert.doesNotMatch(triggerDefinition, /security definer/);
+  assert.match(triggerDefinition, /total student schedule row quota exceeded/);
+  assert.match(triggerDefinition, />= 1000/);
   assert.doesNotMatch(sql, /revision conflict[^;]*raise exception/);
 
   const missingDelete = sql.match(
-    /if p_operation = 'delete' and not found and p_expected_revision = 0.*?end if;/,
+    /if p_operation = 'delete' and not v_exists and p_expected_revision = 0.*?end if;/,
   )?.[0];
   assert.ok(missingDelete, "missing delete no-op branch is required");
   assert.doesNotMatch(missingDelete, /insert|nextval|update/);
