@@ -28,7 +28,6 @@ export function ScheduleAccountPanel({
   onSyncNow,
   onReview,
   onSignOut,
-  onBackup,
   onRemoveLocalData,
   privateSyncFocusRef,
 }: {
@@ -42,7 +41,6 @@ export function ScheduleAccountPanel({
   onSyncNow?: () => void;
   onReview?: () => void;
   onSignOut: () => void;
-  onBackup: () => void;
   onRemoveLocalData: () => void;
   privateSyncFocusRef?: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -79,7 +77,7 @@ export function ScheduleAccountPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 [&_button]:min-h-11 [&_button]:min-w-11">
-        <div><p className="font-medium">{account.email ?? "Google account"}</p><p className="text-sm text-muted-foreground">When enabled, schedules use private Supabase rows and are not shared with Google or Google Calendar.</p></div>
+        <div><p className="font-medium">{account.email ?? "Google account"}</p><p className="text-sm text-muted-foreground">When enabled, your schedule is backed up privately to your account. It is not added to Google Calendar.</p></div>
         {!consentEnabled ? (
           <div className="space-y-2">
             <p className="text-sm">{account.offlineVerified ? "Signing in alone does not enable schedule sync." : "This cached account can use only its local schedule while offline. Reconnect and verify the account before enabling private sync."}</p>
@@ -100,7 +98,6 @@ export function ScheduleAccountPanel({
         )}
         {authError ? <p role="alert" aria-live="assertive" className="text-sm text-destructive">{authError}</p> : null}
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={onBackup}>Backup & export</Button>
           <Button type="button" variant="outline" onClick={onSignOut}>Sign out</Button>
           <Button type="button" variant="destructive" onClick={onRemoveLocalData}>Remove local account data from this device</Button>
         </div>

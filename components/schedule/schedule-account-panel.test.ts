@@ -20,20 +20,21 @@ test("account panel distinguishes guest consent and all sync states", async () =
     "Error",
     "Sync now",
     "Sign out",
-    "Backup & export",
     "Remove local account data from this device",
   ]) {
     assert.match(source, new RegExp(label));
   }
 });
 
-test("account panel discloses private storage and no Google Calendar access", async () => {
+test("account panel explains private backup without implementation jargon", async () => {
   const source = await readFile(
     new URL("./schedule-account-panel.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /private Supabase rows/);
-  assert.match(source, /not shared with Google or Google Calendar/);
+  assert.match(source, /backed up privately to your account/);
+  assert.match(source, /not added to Google Calendar/);
+  assert.doesNotMatch(source, /\b(?:IndexedDB|Supabase)\b/);
+  assert.doesNotMatch(source, />Backup & export</);
   assert.match(source, /min-h-11/);
 });
 

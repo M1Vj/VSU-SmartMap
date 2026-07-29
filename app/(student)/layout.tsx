@@ -3,6 +3,7 @@ import { AppHeader } from "@/components/app-header";
 import { StudentTabs } from "@/components/student-tabs";
 import { AppProvider } from "@/lib/context/app-context";
 import { FacilitySheet } from "@/components/facility/facility-sheet";
+import { SiteCredit } from "@/components/layout/site-credit";
 
 export default function StudentLayout({
   children,
@@ -18,6 +19,7 @@ export default function StudentLayout({
             {children}
             <FacilitySheet />
           </main>
+          <SiteCredit />
           <StudentTabs placement="bottom" />
         </div>
       </AppProvider>

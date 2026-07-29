@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { liveQuery } from "dexie";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Database, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { CalendarDays, Database, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -302,32 +302,6 @@ export function SchedulePageClient() {
           </div>
         </header>
 
-        <ScheduleAccountPanel
-          enabled={accountSyncEnabled}
-          account={scheduleAccount.account}
-          consentEnabled={scheduleAccount.consentEnabled}
-          authError={scheduleAccount.authError}
-          syncStatus={scheduleSync.status}
-          onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
-          onEnable={() => { void scheduleAccount.enableConsent(); }}
-          onSyncNow={scheduleSync.syncNow}
-          onReview={scheduleSync.openReview}
-          onSignOut={() => { void scheduleAccount.signOut(); }}
-          onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
-          onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
-          privateSyncFocusRef={privateSyncFocusRef}
-        />
-        {scheduleReconciliation.error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {scheduleReconciliation.error}
-          </p>
-        ) : null}
-        {scheduleSync.error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {scheduleSync.error}
-          </p>
-        ) : null}
-
         {storageError ? <Card className="border-destructive"><CardHeader><CardTitle>Schedule storage unavailable</CardTitle></CardHeader><CardContent className="space-y-3"><p role="alert">{storageError}</p><Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>Try again</Button></CardContent></Card> : loading || scheduleAccount.account.kind === "loading" || loadedCourses?.scope !== scheduleAccount.scope ? <Card><CardContent className="flex min-h-40 items-center justify-center p-6"><p aria-live="polite">Loading your schedule…</p></CardContent></Card> : (
           <>
             <Card>
@@ -341,7 +315,30 @@ export function SchedulePageClient() {
             {courses.length > 0 ? <ScheduleWeekGrid courses={courses} /> : null}
           </>
         )}
-        <aside className="flex gap-3 rounded-lg border bg-muted/40 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>{scheduleAccount.account.kind !== "authenticated" ? "Your class routine stays in this browser’s IndexedDB and is not sent to Supabase. Keep a JSON backup before clearing browser data or changing devices." : !scheduleAccount.account.offlineVerified ? "This cached account’s local schedule is available only on this device while offline. Cloud sync stays paused until the account is verified online." : !scheduleAccount.consentEnabled ? "This account’s schedule remains local to this device. Signing in does not send it to Supabase unless you explicitly enable private sync." : "Private sync consent is enabled. Your schedule remains available locally; cloud activity and success are shown only when a verified sync status is available."}</p></aside>
+        <ScheduleAccountPanel
+          enabled={accountSyncEnabled}
+          account={scheduleAccount.account}
+          consentEnabled={scheduleAccount.consentEnabled}
+          authError={scheduleAccount.authError}
+          syncStatus={scheduleSync.status}
+          onContinue={() => { void scheduleAccount.startGoogleSignIn(); }}
+          onEnable={() => { void scheduleAccount.enableConsent(); }}
+          onSyncNow={scheduleSync.syncNow}
+          onReview={scheduleSync.openReview}
+          onSignOut={() => { void scheduleAccount.signOut(); }}
+          onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
+          privateSyncFocusRef={privateSyncFocusRef}
+        />
+        {scheduleReconciliation.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {scheduleReconciliation.error}
+          </p>
+        ) : null}
+        {scheduleSync.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {scheduleSync.error}
+          </p>
+        ) : null}
       </div>
       <CourseDialog
         open={editing?.scope === scheduleAccount.scope}

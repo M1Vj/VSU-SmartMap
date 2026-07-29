@@ -4,7 +4,11 @@ import { CalendarClock, CalendarDays, Home, ListOrdered, MapPinned, MessageSquar
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/context/app-context";
 import { usePathname } from "next/navigation";
-import { STUDENT_DESTINATIONS, type StudentDestinationId } from "@/lib/navigation/student-navigation";
+import {
+  shouldShowStudentNavigation,
+  STUDENT_DESTINATIONS,
+  type StudentDestinationId,
+} from "@/lib/navigation/student-navigation";
 
 type Placement = "inline" | "bottom";
 
@@ -55,7 +59,7 @@ export function StudentTabs({
 
   const isInline = placement === "inline";
 
-  if (pathname === "/info") {
+  if (!shouldShowStudentNavigation(pathname)) {
     return null;
   }
 
