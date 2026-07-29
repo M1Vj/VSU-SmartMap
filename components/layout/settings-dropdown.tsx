@@ -274,7 +274,7 @@ export function SettingsDropdown() {
           {isCompactSettings && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="justify-center p-0 text-[10px] text-muted-foreground md:hidden">
+              <DropdownMenuItem asChild className="justify-center p-0 text-[10px] text-foreground md:hidden">
                 <a
                   href="https://github.com/M1Vj"
                   target="_blank"

@@ -45,8 +45,12 @@ test("mobile settings end with a focusable GitHub developer credit", () => {
   assert.ok(creditIndex > reportBugIndex);
   assert.ok(contentEndIndex > creditIndex);
   assert.equal(finalItemIndex, creditItemIndex);
+  assert.doesNotMatch(
+    source.slice(creditItemIndex, contentEndIndex),
+    /text-muted-foreground/,
+  );
   assert.match(
     source.slice(reportBugIndex, contentEndIndex),
-    /Report a Bug[\s\S]*\{isCompactSettings && \([\s\S]*<DropdownMenuSeparator \/>[\s\S]*<DropdownMenuItem asChild className="[^"]*justify-center[^"]*text-\[10px\][^"]*text-muted-foreground[^"]*md:hidden[^"]*"[\s\S]*<a[\s\S]*href="https:\/\/github\.com\/M1Vj"[\s\S]*target="_blank"[\s\S]*rel="noopener noreferrer"[\s\S]*className="[^"]*justify-center[^"]*text-center[^"]*"[\s\S]*Developed by Vj F Mabansag/,
+    /Report a Bug[\s\S]*\{isCompactSettings && \([\s\S]*<DropdownMenuSeparator \/>[\s\S]*<DropdownMenuItem asChild className="[^"]*justify-center[^"]*text-\[10px\][^"]*text-foreground[^"]*md:hidden[^"]*"[\s\S]*<a[\s\S]*href="https:\/\/github\.com\/M1Vj"[\s\S]*target="_blank"[\s\S]*rel="noopener noreferrer"[\s\S]*className="[^"]*justify-center[^"]*text-center[^"]*"[\s\S]*Developed by Vj F Mabansag/,
   );
 });
