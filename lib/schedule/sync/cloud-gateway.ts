@@ -222,6 +222,36 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
     return parseMutationResult(data, mutation);
   }
 
+  async pullAllBounded(
+    maximumRows: number,
+    pageSize = 1_000,
+  ): Promise<CloudScheduleRow[]> {
+    if (
+      !Number.isSafeInteger(maximumRows) ||
+      maximumRows < 0 ||
+      !Number.isSafeInteger(pageSize) ||
+      pageSize <= 0 ||
+      pageSize > maximumRows
+    ) {
+      throw new ScheduleSyncError("invalid-remote");
+    }
+    const rows: CloudScheduleRow[] = [];
+    let cursor = 0;
+    while (true) {
+      const page = await this.pull(cursor);
+      if (rows.length + page.length > maximumRows) {
+        throw new ScheduleSyncError("invalid-remote");
+      }
+      rows.push(...page);
+      if (page.length < pageSize) return rows;
+      const last = page.at(-1);
+      if (!last || last.serverVersion <= cursor) {
+        throw new ScheduleSyncError("invalid-remote");
+      }
+      cursor = last.serverVersion;
+    }
+  }
+
   async pull(afterServerVersion: number): Promise<CloudScheduleRow[]> {
     if (!Number.isSafeInteger(afterServerVersion) || afterServerVersion < 0) {
       throw new ScheduleSyncError("invalid-remote");

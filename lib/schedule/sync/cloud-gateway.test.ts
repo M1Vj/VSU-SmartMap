@@ -149,6 +149,49 @@ test("pull keeps semantically invalid payloads for coordinator quarantine", asyn
   assert.equal(rows.length, 1);
 });
 
+test("initial pull continues from a full page and fails closed above its bound", async () => {
+  class PagingClient {
+    after = 0;
+    calls = 0;
+    from() {
+      const query = {
+        select: () => query,
+        gt: (_column: string, value: number) => {
+          this.after = value;
+          return query;
+        },
+        order: () => query,
+        then: (resolve: (value: unknown) => void) => {
+          this.calls += 1;
+          const start = this.after + 1;
+          const count = this.calls === 1 ? 2 : 1;
+          resolve({
+            data: Array.from({ length: count }, (_, index) => ({
+              id: `00000000-0000-4000-8000-${(start + index).toString().padStart(12, "0")}`,
+              payload: null,
+              revision: 1,
+              server_version: start + index,
+              created_at: "2026-07-28T00:00:00.000Z",
+              updated_at: "2026-07-28T00:00:00.000Z",
+              deleted_at: "2026-07-28T00:00:00.000Z",
+            })),
+            error: null,
+          });
+        },
+      };
+      return query;
+    }
+  }
+  const client = new PagingClient();
+  await assert.rejects(
+    () => new SupabaseScheduleGateway(client as never).pullAllBounded(2, 2),
+    (error: unknown) =>
+      error instanceof ScheduleSyncError &&
+      error.category === "invalid-remote",
+  );
+  assert.equal(client.calls, 2);
+});
+
 test("pull rejects an equal cursor and unsafe BIGINT values", async () => {
   const client = new FakeClient();
   client.rows = [{

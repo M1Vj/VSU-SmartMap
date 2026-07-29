@@ -72,7 +72,9 @@ export function useScheduleReconciliation({
             .equals(GUEST_SCHEDULE_SCOPE)
             .toArray(),
           db.schedule_scoped_courses.where("scope").equals(scope).toArray(),
-          new SupabaseScheduleGateway(getSupabaseBrowserClient()).pull(0),
+          new SupabaseScheduleGateway(
+            getSupabaseBrowserClient(),
+          ).pullAllBounded(MAX_INITIAL_CLOUD_ROWS),
         ]);
         if (cloud.length > MAX_INITIAL_CLOUD_ROWS) {
           throw new Error("Initial cloud schedule is unbounded.");
