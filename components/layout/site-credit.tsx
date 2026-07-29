@@ -18,7 +18,7 @@ export function SiteCredit({
   return (
     <footer
       className={cn(
-        "relative z-20 -mt-5 flex h-5 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-foreground",
+        "relative z-20 -mt-6 flex h-6 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-foreground",
         hasMobileNavigation && "hidden md:flex",
       )}
     >

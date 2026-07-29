@@ -44,7 +44,8 @@ test("site credit remains transparent over every public page", async () => {
   const source = await readCreditSource();
 
   assert.match(source, /bg-transparent/);
-  assert.match(source, /-mt-5/);
+  assert.match(source, /-mt-6 flex h-6 shrink-0/);
+  assert.doesNotMatch(source, /-mt-5 flex h-5 shrink-0/);
   assert.match(source, /if \(pathname === "\/"\) return null;/);
   assert.doesNotMatch(source, /aria-hidden="true"/);
   assert.doesNotMatch(source, /shrink-0 md:hidden/);
