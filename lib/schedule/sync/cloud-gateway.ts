@@ -238,12 +238,12 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
     const rows: CloudScheduleRow[] = [];
     let cursor = 0;
     while (true) {
-      const page = await this.pull(cursor);
+      const page = await this.pullPage(cursor, pageSize);
+      if (page.length === 0) return rows;
       if (rows.length + page.length > maximumRows) {
         throw new ScheduleSyncError("invalid-remote");
       }
       rows.push(...page);
-      if (page.length < pageSize) return rows;
       const last = page.at(-1);
       if (!last || last.serverVersion <= cursor) {
         throw new ScheduleSyncError("invalid-remote");
@@ -253,15 +253,24 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
   }
 
   async pull(afterServerVersion: number): Promise<CloudScheduleRow[]> {
+    return this.pullPage(afterServerVersion);
+  }
+
+  private async pullPage(
+    afterServerVersion: number,
+    pageSize?: number,
+  ): Promise<CloudScheduleRow[]> {
     if (!Number.isSafeInteger(afterServerVersion) || afterServerVersion < 0) {
       throw new ScheduleSyncError("invalid-remote");
     }
-    const { data, error } = await this.client
+    let query = this.client
       .from("student_schedule_courses")
       .select("id,payload,revision,server_version,created_at,updated_at,deleted_at")
       .gt("server_version", afterServerVersion)
       .order("server_version", { ascending: true })
       .order("id", { ascending: true });
+    if (pageSize !== undefined) query = query.limit(pageSize);
+    const { data, error } = await query;
     if (error) throw classify(error);
     if (!Array.isArray(data)) throw new ScheduleSyncError("invalid-remote");
     const rows = data.map((row) => parseRow(row, false));

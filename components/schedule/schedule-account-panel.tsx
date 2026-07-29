@@ -30,7 +30,7 @@ export function ScheduleAccountPanel({
   onSignOut,
   onBackup,
   onRemoveLocalData,
-  reconciliationTriggerRef,
+  privateSyncFocusRef,
 }: {
   enabled: boolean;
   account: ScheduleAccountState;
@@ -44,7 +44,7 @@ export function ScheduleAccountPanel({
   onSignOut: () => void;
   onBackup: () => void;
   onRemoveLocalData: () => void;
-  reconciliationTriggerRef?: RefObject<HTMLButtonElement | null>;
+  privateSyncFocusRef?: RefObject<HTMLHeadingElement | null>;
 }) {
   if (!enabled || account.kind === "guest") {
     return (
@@ -66,13 +66,24 @@ export function ScheduleAccountPanel({
 
   return (
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><Cloud className="h-5 w-5" aria-hidden="true" />Private schedule sync</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle className="text-lg">
+          <h2
+            ref={privateSyncFocusRef}
+            tabIndex={-1}
+            className="flex items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <Cloud className="h-5 w-5" aria-hidden="true" />
+            Private schedule sync
+          </h2>
+        </CardTitle>
+      </CardHeader>
       <CardContent className="space-y-4 [&_button]:min-h-11 [&_button]:min-w-11">
         <div><p className="font-medium">{account.email ?? "Google account"}</p><p className="text-sm text-muted-foreground">When enabled, schedules use private Supabase rows and are not shared with Google or Google Calendar.</p></div>
         {!consentEnabled ? (
           <div className="space-y-2">
             <p className="text-sm">{account.offlineVerified ? "Signing in alone does not enable schedule sync." : "This cached account can use only its local schedule while offline. Reconnect and verify the account before enabling private sync."}</p>
-            <Button ref={reconciliationTriggerRef} type="button" onClick={onEnable} disabled={!account.offlineVerified}>Enable private sync</Button>
+            <Button type="button" onClick={onEnable} disabled={!account.offlineVerified}>Enable private sync</Button>
           </div>
         ) : (
           <div className="space-y-2" aria-live="polite">

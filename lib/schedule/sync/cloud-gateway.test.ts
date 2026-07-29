@@ -153,6 +153,7 @@ test("initial pull continues from a full page and fails closed above its bound",
   class PagingClient {
     after = 0;
     calls = 0;
+    requestedLimit?: number;
     from() {
       const query = {
         select: () => query,
@@ -161,6 +162,10 @@ test("initial pull continues from a full page and fails closed above its bound",
           return query;
         },
         order: () => query,
+        limit: (value: number) => {
+          this.requestedLimit = value;
+          return query;
+        },
         then: (resolve: (value: unknown) => void) => {
           this.calls += 1;
           const start = this.after + 1;
@@ -190,6 +195,57 @@ test("initial pull continues from a full page and fails closed above its bound",
       error.category === "invalid-remote",
   );
   assert.equal(client.calls, 2);
+  assert.equal(client.requestedLimit, 2);
+});
+
+test("bounded initial pull continues through a lower server cap until an empty proof page", async () => {
+  class CappedClient {
+    after = 0;
+    requestedLimit = 0;
+    calls = 0;
+    readonly rows = Array.from({ length: 1_200 }, (_, index) => {
+      const version = index + 1;
+      return {
+        id: `00000000-0000-4000-8000-${version.toString().padStart(12, "0")}`,
+        payload: null,
+        revision: 1,
+        server_version: version,
+        created_at: "2026-07-28T00:00:00.000Z",
+        updated_at: "2026-07-28T00:00:00.000Z",
+        deleted_at: "2026-07-28T00:00:00.000Z",
+      };
+    });
+    from() {
+      const query = {
+        select: () => query,
+        gt: (_column: string, value: number) => {
+          this.after = value;
+          return query;
+        },
+        order: () => query,
+        limit: (value: number) => {
+          this.requestedLimit = value;
+          return query;
+        },
+        then: (resolve: (value: unknown) => void) => {
+          this.calls += 1;
+          resolve({
+            data: this.rows
+              .filter((row) => row.server_version > this.after)
+              .slice(0, Math.min(500, this.requestedLimit)),
+            error: null,
+          });
+        },
+      };
+      return query;
+    }
+  }
+  const client = new CappedClient();
+  const rows = await new SupabaseScheduleGateway(client as never)
+    .pullAllBounded(1_500, 1_000);
+  assert.equal(rows.length, 1_200);
+  assert.equal(client.calls, 4);
+  assert.equal(client.requestedLimit, 1_000);
 });
 
 test("pull rejects an equal cursor and unsafe BIGINT values", async () => {

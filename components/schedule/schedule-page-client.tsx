@@ -13,6 +13,7 @@ import { ScheduleRepository } from "@/lib/schedule/repository";
 import type { ScheduleScope } from "@/lib/schedule/scope";
 import { canRunScheduleScopeAction } from "@/lib/schedule/scope-bound-action";
 import { isScheduleAccountSyncEnabled } from "@/lib/schedule/sync/feature-flag";
+import { createReconciliationFocusRestoreController } from "@/lib/schedule/sync/reconciliation-focus";
 import {
   MAX_SCHEDULE_COURSES,
   type IsoWeekday,
@@ -53,7 +54,10 @@ export function SchedulePageClient() {
   const currentScopeRef = useRef(scheduleAccount.scope);
   const loadedScopeRef = useRef<ScheduleScope | undefined>(undefined);
   const actionGeneration = useRef(0);
-  const reconciliationTriggerRef = useRef<HTMLButtonElement>(null);
+  const privateSyncFocusRef = useRef<HTMLHeadingElement>(null);
+  const reconciliationFocusRestore = useRef(
+    createReconciliationFocusRestoreController(),
+  );
   if (currentScopeRef.current !== scheduleAccount.scope) {
     currentScopeRef.current = scheduleAccount.scope;
     loadedScopeRef.current = undefined;
@@ -304,7 +308,7 @@ export function SchedulePageClient() {
           onSignOut={() => { void scheduleAccount.signOut(); }}
           onBackup={() => loadedScopeRef.current === scheduleAccount.scope && setTransferScope(scheduleAccount.scope)}
           onRemoveLocalData={() => setConfirmation({ kind: "remove-local-account", scope: scheduleAccount.scope })}
-          reconciliationTriggerRef={reconciliationTriggerRef}
+          privateSyncFocusRef={privateSyncFocusRef}
         />
         {scheduleReconciliation.error ? (
           <p role="alert" className="text-sm text-destructive">
@@ -353,11 +357,23 @@ export function SchedulePageClient() {
           activeScope={scheduleAccount.scope}
           snapshot={scheduleReconciliation.snapshot}
           busy={scheduleReconciliation.busy}
-          returnFocusRef={reconciliationTriggerRef}
-          onCancel={scheduleReconciliation.cancel}
+          returnFocusRef={privateSyncFocusRef}
+          shouldRestoreFocusOnClose={() =>
+            reconciliationFocusRestore.current.consume(currentScopeRef.current)
+          }
+          onCancel={() => {
+            reconciliationFocusRestore.current.request(scheduleAccount.scope);
+            scheduleReconciliation.cancel();
+          }}
           onChoice={(choice) => {
             if (!scheduleReconciliation.busy) {
-              void scheduleReconciliation.choose(choice);
+              const choiceScope = scheduleAccount.scope;
+              reconciliationFocusRestore.current.request(choiceScope);
+              void scheduleReconciliation.choose(choice).then((applied) => {
+                if (!applied) {
+                  reconciliationFocusRestore.current.clear(choiceScope);
+                }
+              });
             }
           }}
         />

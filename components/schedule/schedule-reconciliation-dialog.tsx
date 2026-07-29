@@ -44,6 +44,7 @@ export function ScheduleReconciliationDialog({
   snapshot,
   busy = false,
   returnFocusRef,
+  shouldRestoreFocusOnClose,
   onChoice,
   onCancel,
 }: {
@@ -53,6 +54,7 @@ export function ScheduleReconciliationDialog({
   snapshot: ValidatedScheduleReconciliationSnapshot;
   busy?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  shouldRestoreFocusOnClose?: () => boolean;
   onChoice: (choice: ReconciliationChoice) => void;
   onCancel: () => void;
 }) {
@@ -117,9 +119,13 @@ export function ScheduleReconciliationDialog({
           initialFocus.current?.focus();
         }}
         onCloseAutoFocus={(event) => {
-          if (!returnFocusRef?.current) return;
           event.preventDefault();
-          returnFocusRef.current.focus();
+          if (
+            shouldRestoreFocusOnClose?.() === true &&
+            returnFocusRef?.current
+          ) {
+            returnFocusRef.current.focus();
+          }
         }}
       >
         <DialogScaffoldHeader>

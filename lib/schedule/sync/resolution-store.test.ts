@@ -119,3 +119,31 @@ test("Dexie resolution rolls back all four stores when mutation creation fails",
   assert.deepEqual(await database.schedule_sync_state.toArray(), before.state);
   await database.delete();
 });
+
+test("use-cloud rejects an uppercase original ID instead of normalizing a direct plan", async () => {
+  const database = await seededDatabase();
+  const store = createDexieAtomicScheduleResolutionStore(database, {
+    mutationId: () => "55555555-5555-4555-8555-555555555555",
+    now: () => new Date("2026-02-01T00:00:00.000Z"),
+  });
+  const alphabeticId = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+  const uppercase = {
+    ...course(alphabeticId, "Cloud"),
+    id: alphabeticId.toUpperCase(),
+  };
+  await assert.rejects(
+    store.apply({
+      kind: "use-cloud",
+      scope,
+      courses: [{ course: uppercase, serverRevision: 1 }],
+      deletedCourseIds: [],
+      clearSuperseded: true,
+    }),
+    /invalid|canonical/i,
+  );
+  assert.equal(
+    (await database.schedule_scoped_courses.get(scopedCourseKey(scope, id)))?.course.title,
+    "Old local",
+  );
+  await database.delete();
+});

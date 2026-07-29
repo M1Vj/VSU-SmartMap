@@ -35,3 +35,30 @@ export function createReconciliationGeneration() {
     },
   };
 }
+
+type ReconciliationGeneration = ReturnType<
+  typeof createReconciliationGeneration
+>;
+
+export async function applyScopedReconciliation(input: {
+  gate: ReconciliationGeneration;
+  scope: ScheduleScope;
+  apply: () => Promise<void>;
+  onSuccess: () => void;
+  onFailure: () => void;
+  onFinally: () => void;
+}): Promise<boolean> {
+  const token = input.gate.begin(input.scope);
+  try {
+    await input.apply();
+    if (!input.gate.isCurrent(token, input.scope)) return false;
+    input.onSuccess();
+    return true;
+  } catch {
+    if (!input.gate.isCurrent(token, input.scope)) return false;
+    input.onFailure();
+    return false;
+  } finally {
+    if (input.gate.isCurrent(token, input.scope)) input.onFinally();
+  }
+}

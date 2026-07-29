@@ -79,6 +79,8 @@ function validatePlan(plan: ScheduleResolutionPlan): void {
     for (const row of plan.courses) {
       const course = parseStoredScheduleCourse(row.course);
       if (
+        row.course.id !== course.id ||
+        row.course.id !== row.course.id.trim().toLowerCase() ||
         ids.has(course.id) ||
         !revision(row.serverRevision)
       ) {

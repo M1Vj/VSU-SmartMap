@@ -13,6 +13,7 @@ import {
 } from "@/lib/schedule/sync/resolution";
 import { createDexieAtomicScheduleResolutionStore } from "@/lib/schedule/sync/resolution-store";
 import {
+  applyScopedReconciliation,
   classifyFirstReconciliation,
   createReconciliationGeneration,
 } from "@/lib/schedule/sync/reconciliation-controller";
@@ -123,20 +124,21 @@ export function useScheduleReconciliation({
   }, [accountVerified, consentEnabled, enabled, onApplied, scope]);
 
   const cancel = useCallback(() => {
+    gate.current.invalidate();
     deferredScope.current = scope;
     setSnapshotState(undefined);
     setError("");
   }, [scope]);
 
   const choose = useCallback(
-    async (choice: ReconciliationChoice) => {
+    async (choice: ReconciliationChoice): Promise<boolean> => {
       if (
         choice.kind === "cancel" ||
         !snapshotState ||
         snapshotState.scope !== scope
       ) {
         cancel();
-        return;
+        return false;
       }
       setBusy(true);
       setError("");
@@ -149,16 +151,29 @@ export function useScheduleReconciliation({
         if (result.kind !== "ready") {
           throw new Error("Reconciliation choice requires review.");
         }
-        await createDexieAtomicScheduleResolutionStore(
-          db,
-          defaultScheduleMutationDependencies,
-        ).apply(result.plan);
-        setSnapshotState(undefined);
-        onApplied();
+        return await applyScopedReconciliation({
+          gate: gate.current,
+          scope,
+          apply: () =>
+            createDexieAtomicScheduleResolutionStore(
+              db,
+              defaultScheduleMutationDependencies,
+            ).apply(result.plan),
+          onSuccess: () => {
+            setSnapshotState(undefined);
+            onApplied();
+          },
+          onFailure: () => {
+            setError(GENERIC_RECONCILIATION_ERROR);
+          },
+          onFinally: () => {
+            setBusy(false);
+          },
+        });
       } catch {
         setError(GENERIC_RECONCILIATION_ERROR);
-      } finally {
         setBusy(false);
+        return false;
       }
     },
     [cancel, onApplied, scope, snapshotState],
