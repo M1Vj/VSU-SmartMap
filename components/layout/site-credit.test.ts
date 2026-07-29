@@ -19,6 +19,14 @@ test("site credit is a tiny centered link to the developer profile", async () =>
   assert.match(source, /rel="noopener noreferrer"/);
   assert.match(source, /text-\[10px\]/);
   assert.match(source, /text-center/);
+  assert.match(source, /\btext-foreground\b/);
+  assert.doesNotMatch(source, /\btext-muted-foreground\b/);
+  assert.match(source, /\binline-flex\b/);
+  assert.match(source, /\bmin-h-6\b/);
+  assert.match(source, /\bitems-center\b/);
+  assert.match(source, /\bpx-1\b/);
+  assert.match(source, /\bfocus-visible:ring-foreground\b/);
+  assert.doesNotMatch(source, /\bfocus-visible:ring-ring\b/);
 });
 
 test("site credit yields mobile student routes to their navigation-owned credit", async () => {

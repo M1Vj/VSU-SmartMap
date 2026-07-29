@@ -18,7 +18,7 @@ export function SiteCredit({
   return (
     <footer
       className={cn(
-        "relative z-20 -mt-5 flex h-5 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-muted-foreground",
+        "relative z-20 -mt-5 flex h-5 shrink-0 items-center justify-center bg-transparent px-3 text-center text-[10px] leading-none text-foreground",
         hasMobileNavigation && "hidden md:flex",
       )}
     >
@@ -26,7 +26,7 @@ export function SiteCredit({
         href="https://github.com/M1Vj"
         target="_blank"
         rel="noopener noreferrer"
-        className="rounded-sm underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        className="inline-flex min-h-6 items-center rounded-sm px-1 underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
       >
         Developed by Vj F Mabansag
       </a>
