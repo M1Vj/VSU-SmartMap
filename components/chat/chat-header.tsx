@@ -10,13 +10,8 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ onClear, hasMessages }: ChatHeaderProps) {
   return (
-    <header className="flex items-center justify-between border-b px-4 py-3">
-      <div>
-        <h1 className="text-lg font-semibold">Campus Assistant</h1>
-        <p className="text-sm text-muted-foreground">
-          Ask me about any location on campus
-        </p>
-      </div>
+    <header className="flex min-h-12 items-center justify-between gap-3 px-4 py-2">
+      <h1 className="text-lg font-semibold">Campus Assistant</h1>
 
       {hasMessages && (
         <Button variant="ghost" size="sm" onClick={onClear}>
