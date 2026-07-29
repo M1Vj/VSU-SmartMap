@@ -84,6 +84,9 @@ function isNetworkOnlyRequest(url, request) {
   if (url.origin === self.location.origin) {
     return url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/');
   }
+  const isSupabaseProjectHost = url.hostname !== 'supabase.co' &&
+    url.hostname.endsWith('.supabase.co');
+  if (isSupabaseProjectHost && url.pathname.startsWith('/auth/v1/')) return true;
   return url.pathname.includes('/rest/v1/') || url.pathname.includes('/rpc/');
 }
 

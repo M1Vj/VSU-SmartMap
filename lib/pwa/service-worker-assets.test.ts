@@ -19,6 +19,82 @@ test("service worker precaches the schedule shell", () => {
   assert.match(serviceWorker, /^\s*'\/schedule',$/m);
 });
 
+test("Supabase Auth requests are network-only without matching lookalike hosts or paths", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const fetchedUrls: string[] = [];
+  const cacheMatchUrls: string[] = [];
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async (request: Request) => {
+      fetchedUrls.push(request.url);
+      return new Response("network");
+    },
+    caches: {
+      open: async () => ({
+        match: async (request: Request) => {
+          cacheMatchUrls.push(request.url);
+          return new Response("cached");
+        },
+        put: async () => undefined,
+        keys: async () => [],
+      }),
+      match: async (request: Request) => {
+        cacheMatchUrls.push(request.url);
+        return new Response("cached");
+      },
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async (url: string) => {
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: () => undefined,
+    });
+    assert.ok(responsePromise);
+    return responsePromise;
+  };
+
+  const authUrl = "https://project-ref.supabase.co/auth/v1/token?grant_type=pkce";
+  assert.equal(await (await dispatchFetch(authUrl)).text(), "network");
+  assert.deepEqual(cacheMatchUrls, []);
+  assert.deepEqual(fetchedUrls, [authUrl]);
+
+  const lookalikeHostUrl =
+    "https://project-ref.supabase.co.attacker.example/auth/v1/token";
+  assert.equal(await (await dispatchFetch(lookalikeHostUrl)).text(), "cached");
+  assert.deepEqual(cacheMatchUrls, [lookalikeHostUrl]);
+
+  const lookalikePathUrl = "https://cdn.example/supabase.co/auth/v1/token";
+  assert.equal(await (await dispatchFetch(lookalikePathUrl)).text(), "cached");
+  assert.deepEqual(cacheMatchUrls, [lookalikeHostUrl, lookalikePathUrl]);
+});
+
 test("install settles with bounded deduplicated optional asset discovery", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const fetchCounts = new Map<string, number>();

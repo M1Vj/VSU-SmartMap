@@ -165,11 +165,11 @@ through whichever gate minimizes total detour.
 - `public/sw.js` — custom service worker for offline caching
 
 ## Offline & PWA
-- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts). API, auth, Supabase REST/RPC, and non-GET requests are always network-only.
+- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts). API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
 - The `/schedule` shell works offline. Personal course payloads remain in account-scoped IndexedDB and are never copied into service-worker Cache Storage.
 - Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
 - Guest schedules make no schedule network requests. Optional account sync stores courses in private, account-owned Supabase rows for cross-device use; it does not share them with Google or Google Calendar.
-- JSON backup and ICS exports contain schedule details. Store and share them as sensitive files, and export a JSON backup before clearing browser data or deleting account data.
+- JSON backup and ICS exports contain private schedule details, including subjects, times, and locations. Store and share them carefully. JSON backup import is read locally on the device and replaces the current schedule only after confirmation; export a backup before clearing browser data or deleting account data.
 - Offline page at `/offline` with retry/back-to-map actions
 - Facilities and chat history cached locally (with TTL/quotas)
 - Manifest/icons included for installability; theme color matches brand green

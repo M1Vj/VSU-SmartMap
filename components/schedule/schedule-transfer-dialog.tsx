@@ -82,8 +82,17 @@ export function ScheduleTransferDialog({
         className="w-[calc(100%-1rem)] motion-reduce:animate-none motion-reduce:transition-none sm:max-w-lg [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11"
         overlayClassName="motion-reduce:animate-none motion-reduce:transition-none"
       >
-        <DialogScaffoldHeader><DialogTitle>Backup and calendar</DialogTitle><DialogDescription>All files are created and read on this device.</DialogDescription></DialogScaffoldHeader>
+        <DialogScaffoldHeader>
+          <DialogTitle>Backup and calendar</DialogTitle>
+          <DialogDescription>
+            JSON backups are created and read only on this device.
+          </DialogDescription>
+        </DialogScaffoldHeader>
         <DialogScaffoldBody className="space-y-6 px-4 sm:px-6">
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            JSON and ICS files contain private schedule details, including
+            subjects, times, and locations. Store and share them carefully.
+          </p>
           <section className="space-y-2"><h3 className="font-semibold">JSON backup</h3><p className="text-sm text-muted-foreground">Download a private copy or choose a backup to replace this schedule after confirmation.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={downloadJson}>Download JSON</Button><Label className="inline-flex min-h-11 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">Choose backup<Input type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} /></Label></div>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}</section>
           <section className="space-y-3"><h3 className="font-semibold">Calendar export</h3><div className="grid grid-cols-2 gap-3"><div><Label htmlFor="term-start">Term start</Label><Input id="term-start" type="date" value={termStart} onChange={(event) => setTermStart(event.target.value)} /></div><div><Label htmlFor="term-end">Term end</Label><Input id="term-end" type="date" value={termEnd} onChange={(event) => setTermEnd(event.target.value)} /></div></div><Button type="button" variant="outline" onClick={() => { try { setError(""); download(exportScheduleIcs(courses, { termStart, termEnd, generatedAt: new Date() }), "vsu-smartmap-schedule.ics", "text/calendar;charset=utf-8"); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to export calendar."); } }}>Download ICS</Button><p className="text-xs text-muted-foreground">TBA-only meetings are not included as timed calendar events.</p></section>
         </DialogScaffoldBody>
