@@ -95,8 +95,9 @@ test("chat input keeps mobile composer status readable without overlap", async (
   assert.match(source, /className="h-11 w-11 shrink-0"/);
   assert.match(
     source,
-    /<\/form>\s*<div className="mt-1\.5 text-xs text-muted-foreground">\s*AI answers may be inaccurate\. Verify important details\.\s*<\/div>\s*<\/div>\s*\);\s*}/,
+    /<\/form>\s*<div className="mt-1\.5 text-xs text-foreground">\s*AI answers may be inaccurate\. Verify important details\.\s*<\/div>\s*<\/div>\s*\);\s*}/,
   );
+  assert.doesNotMatch(disclaimerRegionClasses, /\btext-muted-foreground\b/);
   assert.doesNotMatch(disclaimerRegionClasses, /\b(?:absolute|fixed)\b/);
   assert.doesNotMatch(disclaimerRegionClasses, /\btext-red(?:-\S+)?\b/);
   assert.doesNotMatch(

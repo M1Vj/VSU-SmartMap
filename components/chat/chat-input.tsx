@@ -97,7 +97,7 @@ export function ChatInput({
         </Button>
       </form>
 
-      <div className="mt-1.5 text-xs text-muted-foreground">
+      <div className="mt-1.5 text-xs text-foreground">
         AI answers may be inaccurate. Verify important details.
       </div>
     </div>
