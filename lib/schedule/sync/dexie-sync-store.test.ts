@@ -257,3 +257,93 @@ test("choosing remote uses the latest cloud row observed while review is open", 
   assert.equal(await database.schedule_outbox.where("scope").equals(scope).count(), 0);
   await database.delete();
 });
+
+test("poison pull cannot replace an existing valid conflict snapshot", async () => {
+  for (const payload of [
+    { ...course("Wrong identity"), id: "99999999-9999-4999-8999-999999999999" },
+    { ...course("Invalid semantics"), meetings: [] },
+  ]) {
+    const database = new VSUDatabase();
+    await database.schedule_scoped_courses.put({
+      key: scopedCourseKey(scope, id), scope, id,
+      course: course("Local"), serverRevision: 1,
+    });
+    await database.schedule_conflicts.put({
+      key: scopedCourseKey(scope, id), scope, courseId: id,
+      local: course("Local"), remote: course("Valid remote V2"),
+      serverRevision: 2, reviewKind: "conflict",
+    });
+    const store = createDexieScheduleSyncLocalStore(database);
+    await store.applyPull(scope, [{
+      id, payload, revision: 3, serverVersion: 3,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    }], 3, resolvePulledRow);
+    const review = await database.schedule_conflicts.get(scopedCourseKey(scope, id));
+    assert.equal(review?.remote?.title, "Valid remote V2");
+    assert.equal(review?.serverRevision, 2);
+    assert.equal((await store.reviewCounts(scope)).quarantined, 1);
+    assert.equal(
+      (await database.schedule_scoped_courses.get(scopedCourseKey(scope, id)))?.course.title,
+      "Local",
+    );
+    await resolveDexieScheduleReview(
+      database,
+      scope,
+      scopedCourseKey(scope, id),
+      "remote",
+    );
+    const selected = await database.schedule_scoped_courses.get(scopedCourseKey(scope, id));
+    assert.equal(selected?.id, id);
+    assert.equal(selected?.course.id, id);
+    assert.equal(selected?.course.title, "Valid remote V2");
+    await database.delete();
+  }
+});
+
+test("review resolution permits the 200th active course but atomically rejects the 201st", async () => {
+  for (const existingCount of [199, 200]) {
+    const database = new VSUDatabase();
+    const rows = Array.from({ length: existingCount }, (_, index) => {
+      const courseId = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+      return {
+        key: scopedCourseKey(scope, courseId),
+        scope,
+        id: courseId,
+        course: { ...course("Existing"), id: courseId },
+      };
+    });
+    await database.schedule_scoped_courses.bulkAdd(rows);
+    await database.schedule_conflicts.put({
+      key: scopedCourseKey(scope, id), scope, courseId: id,
+      remote: course("Reviewed remote"), serverRevision: 4,
+      reviewKind: "conflict",
+    });
+    const resolution = resolveDexieScheduleReview(
+      database,
+      scope,
+      scopedCourseKey(scope, id),
+      "remote",
+    );
+    if (existingCount === 199) {
+      await resolution;
+      assert.equal(
+        await database.schedule_scoped_courses.where("scope").equals(scope).count(),
+        200,
+      );
+      assert.equal(await database.schedule_conflicts.count(), 0);
+    } else {
+      await assert.rejects(resolution, /course limit/i);
+      assert.equal(
+        await database.schedule_scoped_courses.where("scope").equals(scope).count(),
+        200,
+      );
+      assert.equal(await database.schedule_conflicts.count(), 1);
+      assert.equal(
+        await database.schedule_scoped_courses.get(scopedCourseKey(scope, id)),
+        undefined,
+      );
+    }
+    await database.delete();
+  }
+});

@@ -81,3 +81,24 @@ test("offline events publish offline immediately and reconnect runs sync", async
   runtime.dispose();
   assert.equal(listeners.size, 0);
 });
+
+test("synchronous coordinator construction failure is recoverable and leaves no listeners", () => {
+  const listeners = new Map<string, EventListenerOrEventListenerObject>();
+  let failures = 0;
+  const runtime = createScheduleSyncRuntimeController({
+    scope: "user:33333333-3333-4333-8333-333333333333",
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    createCoordinator: () => { throw new Error("private provider detail"); },
+    onSynchronousError: () => { failures += 1; },
+    eventTarget: {
+      addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners.set(type, listener);
+      },
+      removeEventListener: (type: string) => { listeners.delete(type); },
+    },
+  });
+  assert.equal(runtime.start(), false);
+  runtime.dispose();
+  assert.equal(failures, 1);
+  assert.equal(listeners.size, 0);
+});

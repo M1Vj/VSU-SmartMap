@@ -64,6 +64,16 @@ export async function resolveDexieScheduleReview(
       if (choice === "remote" && !selected && !review.remoteDeleted) {
         throw new Error("Cloud schedule version is unavailable.");
       }
+      if (
+        selected &&
+        !currentRow &&
+        await database.schedule_scoped_courses
+          .where("scope")
+          .equals(scope)
+          .count() >= MAX_SCHEDULE_COURSES
+      ) {
+        throw new Error("Schedule course limit reached.");
+      }
       await database.schedule_outbox
         .where("[scope+courseId]")
         .equals([scope, review.courseId])
@@ -244,28 +254,6 @@ export function createDexieScheduleSyncLocalStore(
             const key = scopedCourseKey(scope, cloud.id);
             const local = await database.schedule_scoped_courses.get(key);
             const pending = await currentMutation(scope, cloud.id);
-            const existingReview = await database.schedule_conflicts.get(key);
-            if (
-              existingReview &&
-              existingReview.reviewKind !== "quarantine"
-            ) {
-              await storeConflict(
-                scope,
-                pending ?? {
-                  scope,
-                  courseId: cloud.id,
-                  mutationId: "00000000-0000-4000-8000-000000000000",
-                  expectedRevision: existingReview.serverRevision,
-                  operation: existingReview.local ? "upsert" : "delete",
-                  ...(existingReview.local
-                    ? { course: existingReview.local }
-                    : {}),
-                  createdAt: cloud.updatedAt,
-                },
-                cloud,
-              );
-              continue;
-            }
             const decision = resolve({
               accountLocal: local
                 ? {
@@ -293,6 +281,28 @@ export function createDexieScheduleSyncLocalStore(
                 reviewKind: "quarantine",
               };
               await database.schedule_conflicts.put(review);
+              continue;
+            }
+            const existingReview = await database.schedule_conflicts.get(key);
+            if (
+              existingReview &&
+              existingReview.reviewKind !== "quarantine"
+            ) {
+              await storeConflict(
+                scope,
+                pending ?? {
+                  scope,
+                  courseId: cloud.id,
+                  mutationId: "00000000-0000-4000-8000-000000000000",
+                  expectedRevision: existingReview.serverRevision,
+                  operation: existingReview.local ? "upsert" : "delete",
+                  ...(existingReview.local
+                    ? { course: existingReview.local }
+                    : {}),
+                  createdAt: cloud.updatedAt,
+                },
+                cloud,
+              );
               continue;
             }
             await database.schedule_conflicts.delete(

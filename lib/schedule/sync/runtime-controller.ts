@@ -16,6 +16,7 @@ type RuntimeOptions = {
   createCoordinator: () => SyncCoordinator;
   onResult?: (result: SyncRunResult) => void;
   onOnlineChanged?: (online: boolean) => void;
+  onSynchronousError?: () => void;
   debounceMs?: number;
   eventTarget?: Pick<Window, "addEventListener" | "removeEventListener">;
   documentTarget?: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
@@ -33,12 +34,20 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const gateway = () => (coordinator ??= options.createCoordinator());
   const run = () => {
-    if (!active || disposed) return;
-    void gateway().sync(options.scope).then((result) => {
-      if (disposed) return;
-      if (result.kind === "offline") options.onOnlineChanged?.(false);
-      options.onResult?.(result);
-    });
+    if (!active || disposed) return false;
+    try {
+      void gateway().sync(options.scope).then((result) => {
+        if (disposed) return;
+        if (result.kind === "offline") options.onOnlineChanged?.(false);
+        options.onResult?.(result);
+      }).catch(() => {
+        if (!disposed) options.onSynchronousError?.();
+      });
+      return true;
+    } catch {
+      options.onSynchronousError?.();
+      return false;
+    }
   };
   const online = () => {
     options.onOnlineChanged?.(true);
@@ -51,11 +60,11 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
 
   return {
     start() {
-      if (!active || disposed) return;
+      if (!active || disposed) return false;
       options.eventTarget?.addEventListener("online", online);
       options.eventTarget?.addEventListener("offline", offline);
       options.documentTarget?.addEventListener("visibilitychange", visible);
-      run();
+      return run();
     },
     syncNow() {
       if (timer) clearTimeout(timer);

@@ -145,7 +145,8 @@ export function useScheduleSync(input: {
           void db.schedule_sync_state.update(input.scope, { lastError: "sync-failed" });
         }
       };
-      const next = createScheduleSyncRuntimeController({
+      let next: ScheduleSyncRuntimeController;
+      next = createScheduleSyncRuntimeController({
         scope: input.scope,
         enabled: input.enabled,
         authenticated: input.authenticated,
@@ -171,6 +172,11 @@ export function useScheduleSync(input: {
         onResult,
         onOnlineChanged: (online) =>
           dispatch({ type: online ? "ONLINE" : "OFFLINE" }),
+        onSynchronousError: () => {
+          next.dispose();
+          if (runtime.current === next) runtime.current = undefined;
+          setInitializationError(GENERIC_SYNC_SETUP_ERROR);
+        },
         eventTarget: window,
         documentTarget: document,
       });
@@ -178,8 +184,12 @@ export function useScheduleSync(input: {
         next.dispose();
         return;
       }
+      if (!next.start()) {
+        next.dispose();
+        setInitializationError(GENERIC_SYNC_SETUP_ERROR);
+        return;
+      }
       runtime.current = next;
-      next.start();
     })().catch(() => {
       if (alive) setInitializationError(GENERIC_SYNC_SETUP_ERROR);
     });
