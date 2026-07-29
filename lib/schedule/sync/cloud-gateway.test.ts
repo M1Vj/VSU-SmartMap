@@ -47,6 +47,10 @@ class FakeClient {
   from() {
     const query = {
       select: () => query,
+      eq: (column: string, value: string) => {
+        this.filters.push(["eq", column, value]);
+        return query;
+      },
       gt: (column: string, value: number) => {
         this.filters.push(["gt", column, value]);
         return query;
@@ -62,12 +66,13 @@ class FakeClient {
   }
 }
 
-test("push sends the exact RPC shape without a user id", async () => {
+test("push binds the exact RPC shape to the expected authenticated user", async () => {
   const client = new FakeClient();
-  const result = await new SupabaseScheduleGateway(client as never).push(mutation);
+  const result = await new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation);
   assert.deepEqual(client.lastRpc, {
     name: "apply_student_schedule_mutation",
     params: {
+      p_expected_user_id: "33333333-3333-4333-8333-333333333333",
       p_mutation_id: mutation.mutationId,
       p_course_id: mutation.courseId,
       p_expected_revision: 0,
@@ -78,16 +83,35 @@ test("push sends the exact RPC shape without a user id", async () => {
   assert.deepEqual(result, { kind: "deleted-noop", courseId: id, revision: 0 });
 });
 
+test("gateway rejects a mutation from another account before RPC access", async () => {
+  const client = new FakeClient();
+  await assert.rejects(
+    new SupabaseScheduleGateway(
+      client as never,
+      "33333333-3333-4333-8333-333333333333",
+    ).push({
+      ...mutation,
+      scope: "user:99999999-9999-4999-8999-999999999999",
+    }),
+    (error: unknown) =>
+      error instanceof ScheduleSyncError && error.category === "auth",
+  );
+  assert.equal(client.lastRpc, undefined);
+});
+
 test("pull validates its cursor and orders monotonically", async () => {
   const client = new FakeClient();
-  await new SupabaseScheduleGateway(client as never).pull(42);
-  assert.deepEqual(client.filters, [["gt", "server_version", 42]]);
+  await new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(42);
+  assert.deepEqual(client.filters, [
+    ["eq", "user_id", "33333333-3333-4333-8333-333333333333"],
+    ["gt", "server_version", 42],
+  ]);
   assert.deepEqual(client.orders, [
     ["server_version", { ascending: true }],
     ["id", { ascending: true }],
   ]);
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).pull(-1),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(-1),
     (error: unknown) =>
       error instanceof ScheduleSyncError && error.category === "invalid-remote",
   );
@@ -97,7 +121,7 @@ test("invalid responses and raw database errors are sanitized", async () => {
   const client = new FakeClient();
   client.rpcResult = { data: null, error: { code: "42501", message: "secret row" } };
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
     (error: unknown) =>
       error instanceof ScheduleSyncError &&
       error.category === "auth" &&
@@ -105,7 +129,7 @@ test("invalid responses and raw database errors are sanitized", async () => {
   );
   client.rpcResult = { data: [{ status: "upserted", payload: { secret: true } }], error: null };
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
     (error: unknown) =>
       error instanceof ScheduleSyncError &&
       error.category === "invalid-remote" &&
@@ -121,7 +145,7 @@ test("RPC results must exactly match the sent canonical course id", async () => 
   ]) {
     client.rpcResult = { data: [result], error: null };
     await assert.rejects(
-      () => new SupabaseScheduleGateway(client as never).push(mutation),
+      () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
       (error: unknown) => error instanceof ScheduleSyncError && error.category === "invalid-remote",
     );
   }
@@ -134,7 +158,7 @@ test("null conflict and delete-noop variants require every null field", async ()
     { status: "deleted", id, payload: null, revision: 0, server_version: null, created_at: null, updated_at: null, deleted_at: "2026-07-28T00:00:00.000Z" },
   ]) {
     client.rpcResult = { data: [result], error: null };
-    await assert.rejects(() => new SupabaseScheduleGateway(client as never).push(mutation));
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation));
   }
 });
 
@@ -145,7 +169,7 @@ test("pull keeps semantically invalid payloads for coordinator quarantine", asyn
     created_at: "2026-07-28T00:00:00.000Z",
     updated_at: "2026-07-28T00:00:00.000Z", deleted_at: null,
   }];
-  const rows = await new SupabaseScheduleGateway(client as never).pull(0);
+  const rows = await new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(0);
   assert.equal(rows.length, 1);
 });
 
@@ -157,6 +181,7 @@ test("initial pull continues from a full page and fails closed above its bound",
     from() {
       const query = {
         select: () => query,
+        eq: () => query,
         gt: (_column: string, value: number) => {
           this.after = value;
           return query;
@@ -189,7 +214,7 @@ test("initial pull continues from a full page and fails closed above its bound",
   }
   const client = new PagingClient();
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).pullAllBounded(2, 2),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pullAllBounded(2, 2),
     (error: unknown) =>
       error instanceof ScheduleSyncError &&
       error.category === "invalid-remote",
@@ -218,6 +243,7 @@ test("bounded initial pull continues through a lower server cap until an empty p
     from() {
       const query = {
         select: () => query,
+        eq: () => query,
         gt: (_column: string, value: number) => {
           this.after = value;
           return query;
@@ -241,7 +267,7 @@ test("bounded initial pull continues through a lower server cap until an empty p
     }
   }
   const client = new CappedClient();
-  const rows = await new SupabaseScheduleGateway(client as never)
+  const rows = await new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333")
     .pullAllBounded(1_500, 1_000);
   assert.equal(rows.length, 1_200);
   assert.equal(client.calls, 4);
@@ -256,20 +282,20 @@ test("pull rejects an equal cursor and unsafe BIGINT values", async () => {
     updated_at: "2026-07-28T00:00:00.000Z",
     deleted_at: "2026-07-28T00:00:00.000Z",
   }];
-  await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(42));
-  await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(Number.MAX_SAFE_INTEGER + 1));
+  await assert.rejects(() => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(42));
+  await assert.rejects(() => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(Number.MAX_SAFE_INTEGER + 1));
 });
 
 test("quota and representative PostgREST network failures are generic", async () => {
   const client = new FakeClient();
   client.rpcResult = { data: null, error: { code: "P0001", message: "active student schedule quota exceeded" } };
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
     (error: unknown) => error instanceof ScheduleSyncError && error.category === "conflict",
   );
   client.rpcResult = { data: null, error: { code: "", message: "TypeError: Failed to fetch", details: "secret endpoint" } };
   await assert.rejects(
-    () => new SupabaseScheduleGateway(client as never).push(mutation),
+    () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
     (error: unknown) =>
       error instanceof ScheduleSyncError &&
       error.category === "offline" &&
@@ -278,7 +304,7 @@ test("quota and representative PostgREST network failures are generic", async ()
   for (const message of ["fetch failed", "Network request failed", "Load failed"]) {
     client.rpcResult = { data: null, error: { code: "", message, details: "secret" } };
     await assert.rejects(
-      () => new SupabaseScheduleGateway(client as never).push(mutation),
+      () => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(mutation),
       (error: unknown) => error instanceof ScheduleSyncError && error.category === "offline",
     );
   }
@@ -292,7 +318,7 @@ test("accepts strict PostgREST timestamptz offsets and microseconds", async () =
     updated_at: "2026-07-28T20:46:04.1+02:00",
     deleted_at: "2026-07-29T02:46:04-08:00",
   }];
-  assert.equal((await new SupabaseScheduleGateway(client as never).pull(0)).length, 1);
+  assert.equal((await new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(0)).length, 1);
 });
 
 test("rejects invalid and ambiguous timestamp strings", async () => {
@@ -309,7 +335,7 @@ test("rejects invalid and ambiguous timestamp strings", async () => {
       created_at: value, updated_at: "2026-07-28T00:00:00Z",
       deleted_at: "2026-07-28T00:00:00Z",
     }];
-    await assert.rejects(() => new SupabaseScheduleGateway(client as never).pull(0));
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").pull(0));
   }
 });
 
@@ -333,7 +359,7 @@ test("RPC status and row state must match the sent operation", async () => {
   ] as const) {
     const client = new FakeClient();
     client.rpcResult = { data: [result], error: null };
-    await assert.rejects(() => new SupabaseScheduleGateway(client as never).push(sent));
+    await assert.rejects(() => new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333").push(sent));
   }
 });
 

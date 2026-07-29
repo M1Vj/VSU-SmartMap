@@ -102,3 +102,25 @@ test("synchronous coordinator construction failure is recoverable and leaves no 
   assert.equal(failures, 1);
   assert.equal(listeners.size, 0);
 });
+
+test("stopAndDrain waits for the active scoped sync before resolving", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let settled = false;
+  const runtime = createScheduleSyncRuntimeController({
+    scope: "user:33333333-3333-4333-8333-333333333333",
+    enabled: true, authenticated: true, offlineVerified: true, consent: true, reconciled: true,
+    createCoordinator: () => ({
+      async sync(scope) {
+        await blocked;
+        settled = true;
+        return { kind: "synced" as const, scope, runToken: 1, pending: 0, conflicts: 0 };
+      },
+      cancel() { release(); },
+    }),
+  });
+  assert.equal(runtime.start(), true);
+  const draining = runtime.stopAndDrain();
+  await draining;
+  assert.equal(settled, true);
+});

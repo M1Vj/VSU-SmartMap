@@ -149,8 +149,13 @@ function category(error: unknown): string | undefined {
 export class ScheduleSyncCoordinator {
   private active?: { scope: ScheduleScope; promise: Promise<SyncRunResult> };
   private nextRunToken = 1;
+  private readonly cancellation = new AbortController();
 
   constructor(private readonly options: CoordinatorOptions) {}
+
+  cancel(): void {
+    this.cancellation.abort();
+  }
 
   sync(scope: ScheduleScope): Promise<SyncRunResult> {
     if (this.active) {
@@ -183,16 +188,22 @@ export class ScheduleSyncCoordinator {
   }
 
   private async run(scope: ScheduleScope, runToken: number): Promise<SyncRunResult> {
+    const cancelled = () => this.cancellation.signal.aborted;
     try {
       const pending = [...await this.options.store.listOutbox(scope)].sort(
         (a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) -
           (b.sequence ?? Number.MAX_SAFE_INTEGER),
       );
+      if (cancelled()) return { kind: "scope-changed", scope };
       for (const mutation of pending) {
         let result: CloudMutationResult;
         try {
-          result = await this.options.gateway.push(mutation);
+          result = await this.options.gateway.push(
+            mutation,
+            this.cancellation.signal,
+          );
         } catch (error) {
+          if (cancelled()) return { kind: "scope-changed", scope };
           const pendingCount = await this.options.store.pendingCount(scope);
           if (category(error) === "auth") {
             return { kind: "auth-required", scope, runToken, pending: pendingCount };
@@ -206,14 +217,17 @@ export class ScheduleSyncCoordinator {
           }
           return { kind: "failed", scope, runToken, pending: pendingCount };
         }
+        if (cancelled()) return { kind: "scope-changed", scope };
         if (result.kind === "conflict") {
           await this.options.store.recordPushConflict(scope, mutation, result);
           continue;
         }
         await this.options.store.acknowledge(scope, mutation, result);
+        if (cancelled()) return { kind: "scope-changed", scope };
       }
 
       const cursor = await this.options.store.cursorFor(scope) ?? 0;
+      if (cancelled()) return { kind: "scope-changed", scope };
       if (!Number.isSafeInteger(cursor) || cursor < 0) {
         return {
           kind: "failed",
@@ -222,7 +236,11 @@ export class ScheduleSyncCoordinator {
           pending: await this.options.store.pendingCount(scope),
         };
       }
-      const rows = await this.options.gateway.pull(cursor);
+      const rows = await this.options.gateway.pull(
+        cursor,
+        this.cancellation.signal,
+      );
+      if (cancelled()) return { kind: "scope-changed", scope };
       const nextCursor = rows.reduce(
         (maximum, row) => Math.max(maximum, row.serverVersion),
         cursor,
@@ -233,6 +251,7 @@ export class ScheduleSyncCoordinator {
         nextCursor,
         resolvePulledRow,
       );
+      if (cancelled()) return { kind: "scope-changed", scope };
       const remaining = await this.options.store.pendingCount(scope);
       const review = await this.options.store.reviewCounts(scope);
       if (review.conflicts > 0 || review.quarantined > 0) {

@@ -257,7 +257,7 @@ test("invalid remote rows are quarantined atomically and require review", async 
 
 test("gateway poison payload reaches coordinator quarantine and advances atomically", async () => {
   const client = new FakeGatewayClient();
-  const gateway = new SupabaseScheduleGateway(client as never);
+  const gateway = new SupabaseScheduleGateway(client as never, "33333333-3333-4333-8333-333333333333");
   const store = new Store();
   const result = await new ScheduleSyncCoordinator({ store, gateway }).sync(scope);
   assert.equal(result.kind, "needs-review");
@@ -387,7 +387,7 @@ class FakeGatewayClient {
   rpc() { throw new Error("unused"); }
   from() {
     const query = {
-      select: () => query, gt: () => query, order: () => query,
+      select: () => query, eq: () => query, gt: () => query, order: () => query,
       then: (resolve: (value: unknown) => void) => resolve({
         data: [{
           id: courseId, payload: { ...course, meetings: [] }, revision: 1,

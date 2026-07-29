@@ -26,8 +26,8 @@ export class ScheduleSyncError extends Error {
 }
 
 export interface ScheduleCloudGateway {
-  push(mutation: ScheduleOutboxMutation): Promise<CloudMutationResult>;
-  pull(afterServerVersion: number): Promise<CloudScheduleRow[]>;
+  push(mutation: ScheduleOutboxMutation, signal?: AbortSignal): Promise<CloudMutationResult>;
+  pull(afterServerVersion: number, signal?: AbortSignal): Promise<CloudScheduleRow[]>;
 }
 
 type RawRow = Record<string, unknown>;
@@ -205,18 +205,37 @@ function classify(error: unknown): ScheduleSyncError {
 }
 
 export class SupabaseScheduleGateway implements ScheduleCloudGateway {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly client: SupabaseClient,
+    private readonly expectedUserId: string,
+  ) {
+    if (
+      !isValidScheduleId(expectedUserId) ||
+      expectedUserId !== expectedUserId.trim().toLowerCase()
+    ) {
+      throw new ScheduleSyncError("unavailable");
+    }
+  }
 
-  async push(mutation: ScheduleOutboxMutation): Promise<CloudMutationResult> {
-    const { data, error } = await this.client.rpc(
+  async push(mutation: ScheduleOutboxMutation, signal?: AbortSignal): Promise<CloudMutationResult> {
+    if (mutation.scope !== `user:${this.expectedUserId}`) {
+      throw new ScheduleSyncError("auth");
+    }
+    const request = this.client.rpc(
       "apply_student_schedule_mutation",
       {
+        p_expected_user_id: this.expectedUserId,
         p_mutation_id: mutation.mutationId,
         p_course_id: mutation.courseId,
         p_expected_revision: mutation.expectedRevision,
         p_operation: mutation.operation,
         p_payload: mutation.operation === "upsert" ? mutation.course ?? null : null,
       },
+    );
+    const { data, error } = await (
+      signal && typeof request.abortSignal === "function"
+        ? request.abortSignal(signal)
+        : request
     );
     if (error) throw classify(error);
     return parseMutationResult(data, mutation);
@@ -252,13 +271,14 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
     }
   }
 
-  async pull(afterServerVersion: number): Promise<CloudScheduleRow[]> {
-    return this.pullPage(afterServerVersion);
+  async pull(afterServerVersion: number, signal?: AbortSignal): Promise<CloudScheduleRow[]> {
+    return this.pullPage(afterServerVersion, undefined, signal);
   }
 
   private async pullPage(
     afterServerVersion: number,
     pageSize?: number,
+    signal?: AbortSignal,
   ): Promise<CloudScheduleRow[]> {
     if (!Number.isSafeInteger(afterServerVersion) || afterServerVersion < 0) {
       throw new ScheduleSyncError("invalid-remote");
@@ -266,10 +286,14 @@ export class SupabaseScheduleGateway implements ScheduleCloudGateway {
     let query = this.client
       .from("student_schedule_courses")
       .select("id,payload,revision,server_version,created_at,updated_at,deleted_at")
+      .eq("user_id", this.expectedUserId)
       .gt("server_version", afterServerVersion)
       .order("server_version", { ascending: true })
       .order("id", { ascending: true });
     if (pageSize !== undefined) query = query.limit(pageSize);
+    if (signal && typeof query.abortSignal === "function") {
+      query = query.abortSignal(signal);
+    }
     const { data, error } = await query;
     if (error) throw classify(error);
     if (!Array.isArray(data)) throw new ScheduleSyncError("invalid-remote");

@@ -75,6 +75,7 @@ export function useScheduleReconciliation({
           db.schedule_scoped_courses.where("scope").equals(scope).toArray(),
           new SupabaseScheduleGateway(
             getSupabaseBrowserClient(),
+            scope.slice("user:".length),
           ).pullAllBounded(MAX_INITIAL_CLOUD_ROWS),
         ]);
         if (cloud.length > MAX_INITIAL_CLOUD_ROWS) {

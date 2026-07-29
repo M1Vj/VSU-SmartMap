@@ -4,7 +4,8 @@ import type {
   SyncRunResult,
 } from "./coordinator";
 
-type SyncCoordinator = Pick<ScheduleSyncCoordinator, "sync">;
+type SyncCoordinator = Pick<ScheduleSyncCoordinator, "sync"> &
+  Partial<Pick<ScheduleSyncCoordinator, "cancel">>;
 
 type RuntimeOptions = {
   scope: ScheduleScope;
@@ -32,16 +33,21 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
   let disposed = false;
   let coordinator: SyncCoordinator | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const activeRuns = new Set<Promise<SyncRunResult>>();
   const gateway = () => (coordinator ??= options.createCoordinator());
   const run = () => {
     if (!active || disposed) return false;
     try {
-      void gateway().sync(options.scope).then((result) => {
+      const sync = gateway().sync(options.scope);
+      activeRuns.add(sync);
+      void sync.then((result) => {
         if (disposed) return;
         if (result.kind === "offline") options.onOnlineChanged?.(false);
         options.onResult?.(result);
       }).catch(() => {
         if (!disposed) options.onSynchronousError?.();
+      }).finally(() => {
+        activeRuns.delete(sync);
       });
       return true;
     } catch {
@@ -56,6 +62,15 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
   const offline = () => options.onOnlineChanged?.(false);
   const visible = () => {
     if (options.documentTarget?.visibilityState === "visible") run();
+  };
+  const dispose = () => {
+    disposed = true;
+    coordinator?.cancel?.();
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    options.eventTarget?.removeEventListener("online", online);
+    options.eventTarget?.removeEventListener("offline", offline);
+    options.documentTarget?.removeEventListener("visibilitychange", visible);
   };
 
   return {
@@ -80,12 +95,11 @@ export function createScheduleSyncRuntimeController(options: RuntimeOptions) {
       }, options.debounceMs ?? 400);
     },
     dispose() {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-      options.eventTarget?.removeEventListener("online", online);
-      options.eventTarget?.removeEventListener("offline", offline);
-      options.documentTarget?.removeEventListener("visibilitychange", visible);
+      dispose();
+    },
+    async stopAndDrain() {
+      dispose();
+      await Promise.allSettled([...activeRuns]);
     },
   };
 }

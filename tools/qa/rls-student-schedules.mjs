@@ -32,8 +32,17 @@ async function waitForSchemaCache(client) {
   throw new Error("Local PostgREST schema cache did not become ready.");
 }
 
-function mutation(id, expectedRevision, operation, payload, mutationId = randomUUID()) {
+let defaultExpectedUserId;
+function mutation(
+  id,
+  expectedRevision,
+  operation,
+  payload,
+  mutationId = randomUUID(),
+  expectedUserId = defaultExpectedUserId,
+) {
   return {
+    p_expected_user_id: expectedUserId,
     p_mutation_id: mutationId,
     p_course_id: id,
     p_expected_revision: expectedRevision,
@@ -103,6 +112,7 @@ async function main() {
     }
     const [userA, userB] = clients;
     const [userAId, userBId] = createdUserIds;
+    defaultExpectedUserId = userAId;
 
     console.log("Student schedule adversarial matrix (loopback Supabase only)\n");
 
@@ -118,6 +128,23 @@ async function main() {
       anonRpc.error?.code === "42501"
         || /permission denied/i.test(anonRpc.error?.message ?? ""),
       anonRpc.error?.message,
+    );
+    const swappedAccountId = randomUUID();
+    const swappedAccountRpc = await userB.rpc(
+      "apply_student_schedule_mutation",
+      mutation(
+        swappedAccountId,
+        0,
+        "upsert",
+        { id: swappedAccountId },
+        undefined,
+        userAId,
+      ),
+    );
+    check(
+      "authenticated account swap cannot write through another expected user",
+      swappedAccountRpc.error?.code === "42501",
+      swappedAccountRpc.error?.message,
     );
 
     const missingDeleteId = randomUUID();
@@ -286,7 +313,7 @@ async function main() {
       const id = randomUUID();
       return userB.rpc(
         "apply_student_schedule_mutation",
-        mutation(id, 0, "upsert", { id, title: "Boundary course" }),
+        mutation(id, 0, "upsert", { id, title: "Boundary course" }, undefined, userBId),
       );
     });
     const boundaryResults = await Promise.all(boundaryCalls);
@@ -302,7 +329,7 @@ async function main() {
     const extraId = randomUUID();
     const extra = await userB.rpc(
       "apply_student_schedule_mutation",
-      mutation(extraId, 0, "upsert", { id: extraId, title: "Course 201" }),
+      mutation(extraId, 0, "upsert", { id: extraId, title: "Course 201" }, undefined, userBId),
     );
     check("course 201 is rejected", Boolean(extra.error));
     const afterExtra = await userB

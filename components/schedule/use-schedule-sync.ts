@@ -156,7 +156,10 @@ export function useScheduleSync(input: {
         createCoordinator: () =>
           new ScheduleSyncCoordinator({
             store: localStore,
-            gateway: new SupabaseScheduleGateway(getSupabaseBrowserClient()),
+            gateway: new SupabaseScheduleGateway(
+              getSupabaseBrowserClient(),
+              accountId,
+            ),
             consent: () => input.consentEnabled,
             online: () => navigator.onLine,
             cloudVerified: () => input.offlineVerified,
@@ -212,6 +215,14 @@ export function useScheduleSync(input: {
     if (scope === input.scope && scope !== GUEST_SCHEDULE_SCOPE) {
       runtime.current?.requestSync();
     }
+  }, [input.scope]);
+  const stopAndDrain = useCallback(async (scope: ScheduleScope) => {
+    if (scope !== input.scope || scope === GUEST_SCHEDULE_SCOPE) {
+      throw new Error("Schedule sync scope changed.");
+    }
+    const active = runtime.current;
+    runtime.current = undefined;
+    if (active) await active.stopAndDrain();
   }, [input.scope]);
   const syncNow = useCallback(() => {
     if (runtime.current) runtime.current.syncNow();
@@ -280,6 +291,7 @@ export function useScheduleSync(input: {
     conflicts: Math.max(0, state.conflicts - quarantined),
     quarantined,
     requestSync,
+    stopAndDrain,
     syncNow,
     review,
     reviewBusy,

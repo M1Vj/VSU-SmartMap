@@ -201,6 +201,7 @@ GRANT USAGE ON SEQUENCE public.student_schedule_server_version_seq
 GRANT USAGE ON SCHEMA public TO student_schedule_mutator;
 
 CREATE FUNCTION public.apply_student_schedule_mutation(
+  p_expected_user_id UUID,
   p_mutation_id UUID,
   p_course_id UUID,
   p_expected_revision BIGINT,
@@ -230,6 +231,9 @@ BEGIN
   v_user_id := public.student_schedule_authenticated_user_id();
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'authentication required' USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_user_id IS NULL OR p_expected_user_id IS DISTINCT FROM v_user_id THEN
+    RAISE EXCEPTION 'authenticated schedule account changed' USING ERRCODE = '42501';
   END IF;
 
   IF p_mutation_id IS NULL
@@ -365,11 +369,11 @@ END;
 $$;
 
 GRANT CREATE ON SCHEMA public TO student_schedule_mutator;
-REVOKE ALL ON FUNCTION public.apply_student_schedule_mutation(UUID, UUID, BIGINT, TEXT, JSONB)
+REVOKE ALL ON FUNCTION public.apply_student_schedule_mutation(UUID, UUID, UUID, BIGINT, TEXT, JSONB)
   FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.apply_student_schedule_mutation(UUID, UUID, BIGINT, TEXT, JSONB)
+GRANT EXECUTE ON FUNCTION public.apply_student_schedule_mutation(UUID, UUID, UUID, BIGINT, TEXT, JSONB)
   TO authenticated;
-ALTER FUNCTION public.apply_student_schedule_mutation(UUID, UUID, BIGINT, TEXT, JSONB)
+ALTER FUNCTION public.apply_student_schedule_mutation(UUID, UUID, UUID, BIGINT, TEXT, JSONB)
   OWNER TO student_schedule_mutator;
 REVOKE CREATE ON SCHEMA public FROM student_schedule_mutator;
 REVOKE student_schedule_mutator FROM postgres;

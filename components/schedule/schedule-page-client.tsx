@@ -247,6 +247,7 @@ export function SchedulePageClient() {
       } else if (confirmation.kind === "restore") {
         await scheduleRepository.replaceAll(confirmation.backup.courses);
       } else {
+        await scheduleSync.stopAndDrain(confirmation.scope);
         await scheduleAccount.removeLocalData(confirmation.scope);
       }
       if (
@@ -274,7 +275,13 @@ export function SchedulePageClient() {
       );
     } catch (error) {
       if (operation === actionGeneration.current) {
-        toast.error(error instanceof Error ? error.message : "The schedule could not be changed.");
+        toast.error(
+          confirmation.kind === "remove-local-account"
+            ? "Local account data could not be removed. Try again."
+            : error instanceof Error
+              ? error.message
+              : "The schedule could not be changed.",
+        );
       }
     } finally {
       if (operation === actionGeneration.current) setBusy(false);
