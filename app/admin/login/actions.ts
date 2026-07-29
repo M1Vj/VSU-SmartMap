@@ -42,9 +42,7 @@ export async function login(formData: FormData) {
     return { error: 'Unable to sign in.' };
   }
 
-  const roles = await getCurrentUserRoles(data.user.id, data.user, {
-    allowMissingRoleTableAdminFallback: true,
-  });
+  const roles = await getCurrentUserRoles(data.user.id, supabase);
   if (!canAccessAdminArea(roles)) {
     await supabase.auth.signOut();
     return {

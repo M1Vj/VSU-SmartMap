@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ScheduleCourse } from "./types";
+import type { Facility } from "@/lib/types/facility";
+import { buildFacilitySearchOptions } from "@/lib/map/facility-search-model";
 import {
+  applyFacilitySearchSelection,
   assignMeetingColumns,
   assertScheduleFileSize,
   buildFacilityLocationLabel,
+  buildFacilityDisplayQueries,
+  buildScheduleFacilitySearchOptions,
   buildWeekGridModel,
   analyzeDayConflicts,
   endTimeValueToMinute,
   facilitySelectionError,
+  firstFacilityErrorIndex,
+  getFacilityOptionsStatus,
+  getActiveFacilityQuery,
   getMeetingGridPosition,
   mapScheduleIssuesToFormErrors,
   MAX_WEEK_GRID_OCCURRENCES,
@@ -16,9 +24,128 @@ import {
   selectedDayConflictNotices,
   getDayAgendaData,
   reconcileKnownFacilityIds,
+  shouldClearFacilitySelection,
   transitionRestoreDialogs,
   timeValueToMinute,
 } from "./ui";
+
+const scheduleSearchFacility: Facility = {
+  id: "dstat",
+  name: "Department of Statistics",
+  code: "DSTAT",
+  category: "academic",
+  description: "Statistics and data science",
+  slug: "department-of-statistics",
+  coordinates: { lat: 10.7, lng: 124.8 },
+  hasRooms: true,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+test("schedule facility search uses shared map ranking for code, alias, and room queries", () => {
+  const rooms = [{
+    facility_id: "dstat",
+    room_code: "DSTAT-201",
+    name: "Statistics Lab",
+  }];
+
+  for (const query of ["DSTAT", "data science"]) {
+    assert.equal(
+      buildScheduleFacilitySearchOptions({
+        facilities: [scheduleSearchFacility],
+        rooms,
+        query,
+      })[0]?.facility.id,
+      "dstat",
+    );
+  }
+
+  const roomMatch = buildScheduleFacilitySearchOptions({
+    facilities: [scheduleSearchFacility],
+    rooms,
+    query: "DSTAT-201",
+  })[0];
+  const sharedRoomMatch = buildFacilitySearchOptions({
+    facilities: [scheduleSearchFacility],
+    rooms,
+    query: "DSTAT-201",
+  })[0];
+  assert.equal(roomMatch?.facility.id, "dstat");
+  assert.equal(roomMatch?.matchedRoomCode, "DSTAT-201");
+  assert.equal(roomMatch?.secondary, "DSTAT - Academic - Room DSTAT-201");
+  assert.deepEqual(roomMatch, sharedRoomMatch);
+});
+
+test("facility search selection preserves the typed room detail exactly", () => {
+  assert.deepEqual(
+    applyFacilitySearchSelection(
+      { facilityId: "", facilityDetail: "Room 101" },
+      "dstat",
+    ),
+    { facilityId: "dstat", facilityDetail: "Room 101" },
+  );
+});
+
+test("facility display queries reinitialize from the newly edited course", () => {
+  assert.deepEqual(
+    buildFacilityDisplayQueries(
+      [{ facilityId: "dstat" }, { facilityId: "" }],
+      [scheduleSearchFacility],
+    ),
+    ["Department of Statistics", ""],
+  );
+  assert.deepEqual(
+    buildFacilityDisplayQueries(
+      [{ facilityId: "unknown" }],
+      [scheduleSearchFacility],
+    ),
+    [""],
+  );
+});
+
+test("visible facility edits clear only a non-equivalent saved selection", () => {
+  assert.equal(
+    shouldClearFacilitySelection(
+      "  department OF statistics ",
+      "dstat",
+      "Department of Statistics",
+    ),
+    false,
+  );
+  assert.equal(
+    shouldClearFacilitySelection("DSTAT-201", "dstat", "Department of Statistics"),
+    true,
+  );
+  assert.equal(
+    shouldClearFacilitySelection("DSTAT-201", "stale-id", undefined),
+    true,
+  );
+  assert.equal(
+    shouldClearFacilitySelection("anything", "", undefined),
+    false,
+  );
+});
+
+test("finds the first hidden facility ID error for visible focus routing", () => {
+  assert.equal(
+    firstFacilityErrorIndex([
+      { start: { message: "Required" } },
+      { facilityId: { message: "Choose a facility" } },
+      { facilityId: { message: "Choose another facility" } },
+    ]),
+    1,
+  );
+  assert.equal(firstFacilityErrorIndex([{ end: { message: "Required" } }]), -1);
+  assert.equal(firstFacilityErrorIndex(undefined), -1);
+});
+
+test("refocusing a meeting reactivates only that meeting's local query", () => {
+  assert.equal(
+    getActiveFacilityQuery(["Department of Statistics", "Admin"], 0),
+    "Department of Statistics",
+  );
+  assert.equal(getActiveFacilityQuery(["Department of Statistics"], 3), "");
+});
 
 test("converts HTML time values to integer minutes and back", () => {
   assert.equal(timeValueToMinute("09:05"), 545);
@@ -235,6 +362,60 @@ test("requires a selected facility to match the loaded facility options", () => 
 test("cached facility handoff survives refresh failure and live refresh replaces it", () => {
   assert.deepEqual([...reconcileKnownFacilityIds(["cached"], undefined)], ["cached"]);
   assert.deepEqual([...reconcileKnownFacilityIds(["cached"], ["live"])], ["live"]);
+});
+
+test("facility option status distinguishes loading, cached fallback, and unavailable data", () => {
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "empty",
+      loading: true,
+      error: null,
+      facilityCount: 0,
+    }),
+    { message: "Loading campus facilities…", tone: "muted" },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "cache",
+      loading: true,
+      error: null,
+      facilityCount: 2,
+    }),
+    {
+      message: "Showing saved campus facilities while refreshing…",
+      tone: "muted",
+    },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "cache",
+      loading: false,
+      error: "safe error",
+      facilityCount: 2,
+    }),
+    { message: "Showing saved campus facilities while offline.", tone: "warning" },
+  );
+  assert.deepEqual(
+    getFacilityOptionsStatus({
+      source: "empty",
+      loading: false,
+      error: "safe error",
+      facilityCount: 0,
+    }),
+    {
+      message: "Facility search is unavailable. Try again online or choose Other location.",
+      tone: "warning",
+    },
+  );
+  assert.equal(
+    getFacilityOptionsStatus({
+      source: "remote",
+      loading: false,
+      error: null,
+      facilityCount: 2,
+    }),
+    null,
+  );
 });
 
 test("restore confirmation never overlaps the transfer dialog", () => {

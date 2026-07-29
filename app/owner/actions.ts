@@ -18,8 +18,12 @@ import {
 } from "@/lib/auth/server";
 import { notifyAdmins } from "@/lib/notifications/service";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
+import {
+  VERIFICATION_DOCUMENT_BUCKET,
+  buildVerificationDocumentPath,
+  type VerificationDocumentLabel,
+} from "@/lib/storage/verification-document-path";
 
-const DOCUMENT_BUCKET = "boarding-house-verification";
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_DOCUMENT_TYPES = new Set([
   "image/png",
@@ -595,39 +599,55 @@ async function uploadVerificationDocument({
 }: {
   applicationId: string;
   userId: string;
-  label: string;
+  label: VerificationDocumentLabel;
   file: File;
 }): Promise<ActionResult> {
   const serviceClient = getSupabaseServiceRoleClient();
-  const storagePath = `${userId}/${applicationId}/${label}-${Date.now()}-${safeFilename(file.name)}`;
+  const documentId = randomUUID();
+  const now = Date.now();
+  const storagePath = buildVerificationDocumentPath({
+    userId,
+    applicationId,
+    label,
+    timestamp: now,
+    filename: file.name,
+  });
+  const { error: rowError } = await serviceClient
+    .from("owner_verification_documents")
+    .insert({
+      id: documentId,
+      application_id: applicationId,
+      user_id: userId,
+      storage_bucket: VERIFICATION_DOCUMENT_BUCKET,
+      storage_path: storagePath,
+      original_filename: file.name,
+      mime_type: file.type,
+      size_bytes: file.size,
+      delete_after: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+  if (rowError) {
+    console.error("uploadVerificationDocument row insert failed");
+    return { error: "Could not save your documents. Please try again." };
+  }
+
   const { error: uploadError } = await serviceClient.storage
-    .from(DOCUMENT_BUCKET)
+    .from(VERIFICATION_DOCUMENT_BUCKET)
     .upload(storagePath, file, {
       contentType: file.type,
       upsert: false,
     });
 
   if (uploadError) {
-    console.error("uploadVerificationDocument upload failed", uploadError);
+    console.error("uploadVerificationDocument upload failed");
+    const { error: retentionError } = await serviceClient
+      .from("owner_verification_documents")
+      .update({ delete_after: new Date(now).toISOString() })
+      .eq("id", documentId);
+    if (retentionError) {
+      console.error("uploadVerificationDocument retention expedite failed");
+    }
     return { error: "Could not upload your documents. Please try again." };
-  }
-
-  const { error: rowError } = await serviceClient
-    .from("owner_verification_documents")
-    .insert({
-      application_id: applicationId,
-      user_id: userId,
-      storage_bucket: DOCUMENT_BUCKET,
-      storage_path: storagePath,
-      original_filename: file.name,
-      mime_type: file.type,
-      size_bytes: file.size,
-      delete_after: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
-  if (rowError) {
-    console.error("uploadVerificationDocument row insert failed", rowError);
-    return { error: "Could not save your documents. Please try again." };
   }
   return {};
 }
@@ -1027,8 +1047,4 @@ function validateDocument(file: File): string | null {
     return "Each document must be 10MB or smaller.";
   }
   return null;
-}
-
-function safeFilename(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
 }

@@ -36,3 +36,15 @@ test("delivery retries transient responses with bounded events and exponential d
 test("local browser sessions do not send remote telemetry", () => {
   assert.match(source, /isLocalHostname\(window\.location\.hostname\)/);
 });
+
+test("telemetry never includes schedule sync payload fields", () => {
+  for (const sensitive of [
+    "course.title",
+    "course.notes",
+    "instructor",
+    "locationLabel",
+    "student_schedule_courses",
+  ]) {
+    assert.doesNotMatch(source, new RegExp(sensitive));
+  }
+});

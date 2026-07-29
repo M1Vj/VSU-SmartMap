@@ -1,0 +1,154 @@
+import type {
+  ScheduleSyncEvent,
+  ScheduleSyncReducerState,
+  SyncStatus,
+} from "./types";
+
+const GENERIC_SYNC_ERROR = "Schedule sync failed. Try again.";
+
+export const initialScheduleSyncState: ScheduleSyncReducerState = {
+  online: true,
+  authExpired: false,
+  pushing: false,
+  failed: false,
+  pending: 0,
+  conflicts: 0,
+  generation: 0,
+  lastRunToken: 0,
+};
+
+function count(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Schedule sync count is invalid.");
+  }
+  return value;
+}
+
+export function reduceScheduleSyncState(
+  state: ScheduleSyncReducerState,
+  event: ScheduleSyncEvent,
+): ScheduleSyncReducerState {
+  switch (event.type) {
+    case "AUTH_CHANGED":
+      return {
+        ...(event.accountId ? { accountId: event.accountId } : {}),
+        online: state.online,
+        authExpired: false,
+        pushing: false,
+        failed: false,
+        pending: count(event.pending),
+        conflicts: count(event.conflicts),
+        generation: event.generation ?? state.generation + 1,
+        lastRunToken: 0,
+        ...(event.lastSyncedAt ? { lastSyncedAt: event.lastSyncedAt } : {}),
+      };
+    case "ONLINE":
+      return { ...state, online: true };
+    case "OFFLINE":
+      return {
+        ...state,
+        online: false,
+        pushing: false,
+      };
+    case "PUSH_STARTED":
+      if (
+        !matchesAccountGeneration(state, event) ||
+        !Number.isSafeInteger(event.runToken) ||
+        event.runToken <= state.lastRunToken
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        pushing: true,
+        failed: false,
+        lastRunToken: event.runToken,
+        activeRunToken: event.runToken,
+      };
+    case "PUSH_ACKNOWLEDGED":
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        pushing: false,
+        failed: false,
+        pending: count(event.pending),
+        lastSyncedAt: event.lastSyncedAt,
+      };
+    case "PULL_APPLIED":
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        pushing: false,
+        failed: false,
+        pending: count(event.pending),
+        conflicts: count(event.conflicts),
+        lastSyncedAt: event.lastSyncedAt,
+        activeRunToken: undefined,
+      };
+    case "CONFLICT":
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        pushing: false,
+        conflicts: count(event.conflicts),
+        activeRunToken: undefined,
+      };
+    case "AUTH_EXPIRED":
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        authExpired: true,
+        pushing: false,
+        activeRunToken: undefined,
+      };
+    case "FAILED":
+      if (!matchesActiveRun(state, event)) return state;
+      return {
+        ...state,
+        pushing: false,
+        failed: true,
+        activeRunToken: undefined,
+      };
+  }
+}
+
+function matchesAccountGeneration(
+  state: ScheduleSyncReducerState,
+  event: { accountId: string; generation: number },
+): boolean {
+  return (
+    state.accountId === event.accountId && state.generation === event.generation
+  );
+}
+
+function matchesActiveRun(
+  state: ScheduleSyncReducerState,
+  event: { accountId: string; generation: number; runToken: number },
+): boolean {
+  return (
+    matchesAccountGeneration(state, event) &&
+    state.activeRunToken === event.runToken
+  );
+}
+
+export function scheduleSyncStatus(state: ScheduleSyncReducerState): SyncStatus {
+  if (!state.accountId) return { kind: "guest" };
+  if (state.authExpired) return { kind: "auth-required", pending: state.pending };
+  if (!state.online) return { kind: "offline", pending: state.pending };
+  if (state.conflicts > 0) {
+    return { kind: "needs-review", conflicts: state.conflicts };
+  }
+  if (state.pushing) return { kind: "syncing", pending: state.pending };
+  if (state.failed) {
+    return {
+      kind: "error",
+      message: GENERIC_SYNC_ERROR,
+      pending: state.pending,
+    };
+  }
+  if (state.pending > 0) return { kind: "pending", pending: state.pending };
+  if (state.lastSyncedAt) {
+    return { kind: "saved", lastSyncedAt: state.lastSyncedAt };
+  }
+  return { kind: "pending", pending: 0 };
+}

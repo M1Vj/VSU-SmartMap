@@ -4,6 +4,17 @@ import type { Facility } from "@/lib/types";
 import type { MapNode, MapEdge } from "@/lib/types/graph";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
 import type { ScheduleCourse } from "@/lib/schedule/types";
+import {
+  GUEST_SCHEDULE_SCOPE,
+} from "@/lib/schedule/scope";
+import {
+  scopedCourseKey,
+  type ScheduleOutboxMutation,
+  type ScheduleSyncState,
+  type StoredScheduleConflict,
+  type StoredScopedScheduleCourse,
+} from "@/lib/schedule/local-types";
+import { parseStoredScheduleCourse } from "@/lib/schedule/validation";
 
 export type CacheMetaKey = "facilities" | "rooms" | "navigation" | "boarding_houses";
 
@@ -28,6 +39,10 @@ export class VSUDatabase extends Dexie {
   offline_queue!: Table<OfflineAction, number>;
   cache_meta!: Table<CacheMetaEntry, CacheMetaKey>;
   schedule_courses!: Table<ScheduleCourse, string>;
+  schedule_scoped_courses!: Table<StoredScopedScheduleCourse, string>;
+  schedule_outbox!: Table<ScheduleOutboxMutation, number>;
+  schedule_sync_state!: Table<ScheduleSyncState, string>;
+  schedule_conflicts!: Table<StoredScheduleConflict, string>;
 
   constructor() {
     super("VSUSmartMapDB");
@@ -94,6 +109,26 @@ export class VSUDatabase extends Dexie {
 
     this.version(10).stores({
       schedule_courses: "id, code, updatedAt",
+    });
+
+    this.version(11).stores({
+      schedule_scoped_courses: "&key, scope, id, course.updatedAt",
+      schedule_outbox: "++sequence, &[scope+courseId], scope, mutationId, createdAt",
+      schedule_sync_state: "&scope",
+      schedule_conflicts: "&key, scope, courseId",
+    }).upgrade(async (tx) => {
+      const legacy = await tx.table("schedule_courses").toArray();
+      const migrated = legacy.map((value) => {
+        const course = parseStoredScheduleCourse(value);
+        return {
+          key: scopedCourseKey(GUEST_SCHEDULE_SCOPE, course.id),
+          scope: GUEST_SCHEDULE_SCOPE,
+          id: course.id,
+          course,
+        };
+      });
+      await tx.table("schedule_scoped_courses").bulkPut(migrated);
+      await tx.table("schedule_courses").clear();
     });
   }
 }

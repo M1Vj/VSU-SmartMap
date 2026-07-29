@@ -3,54 +3,89 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   canAccessAdminArea,
   canAccessOwnerArea,
-  getMetadataAppRoles,
   isBreakGlassAdmin,
-  isMissingAppRoleTableError,
   mergeAppRoles,
   normalizeAppRoles,
-  shouldAllowMissingRoleTableAdminFallback,
-  shouldAllowLegacyUserMetadataRoles,
 } from "@/lib/auth/roles";
 import type { AppRole } from "@/lib/auth/roles";
 import { decideAdminRouteAccess } from "@/lib/auth/route-access";
+import { isSupabasePublicConfigValid } from "@/lib/supabase/public-config";
 
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  const isAdminRoute = pathname.startsWith("/admin");
+  const isOwnerRoute = pathname.startsWith("/owner");
   let supabaseResponse = NextResponse.next({
     request,
   });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
+  const anonymousResponse = () => {
+    const adminDecision = decideAdminRouteAccess({
+      pathname,
+      isAuthenticated: false,
+      hasAdminAccess: false,
+    });
+    if (adminDecision.redirectTo) {
+      const url = request.nextUrl.clone();
+      url.pathname = adminDecision.redirectTo;
+      return NextResponse.redirect(url);
     }
-  );
+    if (
+      isOwnerRoute &&
+      pathname !== "/owner/login" &&
+      pathname !== "/owner/apply"
+    ) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/owner/login";
+      return NextResponse.redirect(url);
+    }
+    return supabaseResponse;
+  };
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!isSupabasePublicConfigValid(url, key)) {
+    return anonymousResponse();
+  }
+  const validUrl = url as string;
+  const validKey = key as string;
 
-  const pathname = request.nextUrl.pathname;
-  const isAdminRoute = pathname.startsWith("/admin");
-  const isOwnerRoute = pathname.startsWith("/owner");
+  let supabase: ReturnType<typeof createServerClient>;
+  try {
+    supabase = createServerClient(
+      validUrl,
+      validKey,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value)
+            );
+            supabaseResponse = NextResponse.next({
+              request,
+            });
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseResponse.cookies.set(name, value, options)
+            );
+          },
+        },
+      }
+    );
+  } catch {
+    return anonymousResponse();
+  }
 
-  const roleResult = user
+  let user;
+  try {
+    ({ data: { user } } = await supabase.auth.getUser());
+  } catch {
+    return anonymousResponse();
+  }
+
+  const roleResult = user && (isAdminRoute || isOwnerRoute)
     ? await supabase
         .from("app_user_roles")
         .select("role")
@@ -61,17 +96,11 @@ export async function updateSession(request: NextRequest) {
 
   const roles = user
     ? mergeAppRoles(
-        mergeAppRoles(
-          normalizeAppRoles(roleResult?.data?.map((row) => row.role)),
-          roleResult?.error &&
-            isMissingAppRoleTableError(roleResult.error) &&
-            isAdminRoute &&
-            shouldAllowMissingRoleTableAdminFallback()
-            ? ["admin"]
-            : getMetadataAppRoles(user, {
-                includeUserMetadata: shouldAllowLegacyUserMetadataRoles(),
-              }),
-        ),
+        roleResult?.error
+          ? []
+          : normalizeAppRoles(
+              roleResult?.data?.map((row: { role: unknown }) => row.role),
+            ),
         breakGlassRoles,
       )
     : [];

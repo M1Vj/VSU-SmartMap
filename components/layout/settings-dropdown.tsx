@@ -25,7 +25,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useApp } from "@/lib/context/app-context";
 import type { TransportMode } from "@/lib/types/graph";
-import { STUDENT_DESTINATIONS } from "@/lib/navigation/student-navigation";
+import {
+  STUDENT_DESTINATIONS,
+  type StudentDestinationId,
+} from "@/lib/navigation/student-navigation";
+
+const MOBILE_SETTINGS_QUERY = "(max-width: 767px)";
 
 const ReportBugDialog = dynamic(
   () => import("@/components/bugs/report-bug-dialog").then((module) => module.ReportBugDialog),
@@ -42,8 +47,40 @@ const HelpGuideDialog = dynamic(
   { ssr: false }
 );
 
+function NavigationTabItems({
+  visibleStudentDestinations,
+  toggleStudentDestination,
+  resetStudentDestinations,
+}: {
+  visibleStudentDestinations: StudentDestinationId[];
+  toggleStudentDestination: (id: StudentDestinationId) => void;
+  resetStudentDestinations: () => void;
+}) {
+  return (
+    <>
+      {STUDENT_DESTINATIONS.map((destination) => (
+        <DropdownMenuCheckboxItem
+          key={destination.id}
+          aria-label={destination.label}
+          checked={visibleStudentDestinations.includes(destination.id)}
+          disabled={destination.required}
+          onCheckedChange={() => toggleStudentDestination(destination.id)}
+          onSelect={(event) => event.preventDefault()}
+        >
+          {destination.label}
+        </DropdownMenuCheckboxItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={resetStudentDestinations}>
+        Reset navigation tabs
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 export function SettingsDropdown() {
   const [mounted, setMounted] = useState(false);
+  const [isCompactSettings, setIsCompactSettings] = useState(false);
   const { theme, setTheme } = useTheme();
   const {
     mapStyle,
@@ -61,6 +98,11 @@ export function SettingsDropdown() {
 
   useEffect(() => {
     setMounted(true);
+    const mediaQuery = window.matchMedia(MOBILE_SETTINGS_QUERY);
+    const updateCompactSettings = () => setIsCompactSettings(mediaQuery.matches);
+    updateCompactSettings();
+    mediaQuery.addEventListener("change", updateCompactSettings);
+    return () => mediaQuery.removeEventListener("change", updateCompactSettings);
   }, []);
 
   useEffect(() => {
@@ -161,32 +203,36 @@ export function SettingsDropdown() {
             </DropdownMenuPortal>
           </DropdownMenuSub>
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <PanelTop className="mr-2 h-4 w-4" />
-              <span>Navigation tabs</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent>
-                {STUDENT_DESTINATIONS.map((destination) => (
-                  <DropdownMenuCheckboxItem
-                    key={destination.id}
-                    aria-label={destination.label}
-                    checked={visibleStudentDestinations.includes(destination.id)}
-                    disabled={destination.required}
-                    onCheckedChange={() => toggleStudentDestination(destination.id)}
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    {destination.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={resetStudentDestinations}>
-                  Reset navigation tabs
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
+          {isCompactSettings ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="flex items-center gap-2 text-xs text-muted-foreground">
+                <PanelTop className="h-4 w-4" aria-hidden="true" />
+                Navigation tabs
+              </DropdownMenuLabel>
+              <NavigationTabItems
+                visibleStudentDestinations={visibleStudentDestinations}
+                toggleStudentDestination={toggleStudentDestination}
+                resetStudentDestinations={resetStudentDestinations}
+              />
+            </>
+          ) : (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <PanelTop className="mr-2 h-4 w-4" />
+                <span>Navigation tabs</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent>
+                  <NavigationTabItems
+                    visibleStudentDestinations={visibleStudentDestinations}
+                    toggleStudentDestination={toggleStudentDestination}
+                    resetStudentDestinations={resetStudentDestinations}
+                  />
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          )}
 
           <DropdownMenuSeparator />
 

@@ -1,20 +1,36 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-function safeNext(value: string | null): string {
-  if (!value) return "/owner";
-  // only allow same-origin relative paths
-  if (!value.startsWith("/") || value.startsWith("//")) return "/owner";
-  return value;
+import { oauthFailurePath, safeOauthNext } from "@/lib/auth/oauth-return";
+
+type PendingCookie = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
+
+function redirectWithCookies(path: string, pendingCookies: PendingCookie[]) {
+  const response = new NextResponse(null, {
+    status: 307,
+    headers: { location: path },
+  });
+  for (const { name, value, options } of pendingCookies) {
+    response.cookies.set(name, value, options);
+  }
+  return response;
 }
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = safeNext(searchParams.get("next"));
+  const next = safeOauthNext(searchParams.get("next"));
+  const failurePath = oauthFailurePath(next);
 
-  if (code) {
+  if (!code) return redirectWithCookies(failurePath, []);
+
+  const pendingCookies: PendingCookie[] = [];
+  try {
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,18 +41,18 @@ export async function GET(request: Request) {
             return cookieStore.getAll();
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options),
-            );
+            pendingCookies.push(...cookiesToSet);
           },
         },
       },
     );
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+    return redirectWithCookies(error ? failurePath : next, pendingCookies);
+  } catch {
+    try {
+      return redirectWithCookies(failurePath, pendingCookies);
+    } catch {
+      return redirectWithCookies(failurePath, []);
     }
   }
-
-  return NextResponse.redirect(`${origin}/owner/login?error=oauth`);
 }

@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 
 import { reclaimExpiredEventProofs } from "@/lib/storage/event-proofs";
 import { reclaimExpiredPendingUploads } from "@/lib/storage/pending-uploads";
+import { reclaimExpiredVerificationDocuments } from "@/lib/storage/verification-documents";
 
 function response(body: unknown, status: number) {
   return NextResponse.json(body, {
@@ -29,11 +30,22 @@ export async function GET(request: Request) {
     return response({ error: "Unauthorized." }, 401);
   }
 
-  try {
-    const pendingUploads = await reclaimExpiredPendingUploads();
-    const eventProofs = await reclaimExpiredEventProofs();
-    return response({ pendingUploads, eventProofs }, 200);
-  } catch {
+  const [pendingUploads, eventProofs, verificationDocuments] =
+    await Promise.allSettled([
+      reclaimExpiredPendingUploads(),
+      reclaimExpiredEventProofs(),
+      reclaimExpiredVerificationDocuments(),
+    ]);
+  if (
+    pendingUploads.status === "rejected"
+    || eventProofs.status === "rejected"
+    || verificationDocuments.status === "rejected"
+  ) {
     return response({ error: "Unable to reclaim storage." }, 500);
   }
+  return response({
+    pendingUploads: pendingUploads.value,
+    eventProofs: eventProofs.value,
+    verificationDocuments: verificationDocuments.value,
+  }, 200);
 }

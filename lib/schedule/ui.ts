@@ -1,7 +1,73 @@
 import { MAX_SCHEDULE_BACKUP_BYTES } from "./backup";
+import {
+  buildFacilitySearchOptions,
+  type FacilitySearchOption,
+} from "@/lib/map/facility-search-model";
+import type { RoomSearchSource } from "@/lib/map/search-suggestions";
+import type { Facility } from "@/lib/types/facility";
 import { formatMinuteOfDay, isMeetingTba } from "./time";
 import type { IsoWeekday, ScheduleCourse, ScheduleMeeting } from "./types";
 import type { ScheduleValidationIssue } from "./validation";
+
+export function buildScheduleFacilitySearchOptions(input: {
+  facilities: readonly Facility[];
+  rooms: readonly RoomSearchSource[];
+  query: string;
+}): FacilitySearchOption[] {
+  return buildFacilitySearchOptions(input);
+}
+
+export function applyFacilitySearchSelection<T extends {
+  facilityId: string;
+  facilityDetail: string;
+}>(meeting: T, facilityId: string): T {
+  return { ...meeting, facilityId };
+}
+
+export function buildFacilityDisplayQueries(
+  meetings: readonly { facilityId: string }[],
+  facilities: readonly Facility[],
+): string[] {
+  const namesById = new Map(
+    facilities.map((facility) => [facility.id, facility.name]),
+  );
+  return meetings.map((meeting) => namesById.get(meeting.facilityId) ?? "");
+}
+
+function normalizeFacilityQuery(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function shouldClearFacilitySelection(
+  query: string,
+  selectedFacilityId: string,
+  selectedFacilityName: string | undefined,
+): boolean {
+  if (!selectedFacilityId) return false;
+  if (!selectedFacilityName) return true;
+  return normalizeFacilityQuery(query) !==
+    normalizeFacilityQuery(selectedFacilityName);
+}
+
+export function firstFacilityErrorIndex(
+  meetingErrors: unknown,
+): number {
+  if (!Array.isArray(meetingErrors)) return -1;
+  return meetingErrors.findIndex(
+    (error) =>
+      typeof error === "object" &&
+      error !== null &&
+      "facilityId" in error &&
+      Boolean(error.facilityId),
+  );
+}
+
+export function getActiveFacilityQuery(
+  queries: readonly string[],
+  meetingIndex: number,
+): string {
+  return queries[meetingIndex] ?? "";
+}
 
 export function timeValueToMinute(value: string): number {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
@@ -214,6 +280,41 @@ export function reconcileKnownFacilityIds(
   liveIds: readonly string[] | undefined,
 ): Set<string> {
   return new Set(liveIds ?? cachedIds);
+}
+
+export function getFacilityOptionsStatus({
+  source,
+  loading,
+  error,
+  facilityCount,
+}: {
+  source: "cache" | "remote" | "empty";
+  loading: boolean;
+  error: string | null;
+  facilityCount: number;
+}): { message: string; tone: "muted" | "warning" } | null {
+  if (source === "cache" && facilityCount > 0) {
+    if (loading && !error) {
+      return {
+        message: "Showing saved campus facilities while refreshing…",
+        tone: "muted",
+      };
+    }
+    return {
+      message: "Showing saved campus facilities while offline.",
+      tone: "warning",
+    };
+  }
+  if (error) {
+    return {
+      message: "Facility search is unavailable. Try again online or choose Other location.",
+      tone: "warning",
+    };
+  }
+  if (loading) {
+    return { message: "Loading campus facilities…", tone: "muted" };
+  }
+  return null;
 }
 
 export type RestoreDialogState = "closed" | "transfer" | "confirm";

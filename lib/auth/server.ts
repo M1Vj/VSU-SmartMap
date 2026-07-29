@@ -3,13 +3,9 @@ import { redirect } from "next/navigation";
 import {
   canAccessAdminArea,
   canAccessOwnerArea,
-  getMetadataAppRoles,
   isBreakGlassAdmin,
-  isMissingAppRoleTableError,
   mergeAppRoles,
   normalizeAppRoles,
-  shouldAllowMissingRoleTableAdminFallback,
-  shouldAllowLegacyUserMetadataRoles,
 } from "@/lib/auth/roles";
 import {
   getSupabaseServerClient,
@@ -33,14 +29,8 @@ export type AuthorizedSession = AuthenticatedSession & {
   serviceClient: SupabaseClient;
 };
 
-type CurrentUserRoleOptions = {
-  allowMissingRoleTableAdminFallback?: boolean;
-};
-
 export async function getCurrentUserRoles(
   userId: string,
-  user?: Pick<User, "app_metadata" | "user_metadata">,
-  options: CurrentUserRoleOptions = {},
   authenticatedClient?: SupabaseClient,
 ): Promise<AppRole[]> {
   const breakGlassRoles: AppRole[] = isBreakGlassAdmin(userId) ? ["admin"] : [];
@@ -50,38 +40,18 @@ export async function getCurrentUserRoles(
     .select("role")
     .eq("user_id", userId);
 
-  const metadataRoles = user
-    ? getMetadataAppRoles(user, {
-        includeUserMetadata: shouldAllowLegacyUserMetadataRoles(),
-      })
-    : [];
-
   if (error) {
-    if (isMissingAppRoleTableError(error)) {
-      if (
-        user &&
-        options.allowMissingRoleTableAdminFallback &&
-        shouldAllowMissingRoleTableAdminFallback()
-      ) {
-        return mergeAppRoles(["admin"], mergeAppRoles(metadataRoles, breakGlassRoles));
-      }
-
-      return mergeAppRoles(metadataRoles, breakGlassRoles);
-    }
-
     console.error("[auth] Failed to load app roles:", error.message);
-    return mergeAppRoles(metadataRoles, breakGlassRoles);
+    return breakGlassRoles;
   }
 
   return mergeAppRoles(
     normalizeAppRoles((data as RoleRow[] | null)?.map((row) => row.role)),
-    mergeAppRoles(metadataRoles, breakGlassRoles),
+    breakGlassRoles,
   );
 }
 
-export async function getAuthorizedSession(
-  options: CurrentUserRoleOptions = {},
-): Promise<AuthenticatedSession | null> {
+export async function getAuthorizedSession(): Promise<AuthenticatedSession | null> {
   const client = await getSupabaseServerClient();
   const {
     data: { user },
@@ -92,7 +62,7 @@ export async function getAuthorizedSession(
     return null;
   }
 
-  const roles = await getCurrentUserRoles(user.id, user, options, client);
+  const roles = await getCurrentUserRoles(user.id, client);
   return {
     user,
     roles,
@@ -108,9 +78,7 @@ function attachServiceClient(session: AuthenticatedSession): AuthorizedSession {
 }
 
 export async function requireAdminSession(): Promise<AuthorizedSession> {
-  const session = await getAuthorizedSession({
-    allowMissingRoleTableAdminFallback: true,
-  });
+  const session = await getAuthorizedSession();
   if (!session || !canAccessAdminArea(session.roles)) {
     redirect("/admin/login");
   }
@@ -126,9 +94,7 @@ export async function requireOwnerSession(): Promise<AuthorizedSession> {
 }
 
 export async function assertAdminAction(): Promise<AuthorizedSession | { error: string }> {
-  const session = await getAuthorizedSession({
-    allowMissingRoleTableAdminFallback: true,
-  });
+  const session = await getAuthorizedSession();
   if (!session || !canAccessAdminArea(session.roles)) {
     return { error: "Unauthorized" };
   }
