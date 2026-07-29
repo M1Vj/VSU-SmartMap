@@ -35,6 +35,23 @@ export type AccountLocalScheduleVersion = {
 
 export type ReconciliationSource = "guest" | "account-local" | "cloud";
 
+export type ReconciliationChoice =
+  | {
+      kind: "review-merge";
+      choices: Record<string, ReconciliationSource>;
+    }
+  | { kind: "replace-cloud" }
+  | { kind: "use-cloud" }
+  | { kind: "cancel" };
+
+export type PerCourseResolution =
+  | {
+      kind: "choose-source";
+      courseId: string;
+      source: ReconciliationSource;
+    }
+  | { kind: "cancel"; courseId: string };
+
 export type ReconciliationVersion = {
   source: ReconciliationSource;
   course: ScheduleCourse;
