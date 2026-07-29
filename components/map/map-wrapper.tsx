@@ -176,7 +176,7 @@ export function MapWrapper({ children, className, bounds }: MapWrapperProps) {
           }
 
           .map-wrapper .leaflet-bottom.leaflet-right {
-            margin-bottom: calc(5.25rem + env(safe-area-inset-bottom));
+            margin-bottom: calc(4.5625rem + env(safe-area-inset-bottom));
           }
         }
       `}</style>
