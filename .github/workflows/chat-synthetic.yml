@@ -1,0 +1,30 @@
+name: Chat synthetic health
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe production Chat generation
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          CHAT_HEALTH_SECRET: ${{ secrets.CHAT_HEALTH_SECRET }}
+        run: |
+          test -n "$PRODUCTION_URL"
+          test -n "$CHAT_HEALTH_SECRET"
+          response="$(curl --silent --show-error --fail-with-body \
+            --max-time 25 \
+            --retry 2 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --header "x-chat-health-secret: ${CHAT_HEALTH_SECRET}" \
+            "${PRODUCTION_URL%/}/api/health/chat")"
+          jq -e '.ok == true' <<<"$response" >/dev/null

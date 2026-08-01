@@ -138,7 +138,15 @@ function findInternalLinkToken(text: string, from: number): { start: number; end
 
   for (const match of text.matchAll(pattern)) {
     const href = match[2];
-    if (!href.startsWith("/")) continue;
+    let decodedHref: string;
+    try {
+      decodedHref = decodeURIComponent(href);
+    } catch {
+      continue;
+    }
+    if (href !== href.trim() || !href.startsWith("/") || href.startsWith("//") || decodedHref.startsWith("//")) {
+      continue;
+    }
 
     return {
       start: match.index ?? 0,

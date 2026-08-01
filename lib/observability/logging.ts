@@ -293,7 +293,8 @@ export function buildIncidentExport(input: {
 }
 
 function csvEscape(value: unknown): string {
-  const text = value == null ? "" : String(value);
+  const rawText = value == null ? "" : String(value);
+  const text = /^\s*[=+\-@\t\r]/.test(rawText) ? `'${rawText}` : rawText;
   if (!/[",\n\r]/.test(text)) return text;
   return `"${text.replace(/"/g, '""')}"`;
 }

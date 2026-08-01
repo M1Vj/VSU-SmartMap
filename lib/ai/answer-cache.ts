@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
 import type { EventMatch } from "@/lib/types/chat";
+import { AI_RELEASE_ID } from "@/lib/ai/ops/release";
 
 export type CachedFacilityRef = {
   facilityId: string;
@@ -47,11 +48,27 @@ export function normalizeChatQuestion(question: string): string {
 
 // Bump when prompt/behavior changes make previously cached answers wrong;
 // old rows simply stop matching and expire on their own TTL.
-const CHAT_ANSWER_CACHE_VERSION = "v2";
+export const CHAT_ANSWER_CACHE_BEHAVIOR_VERSION = "v3";
 
-export function getChatQuestionHash(question: string): string {
+const SENSITIVE_CACHE_PATTERNS = [
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+  /(?:\+?\d[\s().-]*){8,}\d/,
+  /\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/i,
+  /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
+  /\b(?:api[_-]?key|secret|client[_-]?secret|access[_-]?token|private[_-]?key)\b\s*[:=]\s*\S+/i,
+  /\bsk-(?:live|test|proj)-[A-Za-z0-9_-]{8,}\b/i,
+] as const;
+
+export function isChatAnswerCacheEligible(question: string): boolean {
+  if (/[\u0000-\u001f\u007f]/.test(question)) return false;
+  return !SENSITIVE_CACHE_PATTERNS.some((pattern) => pattern.test(question));
+}
+
+export function getChatQuestionHash(question: string, releaseId = AI_RELEASE_ID): string {
   return createHash("sha256")
-    .update(`${CHAT_ANSWER_CACHE_VERSION}|${normalizeChatQuestion(question)}`)
+    .update(
+      `${CHAT_ANSWER_CACHE_BEHAVIOR_VERSION}|${releaseId}|${normalizeChatQuestion(question)}`
+    )
     .digest("hex");
 }
 

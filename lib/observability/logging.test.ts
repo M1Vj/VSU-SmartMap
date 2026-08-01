@@ -249,3 +249,27 @@ test("serializeIncidentsToCsv escapes incident fields for spreadsheet export", (
   assert.match(csv, /"Map ""blank"", after click"/);
   assert.match(csv, /"Map failed\nNeeds fix"/);
 });
+
+test("serializeIncidentsToCsv neutralizes spreadsheet formulas after optional whitespace", () => {
+  const dangerousTitles = ["=cmd", " +cmd", "\t-cmd", "\r@cmd"];
+  const csv = serializeIncidentsToCsv(
+    dangerousTitles.map((title, index) => ({
+      id: `incident-${index}`,
+      title,
+      severity: "HIGH",
+      status: "OPEN",
+      route: "/",
+      source: "client",
+      fingerprint: `fp-${index}`,
+      eventCount: 1,
+      firstSeenAt: "2026-08-01T00:00:00Z",
+      lastSeenAt: "2026-08-01T00:00:00Z",
+      summary: null,
+    })),
+  );
+
+  assert.match(csv, /incident-0,'=cmd,/);
+  assert.match(csv, /incident-1,' \+cmd,/);
+  assert.match(csv, /incident-2,'\t-cmd,/);
+  assert.match(csv, /incident-3,"'\r@cmd",/);
+});

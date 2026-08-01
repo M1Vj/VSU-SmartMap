@@ -29,6 +29,10 @@ test("normalizeRecipientEvents keeps only known events and removes duplicates", 
   );
 });
 
+test("normalizes chat operations alerts as a selectable admin event", () => {
+  assert.deepEqual(normalizeRecipientEvents(["chat_ops_alert"]), ["chat_ops_alert"]);
+});
+
 test("normalizeRecipientEvents falls back to every event when no valid events are provided", () => {
   assert.deepEqual(normalizeRecipientEvents(["unknown"]), NOTIFICATION_EVENTS.map((event) => event.value));
 });

@@ -1,27 +1,38 @@
 import {
-  findLocationFlow,
+  executeFindLocation,
+  sanitizeGeneratedLocationResponse,
   streamFindLocation,
+  type FindLocationOperations,
 } from "@/lib/ai/flows/find-location";
 import { findFallbackFacilityRefs } from "@/lib/ai/facility-fallback-match";
 import {
   getCachedChatAnswer,
   getChatQuestionHash,
+  isChatAnswerCacheEligible,
   upsertCachedChatAnswer,
   type ChatAnswerCacheHit,
 } from "@/lib/ai/answer-cache";
-import { chatRateLimiter, getClientIp } from "@/lib/ai/rate-limit";
+import { consumeDurableChatRateLimit } from "@/lib/ai/rate-limit";
+import {
+  ChatRequestError,
+  getTrustedClientIp,
+  parseChatRequest,
+} from "@/lib/ai/ops/request";
+import { detectPromptInjectionSignals } from "@/lib/ai/ops/safety";
+import { createChatTurnSession, type ChatTurnSession } from "@/lib/ai/ops/trace";
+import { notifyChatOpsAlert } from "@/lib/ai/ops/alerts";
+import { AI_RELEASE_ID } from "@/lib/ai/ops/release";
+import type { ChatOutcome, ChatValidationStatus } from "@/lib/ai/ops/types";
 import { getFacilitiesByIds } from "@/lib/supabase/queries/facilities";
 import { getFacilitiesForChatCached } from "@/lib/supabase/queries/facilities.server";
 import { getBoardingHousesForChatCached } from "@/lib/supabase/queries/boarding-houses.server";
+import { getEventsCached } from "@/lib/actions/events";
 import { NextResponse } from "next/server";
 import { CHAT_HISTORY } from "@/lib/constants/chat";
 import { CHAT_MODEL_ID } from "@/lib/ai/genkit";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
 import { buildChatFallbackContent, shouldUseChatFallback } from "@/lib/ai/chat-fallback";
-import {
-  buildPartialStreamFinalPayload,
-  shouldFinalizePartialStream,
-} from "./streaming";
+import { shouldFinalizePartialStream } from "./streaming";
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 type ChatContext = {
@@ -40,8 +51,89 @@ type FinalChatPayload = {
     events?: EventMatch[];
     boardingHouses?: BoardingHouseRef[];
   };
+  operations?: FindLocationOperations;
+  cachedModel?: string;
+  turnId?: string;
+  feedbackToken?: string;
+  requestId?: string;
 };
 const encoder = new TextEncoder();
+
+class GroundingValidationError extends Error {
+  constructor(readonly operations: FindLocationOperations) {
+    super("Grounding validation failed");
+    this.name = "GroundingValidationError";
+  }
+}
+
+function attachTurnCredential(
+  payload: FinalChatPayload,
+  session: ChatTurnSession,
+): FinalChatPayload {
+  return {
+    ...payload,
+    turnId: session.identity.turnId,
+    feedbackToken: session.identity.feedbackToken,
+    requestId: session.identity.requestId,
+  };
+}
+
+function clientPayload(payload: FinalChatPayload) {
+  return {
+    content: payload.content,
+    facilities: payload.facilities,
+    events: payload.events,
+    boardingHouses: payload.boardingHouses,
+    turnId: payload.turnId,
+    feedbackToken: payload.feedbackToken,
+    requestId: payload.requestId,
+  };
+}
+
+function payloadRecordIds(payload: FinalChatPayload): string[] {
+  return [
+    ...(payload.cacheRefs?.facilities ?? []).map(({ facilityId }) => `facility:${facilityId}`),
+    ...(payload.cacheRefs?.events ?? []).map(({ eventId }) => `event:${eventId}`),
+    ...(payload.cacheRefs?.boardingHouses ?? []).map(({ listingId }) => `boarding:${listingId}`),
+  ];
+}
+
+async function finalizeTurn(
+  session: ChatTurnSession,
+  payload: FinalChatPayload | undefined,
+  outcome: ChatOutcome,
+  options: {
+    validationStatus?: ChatValidationStatus;
+    validationReasons?: string[];
+    cacheState?: string;
+    errorClass?: string;
+  } = {},
+) {
+  const operations = payload?.operations;
+  await session.finalize({
+    assistantMessage: payload?.content,
+    outcome,
+    selectedModel: operations?.generation?.selectedModel ?? payload?.cachedModel,
+    attemptCount: operations?.generation?.attemptCount ?? 0,
+    validationStatus: options.validationStatus ?? operations?.grounding.outcome ?? "pass",
+    validationReasons: options.validationReasons ?? operations?.grounding.reasonCodes ?? [],
+    retrievedRecordIds: operations?.retrievedRecordIds ?? (payload ? payloadRecordIds(payload) : []),
+    cacheState: options.cacheState,
+    errorClass: options.errorClass,
+  });
+}
+
+function classifyChatError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("grounding") || message.includes("validation")) return "validation_error";
+  if (message.includes("timeout") || message.includes("etimedout")) return "provider_timeout";
+  if (message.includes("429") || message.includes("quota")) return "provider_quota";
+  if (message.includes("rate limit")) return "provider_rate_limit";
+  if (message.includes("network") || message.includes("unavailable") || message.includes("econnrefused")) {
+    return "provider_unavailable";
+  }
+  return "provider_error";
+}
 
 function createSseResponse(start: (controller: ReadableStreamDefaultController<Uint8Array>) => Promise<void> | void) {
   const readable = new ReadableStream({
@@ -126,7 +218,7 @@ async function resolveFacilityMatches(
     .filter(Boolean) as FacilityMatch[];
 }
 
-function resolveEventMatches(
+async function resolveEventMatches(
   events: Array<{
     eventId: string;
     title: string;
@@ -135,17 +227,35 @@ function resolveEventMatches(
     locationText?: string;
     category: string;
   }> | undefined
-): EventMatch[] {
+): Promise<EventMatch[]> {
   if (!events?.length) return [];
+  const today = new Date();
+  const nextWeek = new Date(today);
+  nextWeek.setDate(today.getDate() + 7);
+  const { data } = await getEventsCached({ startDate: today, endDate: nextWeek });
+  const canonical = new Map((data ?? []).map((event) => [event.id, event]));
 
-  return events.map((event) => ({
-    eventId: event.eventId,
-    title: event.title,
-    startTime: event.startTime,
-    endTime: event.endTime,
-    locationText: event.locationText,
-    category: event.category,
-  }));
+  return events.flatMap((event) => {
+    const current = canonical.get(event.eventId);
+    if (
+      !current ||
+      current.title !== event.title ||
+      current.startTime !== event.startTime ||
+      current.endTime !== event.endTime ||
+      (current.locationText ?? undefined) !== event.locationText ||
+      current.category !== event.category
+    ) {
+      return [];
+    }
+    return [{
+      eventId: current.id,
+      title: current.title,
+      startTime: current.startTime,
+      endTime: current.endTime,
+      locationText: current.locationText ?? undefined,
+      category: current.category,
+    }];
+  });
 }
 
 async function resolveBoardingHouseMatches(
@@ -173,24 +283,34 @@ async function resolveBoardingHouseMatches(
 async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit): Promise<FinalChatPayload> {
   const facilities = await resolveFacilityMatches(cacheHit.facilities);
   const boardingHouses = await resolveBoardingHouseMatches(cacheHit.boardingHouses);
-  const events = resolveEventMatches(cacheHit.events);
+  const events = await resolveEventMatches(cacheHit.events);
 
   return {
     content: cacheHit.content,
     facilities: facilities.length > 0 ? facilities : undefined,
     events: events.length > 0 ? events : undefined,
     boardingHouses: boardingHouses.length > 0 ? boardingHouses : undefined,
+    cacheRefs: {
+      facilities: cacheHit.facilities,
+      events: cacheHit.events,
+      boardingHouses: cacheHit.boardingHouses,
+    },
+    cachedModel: cacheHit.model,
   };
 }
 
-async function buildFinalChatPayload(message: string, context: ChatContext): Promise<FinalChatPayload> {
-  const result = await findLocationFlow({
-    query: message,
-    context,
-  });
+async function buildFinalChatPayload(
+  message: string,
+  context: ChatContext,
+  abortSignal?: AbortSignal,
+): Promise<FinalChatPayload> {
+  const { output: result, operations } = await executeFindLocation(
+    { query: message, context },
+    { abortSignal },
+  );
 
   const matches = await resolveFacilityMatches(result.facilities);
-  const eventMatches = resolveEventMatches(result.events);
+  const eventMatches = await resolveEventMatches(result.events);
   const boardingHouseMatches = await resolveBoardingHouseMatches(result.boardingHouses);
 
   return {
@@ -203,21 +323,11 @@ async function buildFinalChatPayload(message: string, context: ChatContext): Pro
       events: result.events,
       boardingHouses: result.boardingHouses,
     },
+    operations,
   };
 }
 
-async function buildPartialStreamPayload(message: string, content: string): Promise<FinalChatPayload> {
-  const { data } = await getFacilitiesForChatCached();
-  const facilityRefs = data ? findFallbackFacilityRefs(message, data) : [];
-  const facilities = await resolveFacilityMatches(facilityRefs);
-
-  return {
-    content,
-    facilities: facilities.length > 0 ? facilities : undefined,
-  };
-}
-
-async function buildStaticFallbackPayload(message: string) {
+async function buildStaticFallbackPayload(message: string): Promise<FinalChatPayload> {
   const { data } = await getFacilitiesForChatCached();
   const facilityRefs = data ? findFallbackFacilityRefs(message, data) : [];
   const facilities = await resolveFacilityMatches(facilityRefs);
@@ -227,15 +337,22 @@ async function buildStaticFallbackPayload(message: string) {
     facilities: facilities.length > 0 ? facilities : undefined,
     events: undefined,
     boardingHouses: undefined,
+    cacheRefs: { facilities: facilityRefs },
   };
 }
 
 async function enqueueGeneratedFinal(
   controller: ReadableStreamDefaultController<Uint8Array>,
   message: string,
-  context: ChatContext
+  context: ChatContext,
+  session?: ChatTurnSession,
+  abortSignal?: AbortSignal,
 ) {
-  const payload = await buildFinalChatPayload(message, context);
+  const generated = await buildFinalChatPayload(message, context, abortSignal);
+  if (generated.operations?.grounding.outcome === "fail") {
+    throw new GroundingValidationError(generated.operations);
+  }
+  const payload = session ? attachTurnCredential(generated, session) : generated;
 
   enqueueSse(controller, {
     type: "final",
@@ -243,14 +360,20 @@ async function enqueueGeneratedFinal(
     facilities: payload.facilities,
     events: payload.events,
     boardingHouses: payload.boardingHouses,
+    turnId: payload.turnId,
+    feedbackToken: payload.feedbackToken,
+    requestId: payload.requestId,
   });
+  return payload;
 }
 
 async function enqueueStaticFallback(
   controller: ReadableStreamDefaultController<Uint8Array>,
-  message: string
+  message: string,
+  session?: ChatTurnSession,
 ) {
-  const payload = await buildStaticFallbackPayload(message);
+  const fallback = await buildStaticFallbackPayload(message);
+  const payload = session ? attachTurnCredential(fallback, session) : fallback;
 
   enqueueSse(controller, {
     type: "final",
@@ -258,7 +381,11 @@ async function enqueueStaticFallback(
     facilities: payload.facilities,
     events: payload.events,
     boardingHouses: payload.boardingHouses,
+    turnId: payload.turnId,
+    feedbackToken: payload.feedbackToken,
+    requestId: payload.requestId,
   });
+  return payload;
 }
 
 function isContextFreeQuestion(context: ChatContext): boolean {
@@ -276,42 +403,82 @@ async function cacheSuccessfulFinalPayload(
     facilities: payload.cacheRefs?.facilities,
     events: payload.cacheRefs?.events,
     boardingHouses: payload.cacheRefs?.boardingHouses,
-    model: CHAT_MODEL_ID,
+    model: payload.operations?.generation?.selectedModel ?? CHAT_MODEL_ID,
   });
 }
 
 export async function POST(request: Request) {
   let fallbackQuery = "";
+  let turnSession: ChatTurnSession | undefined;
 
   try {
-    const rateLimit = chatRateLimiter.check(getClientIp(request.headers));
+    const parsed = await parseChatRequest(request);
+    const session = createChatTurnSession({
+      conversationId: parsed.data.conversationId,
+      requestId: request.headers.get("x-request-id"),
+      userMessage: parsed.data.message,
+      injectionSignals: detectPromptInjectionSignals(parsed.data.message),
+    });
+    turnSession = session;
+    const rateLimit = await consumeDurableChatRateLimit({
+      subject: getTrustedClientIp(request.headers),
+      costBytes: parsed.byteLength,
+    });
     if (!rateLimit.allowed) {
-      return NextResponse.json({ error: rateLimit.message }, { status: 429 });
-    }
-
-    const body = await request.json();
-    const message = typeof body?.message === "string" ? body.message.trim() : "";
-    fallbackQuery = message;
-    const streaming = Boolean(body?.streaming);
-    const history = Array.isArray(body?.history) ? body.history : [];
-
-    if (!message) {
+      await finalizeTurn(session, undefined, "rate_limited", {
+        validationStatus: "pass",
+        cacheState: "skipped",
+      });
       return NextResponse.json(
-        { error: "Message is required" },
-        { status: 400 }
+        { error: rateLimit.message },
+        {
+          status: 429,
+          headers: {
+            "Cache-Control": "no-store",
+            "Retry-After": String(rateLimit.retryAfterSeconds),
+          },
+        },
       );
     }
 
+    const { message, streaming, history, summary: requestedSummary } = parsed.data;
+    fallbackQuery = message;
+
     const previousQueries = getPreviousQueries(history);
     const conversationHistory = getConversationHistory(history);
-    const summary = getConversationSummary(body?.summary);
+    const summary = getConversationSummary(requestedSummary);
     const context = { previousQueries, conversationHistory, summary };
-    const contextFreeQuestion = isContextFreeQuestion(context);
+    if (process.env.CHAT_LLM_ENABLED?.trim().toLowerCase() === "false") {
+      const payload = attachTurnCredential(await buildStaticFallbackPayload(message), session);
+      session.markFirstToken();
+      await finalizeTurn(session, payload, "disabled_fallback", {
+        validationStatus: "pass",
+        cacheState: "disabled",
+      });
+      if (streaming) {
+        return createSseResponse((controller) => {
+          enqueueSse(controller, { type: "chunk", content: payload.content });
+          enqueueSse(controller, {
+            type: "final",
+            content: payload.content,
+            facilities: payload.facilities,
+            turnId: payload.turnId,
+            feedbackToken: payload.feedbackToken,
+            requestId: payload.requestId,
+          });
+          closeSse(controller);
+        });
+      }
+      return NextResponse.json(clientPayload(payload), { headers: { "Cache-Control": "no-store" } });
+    }
+    const contextFreeQuestion = isContextFreeQuestion(context) && isChatAnswerCacheEligible(message);
     const questionHash = contextFreeQuestion ? getChatQuestionHash(message) : "";
     const cacheHit = contextFreeQuestion ? await getCachedChatAnswer(questionHash) : null;
 
     if (cacheHit) {
-      const payload = await buildCachedFinalPayload(cacheHit);
+      const payload = attachTurnCredential(await buildCachedFinalPayload(cacheHit), session);
+      session.markFirstToken();
+      await finalizeTurn(session, payload, "cached", { cacheState: "hit" });
 
       if (streaming) {
         return createSseResponse((controller) => {
@@ -322,30 +489,62 @@ export async function POST(request: Request) {
             facilities: payload.facilities,
             events: payload.events,
             boardingHouses: payload.boardingHouses,
+            turnId: payload.turnId,
+            feedbackToken: payload.feedbackToken,
+            requestId: payload.requestId,
           });
           closeSse(controller);
         });
       }
 
-      return NextResponse.json(payload);
+      return NextResponse.json(clientPayload(payload), { headers: { "Cache-Control": "no-store" } });
     }
 
     if (streaming) {
       let stream: Awaited<ReturnType<typeof streamFindLocation>>;
 
       try {
-        stream = await streamFindLocation({
-          query: message,
-          context,
+        stream = await streamFindLocation({ query: message, context }, {
+          abortSignal: request.signal,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Failed to start stream";
         if (shouldUseChatFallback(errorMessage)) {
           return createSseResponse(async (controller) => {
             try {
-              await enqueueGeneratedFinal(controller, message, context);
-            } catch {
-              await enqueueStaticFallback(controller, message);
+              const payload = await enqueueGeneratedFinal(
+                controller,
+                message,
+                context,
+                session,
+                request.signal,
+              );
+              session.markFirstToken();
+              await finalizeTurn(session, payload, "generated_fallback", { cacheState: "miss" });
+            } catch (fallbackError) {
+              const payload = await enqueueStaticFallback(controller, message, session);
+              if (fallbackError instanceof GroundingValidationError) {
+                payload.operations = fallbackError.operations;
+              }
+              session.markFirstToken();
+              const errorClass = classifyChatError(fallbackError);
+              const fallbackOutcome = fallbackError instanceof GroundingValidationError
+                ? "validation_failed"
+                : "static_fallback";
+              await finalizeTurn(session, payload, fallbackOutcome, {
+                validationStatus: fallbackError instanceof GroundingValidationError ? undefined : "warn",
+                validationReasons: fallbackError instanceof GroundingValidationError
+                  ? undefined
+                  : ["provider_fallback"],
+                cacheState: "miss",
+                errorClass,
+              });
+              await notifyChatOpsAlert({
+                outcome: fallbackOutcome,
+                errorClass,
+                releaseId: AI_RELEASE_ID,
+                requestId: session.identity.requestId,
+              });
             } finally {
               closeSse(controller);
             }
@@ -369,14 +568,24 @@ export async function POST(request: Request) {
             if (!newText) continue;
 
             lastResponseText = output.response;
-            send({ type: "chunk", content: newText });
           }
 
           const response = await stream.response;
           if (!response.output) {
             if (shouldFinalizePartialStream(lastResponseText)) {
-              const recoveredPayload = await buildPartialStreamPayload(message, lastResponseText);
-              send(buildPartialStreamFinalPayload(lastResponseText, recoveredPayload));
+              const fallbackPayload = await enqueueStaticFallback(controller, message, session);
+              await finalizeTurn(session, fallbackPayload, "static_fallback", {
+                validationStatus: "warn",
+                validationReasons: ["structured_output_missing"],
+                cacheState: "miss",
+                errorClass: "validation_error",
+              });
+              await notifyChatOpsAlert({
+                outcome: "static_fallback",
+                errorClass: "validation_error",
+                releaseId: AI_RELEASE_ID,
+                requestId: session.identity.requestId,
+              });
               finalSent = true;
               return;
             }
@@ -384,28 +593,69 @@ export async function POST(request: Request) {
             throw new Error("AI response missing output");
           }
 
-          const matches = await resolveFacilityMatches(response.output.facilities);
-          const eventMatches = resolveEventMatches(response.output.events);
-          const boardingHouseMatches = await resolveBoardingHouseMatches(response.output.boardingHouses);
-          const payload: FinalChatPayload = {
-            content: response.output.response,
+          const grounding = sanitizeGeneratedLocationResponse(
+            response.output,
+            stream.operations.groundingContext,
+          );
+          const groundedOutput = grounding.response;
+          if (grounding.outcome === "fail") {
+            const fallbackPayload = attachTurnCredential({
+              ...(await buildStaticFallbackPayload(message)),
+              operations: {
+                generation: stream.operations.generation,
+                grounding,
+                retrievedRecordIds: stream.operations.retrievedRecordIds,
+              },
+            }, session);
+            session.markFirstToken();
+            send({ type: "chunk", content: fallbackPayload.content });
+            send({ type: "final", ...clientPayload(fallbackPayload) });
+            await finalizeTurn(session, fallbackPayload, "validation_failed", {
+              cacheState: "miss",
+              errorClass: "validation_error",
+            });
+            await notifyChatOpsAlert({
+              outcome: "validation_failed",
+              errorClass: "validation_error",
+              releaseId: AI_RELEASE_ID,
+              requestId: session.identity.requestId,
+            });
+            finalSent = true;
+            return;
+          }
+          const matches = await resolveFacilityMatches(groundedOutput.facilities);
+          const eventMatches = await resolveEventMatches(groundedOutput.events);
+          const boardingHouseMatches = await resolveBoardingHouseMatches(groundedOutput.boardingHouses);
+          const payload: FinalChatPayload = attachTurnCredential({
+            content: groundedOutput.response,
             facilities: matches.length > 0 ? matches : undefined,
             events: eventMatches.length > 0 ? eventMatches : undefined,
             boardingHouses: boardingHouseMatches.length > 0 ? boardingHouseMatches : undefined,
             cacheRefs: {
-              facilities: response.output.facilities,
-              events: response.output.events,
-              boardingHouses: response.output.boardingHouses,
+              facilities: groundedOutput.facilities,
+              events: groundedOutput.events,
+              boardingHouses: groundedOutput.boardingHouses,
             },
-          };
+            operations: {
+              generation: stream.operations.generation,
+              grounding,
+              retrievedRecordIds: stream.operations.retrievedRecordIds,
+            },
+          }, session);
 
+          session.markFirstToken();
+          send({ type: "chunk", content: payload.content });
           send({
             type: "final",
             content: payload.content,
             facilities: payload.facilities,
             events: payload.events,
             boardingHouses: payload.boardingHouses,
+            turnId: payload.turnId,
+            feedbackToken: payload.feedbackToken,
+            requestId: payload.requestId,
           });
+          await finalizeTurn(session, payload, "live", { cacheState: "miss" });
           if (contextFreeQuestion) {
             await cacheSuccessfulFinalPayload(questionHash, message, payload);
           }
@@ -414,17 +664,59 @@ export async function POST(request: Request) {
           const errorMessage = error instanceof Error ? error.message : "Failed to stream response";
 
           if (!finalSent && shouldFinalizePartialStream(lastResponseText)) {
-            const recoveredPayload = await buildPartialStreamPayload(message, lastResponseText);
-            send(buildPartialStreamFinalPayload(lastResponseText, recoveredPayload));
+            const fallbackPayload = await enqueueStaticFallback(controller, message, session);
+            const errorClass = classifyChatError(error);
+            await finalizeTurn(session, fallbackPayload, "static_fallback", {
+              validationStatus: "warn",
+              validationReasons: ["partial_stream_discarded"],
+              cacheState: "miss",
+              errorClass,
+            });
+            await notifyChatOpsAlert({
+              outcome: "static_fallback",
+              errorClass,
+              releaseId: AI_RELEASE_ID,
+              requestId: session.identity.requestId,
+            });
             finalSent = true;
             return;
           }
 
           if (shouldUseChatFallback(errorMessage)) {
             try {
-              await enqueueGeneratedFinal(controller, message, context);
-            } catch {
-              await enqueueStaticFallback(controller, message);
+              const payload = await enqueueGeneratedFinal(
+                controller,
+                message,
+                context,
+                session,
+                request.signal,
+              );
+              session.markFirstToken();
+              await finalizeTurn(session, payload, "generated_fallback", { cacheState: "miss" });
+            } catch (fallbackError) {
+              const payload = await enqueueStaticFallback(controller, message, session);
+              if (fallbackError instanceof GroundingValidationError) {
+                payload.operations = fallbackError.operations;
+              }
+              session.markFirstToken();
+              const errorClass = classifyChatError(fallbackError);
+              const fallbackOutcome = fallbackError instanceof GroundingValidationError
+                ? "validation_failed"
+                : "static_fallback";
+              await finalizeTurn(session, payload, fallbackOutcome, {
+                validationStatus: fallbackError instanceof GroundingValidationError ? undefined : "warn",
+                validationReasons: fallbackError instanceof GroundingValidationError
+                  ? undefined
+                  : ["provider_fallback"],
+                cacheState: "miss",
+                errorClass,
+              });
+              await notifyChatOpsAlert({
+                outcome: fallbackOutcome,
+                errorClass,
+                releaseId: AI_RELEASE_ID,
+                requestId: session.identity.requestId,
+              });
             }
             return;
           }
@@ -441,6 +733,19 @@ export async function POST(request: Request) {
             userMessage = "Network connection issue. Please check your connection and try again.";
           }
 
+          const errorClass = classifyChatError(error);
+          await finalizeTurn(session, undefined, "error", {
+            validationStatus: "fail",
+            validationReasons: ["stream_failed"],
+            cacheState: "miss",
+            errorClass,
+          });
+          await notifyChatOpsAlert({
+            outcome: "error",
+            errorClass,
+            releaseId: AI_RELEASE_ID,
+            requestId: session.identity.requestId,
+          });
           send({ type: "error", error: userMessage });
         } finally {
           closeSse(controller);
@@ -448,23 +753,70 @@ export async function POST(request: Request) {
       });
     }
 
-    const payload = await buildFinalChatPayload(message, context);
+    const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+    if (generatedPayload.operations?.grounding.outcome === "fail") {
+      const fallbackPayload = attachTurnCredential({
+        ...(await buildStaticFallbackPayload(message)),
+        operations: generatedPayload.operations,
+      }, session);
+      session.markFirstToken();
+      await finalizeTurn(session, fallbackPayload, "validation_failed", {
+        cacheState: "miss",
+        errorClass: "validation_error",
+      });
+      await notifyChatOpsAlert({
+        outcome: "validation_failed",
+        errorClass: "validation_error",
+        releaseId: AI_RELEASE_ID,
+        requestId: session.identity.requestId,
+      });
+      return NextResponse.json(clientPayload(fallbackPayload), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    const payload = attachTurnCredential(generatedPayload, session);
+    session.markFirstToken();
+    await finalizeTurn(session, payload, "live", { cacheState: "miss" });
     if (contextFreeQuestion) {
       await cacheSuccessfulFinalPayload(questionHash, message, payload);
     }
 
-    return NextResponse.json({
-      content: payload.content,
-      facilities: payload.facilities,
-      events: payload.events,
-      boardingHouses: payload.boardingHouses,
-    });
+    return NextResponse.json(clientPayload(payload), { headers: { "Cache-Control": "no-store" } });
   } catch (error: unknown) {
-    console.error("Chat API Error:", error);
+    if (error instanceof ChatRequestError) {
+      return NextResponse.json(
+        { error: error.publicMessage },
+        {
+          status: error.status,
+          headers: { "Cache-Control": "no-store" },
+        },
+      );
+    }
+
+    console.error("Chat API request failed");
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     if (shouldUseChatFallback(errorMessage)) {
-      return NextResponse.json(await buildStaticFallbackPayload(fallbackQuery));
+      const fallbackPayload = turnSession
+        ? attachTurnCredential(await buildStaticFallbackPayload(fallbackQuery), turnSession)
+        : await buildStaticFallbackPayload(fallbackQuery);
+      if (turnSession) {
+        turnSession.markFirstToken();
+        const errorClass = classifyChatError(error);
+        await finalizeTurn(turnSession, fallbackPayload, "static_fallback", {
+          validationStatus: "warn",
+          validationReasons: ["provider_fallback"],
+          cacheState: "miss",
+          errorClass,
+        });
+        await notifyChatOpsAlert({
+          outcome: "static_fallback",
+          errorClass,
+          releaseId: AI_RELEASE_ID,
+          requestId: turnSession.identity.requestId,
+        });
+      }
+      return NextResponse.json(clientPayload(fallbackPayload), { headers: { "Cache-Control": "no-store" } });
     }
 
     let userMessage = "Sorry, I encountered an error. Please try again.";
@@ -484,9 +836,25 @@ export async function POST(request: Request) {
       statusCode = 503;
     }
 
+    if (turnSession) {
+      const errorClass = classifyChatError(error);
+      await finalizeTurn(turnSession, undefined, "error", {
+        validationStatus: "fail",
+        validationReasons: ["request_failed"],
+        cacheState: "miss",
+        errorClass,
+      });
+      await notifyChatOpsAlert({
+        outcome: "error",
+        errorClass,
+        releaseId: AI_RELEASE_ID,
+        requestId: turnSession.identity.requestId,
+      });
+    }
+
     return NextResponse.json(
       { error: userMessage },
-      { status: statusCode }
+      { status: statusCode, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

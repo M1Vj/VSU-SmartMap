@@ -27,6 +27,12 @@ export interface BoardingHouseMatch {
   walkingMinutesToCampusGate: number | null;
 }
 
+export interface ChatFeedbackCredentials {
+  turnId: string;
+  feedbackToken: string;
+  requestId: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -36,6 +42,9 @@ export interface ChatMessage {
   events?: EventMatch[];
   boardingHouses?: BoardingHouseMatch[];
   followUp?: string | null;
+  turnId?: string;
+  feedbackToken?: string;
+  requestId?: string;
   isError?: boolean;
 }
 
