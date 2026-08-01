@@ -1,9 +1,12 @@
 import { updateSession } from "@/lib/supabase/middleware";
-import { type NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const response = await updateSession(request);
+  const requestId = crypto.randomUUID();
+  const headers = new Headers(request.headers);
+  headers.set("x-request-id", requestId);
+  const forwardedRequest = new NextRequest(request, { headers });
+  const response = await updateSession(forwardedRequest);
   response.headers.set("x-request-id", requestId);
   return response;
 }

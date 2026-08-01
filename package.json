@@ -9,6 +9,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "test": "node tools/run-tests.mjs",
+    "eval:chat": "node tools/evals/run-chat-evals.mjs",
     "preview:offline": "NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next build && NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next start",
     "start": "next start",
     "db:start": "npx --yes supabase@2.107.0 start",

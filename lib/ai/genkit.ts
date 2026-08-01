@@ -49,6 +49,23 @@ export function getChatModelIds(env?: EnvLike): string[] {
 export const CHAT_MODEL_IDS = getChatModelIds();
 export const CHAT_MODEL_ID = CHAT_MODEL_IDS[0];
 
+const CHAT_ATTEMPT_BUDGET = 6;
+
+export type GenerationRunMetadata = {
+  selectedModel: string;
+  attemptCount: number;
+};
+
+export function createGenerationRunMetadata(
+  selectedModel: string,
+  remainingAttempts: number,
+): GenerationRunMetadata {
+  return {
+    selectedModel,
+    attemptCount: Math.max(0, Math.min(CHAT_ATTEMPT_BUDGET, CHAT_ATTEMPT_BUDGET - remainingAttempts)),
+  };
+}
+
 const createGenkit = (apiKey: string, modelId = CHAT_MODEL_ID) => {
   return genkit({
     plugins: [googleAI({ apiKey, models: [modelId] })],
@@ -80,14 +97,17 @@ export function shouldTryNextChatModel(error: unknown): boolean {
 }
 
 export async function runWithKeyRotation<T>(
-  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>
+  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>,
+  onSuccess?: (metadata: GenerationRunMetadata) => void,
 ): Promise<T> {
   let lastError: unknown;
-  const attemptBudget = { remaining: 6 };
+  const attemptBudget = { remaining: CHAT_ATTEMPT_BUDGET };
 
   for (const modelId of CHAT_MODEL_IDS) {
     try {
-      return await runWithKeyRotationForModel(operation, modelId, 'Genkit operation', attemptBudget);
+      const result = await runWithKeyRotationForModel(operation, modelId, 'Genkit operation', attemptBudget);
+      onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
+      return result;
     } catch (error: unknown) {
       lastError = error;
 
@@ -131,7 +151,7 @@ async function runWithKeyRotationForModel<T>(
       const isRateLimit = isRateLimitError(error);
 
       if (isRateLimit && currentKey) {
-        console.warn(`${label} failed with rate limit for model ${modelId} and key ending in ...${currentKey.slice(-4)}, retrying...`);
+        console.warn(`${label} failed with rate limit for model ${modelId}; retrying with another configured credential...`);
         apiKeyManager.markKeyFailed(currentKey, getRateLimitFailureKind(error));
         if (attempts < maxRetries && attemptBudget.remaining > 0) {
           await wait(getBackoffDelayMs(attempts));
@@ -147,14 +167,17 @@ async function runWithKeyRotationForModel<T>(
 }
 
 export async function streamWithKeyRotation<T>(
-  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>
+  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>,
+  onSuccess?: (metadata: GenerationRunMetadata) => void,
 ): Promise<T> {
   let lastError: unknown;
-  const attemptBudget = { remaining: 6 };
+  const attemptBudget = { remaining: CHAT_ATTEMPT_BUDGET };
 
   for (const modelId of CHAT_MODEL_IDS) {
     try {
-      return await runWithKeyRotationForModel(operation, modelId, 'Genkit streaming operation', attemptBudget);
+      const result = await runWithKeyRotationForModel(operation, modelId, 'Genkit streaming operation', attemptBudget);
+      onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
+      return result;
     } catch (error: unknown) {
       lastError = error;
 

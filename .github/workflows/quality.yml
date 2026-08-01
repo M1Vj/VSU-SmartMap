@@ -22,6 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run eval:chat
       - run: npm run build
       # Was --audit-level=high, which became unpassable: the outstanding
       # advisories against next carry the range >=9.3.4-canary.0, so they match

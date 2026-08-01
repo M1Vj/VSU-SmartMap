@@ -11,6 +11,13 @@ let proofCleanupResult = { scanned: 4, reclaimed: 3, retry: 1 };
 let verificationCleanupCalls = 0;
 let verificationCleanupError: Error | null = null;
 let verificationCleanupResult = { scanned: 2, reclaimed: 1, retry: 1 };
+let chatOpsCalls = 0;
+let chatOpsError: Error | null = null;
+let chatOpsDeleted = {
+  feedback_deleted: 2,
+  turns_deleted: 3,
+  alert_claims_deleted: 5,
+};
 
 mock.module("@/lib/storage/pending-uploads", {
   namedExports: {
@@ -42,6 +49,23 @@ mock.module("@/lib/storage/verification-documents", {
   },
 });
 
+mock.module("@/lib/supabase/server-client", {
+  namedExports: {
+    getSupabaseServiceRoleClient() {
+      return {
+        async rpc(name: string, args: { p_batch_size: number }) {
+          assert.equal(name, "purge_ai_chat_ops");
+          assert.deepEqual(args, { p_batch_size: 5_000 });
+          chatOpsCalls += 1;
+          return chatOpsError
+            ? { data: null, error: chatOpsError }
+            : { data: [chatOpsDeleted], error: null };
+        },
+      };
+    },
+  },
+});
+
 const routeModule = import("./route.ts");
 
 function request(authorization?: string) {
@@ -61,6 +85,13 @@ function reset() {
   verificationCleanupCalls = 0;
   verificationCleanupError = null;
   verificationCleanupResult = { scanned: 2, reclaimed: 1, retry: 1 };
+  chatOpsCalls = 0;
+  chatOpsError = null;
+  chatOpsDeleted = {
+    feedback_deleted: 2,
+    turns_deleted: 3,
+    alert_claims_deleted: 5,
+  };
 }
 
 test.beforeEach(reset);
@@ -74,6 +105,7 @@ test("fails closed without CRON_SECRET", async () => {
   assert.equal(cleanupCalls, 0);
   assert.equal(proofCleanupCalls, 0);
   assert.equal(verificationCleanupCalls, 0);
+  assert.equal(chatOpsCalls, 0);
 });
 
 test("requires the exact bearer authorization value", async () => {
@@ -85,6 +117,7 @@ test("requires the exact bearer authorization value", async () => {
   assert.equal(cleanupCalls, 0);
   assert.equal(proofCleanupCalls, 0);
   assert.equal(verificationCleanupCalls, 0);
+  assert.equal(chatOpsCalls, 0);
 });
 
 test("runs bounded reclamation for an authorized cron request without caching", async () => {
@@ -96,10 +129,42 @@ test("runs bounded reclamation for an authorized cron request without caching", 
     pendingUploads: cleanupResult,
     eventProofs: proofCleanupResult,
     verificationDocuments: verificationCleanupResult,
+    chatOps: {
+      feedbackDeleted: 2,
+      turnsDeleted: 3,
+      alertClaimsDeleted: 5,
+    },
   });
   assert.equal(cleanupCalls, 1);
   assert.equal(proofCleanupCalls, 1);
   assert.equal(verificationCleanupCalls, 1);
+  assert.equal(chatOpsCalls, 1);
+});
+
+test("caps the reported chat-ops deletion count", async () => {
+  chatOpsDeleted = {
+    feedback_deleted: 99_999,
+    turns_deleted: -1,
+    alert_claims_deleted: Number.NaN,
+  };
+  const { GET } = await routeModule;
+  const response = await GET(request("Bearer test-cron-secret"));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).chatOps, {
+    feedbackDeleted: 5_000,
+    turnsDeleted: 0,
+    alertClaimsDeleted: 0,
+  });
+});
+
+test("keeps chat-ops retention failures generic", async () => {
+  chatOpsError = new Error("private transcript retention failure");
+  const { GET } = await routeModule;
+  const response = await GET(request("Bearer test-cron-secret"));
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.deepEqual(body, { error: "Unable to reclaim storage." });
+  assert.equal(JSON.stringify(body).includes("private transcript"), false);
 });
 
 test("returns a generic no-cache error when cleanup fails", async () => {

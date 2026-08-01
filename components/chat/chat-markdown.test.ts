@@ -50,3 +50,21 @@ test("parseChatMarkdown keeps non-internal links literal", () => {
     },
   ]);
 });
+
+test("parseChatMarkdown rejects protocol-relative internal-link lookalikes", () => {
+  for (const href of ["//evil.example", " //evil.example", "/%2Fevil.example", "/%2f%2fevil.example"]) {
+    assert.deepEqual(parseChatMarkdown(`[unsafe](${href})`), [
+      {
+        type: "paragraph",
+        children: [{ type: "text", text: `[unsafe](${href})` }],
+      },
+    ], href);
+  }
+
+  assert.deepEqual(parseChatMarkdown("[safe](/map)"), [
+    {
+      type: "paragraph",
+      children: [{ type: "link", href: "/map", children: [{ type: "text", text: "safe" }] }],
+    },
+  ]);
+});

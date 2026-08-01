@@ -1,3 +1,10 @@
+import { CHAT_REQUEST_MAX_BYTES } from "@/lib/ai/ops/request";
+import {
+  consumeRateLimit,
+  type ConsumeRateLimitInput,
+  type ConsumeRateLimitResult,
+} from "@/lib/security/rate-limit";
+
 export type ChatRateLimitResult =
   | { allowed: true }
   | { allowed: false; reason: "minute" | "day"; message: string };
@@ -96,3 +103,81 @@ export function getClientIp(headers: Headers): string {
 }
 
 export const chatRateLimiter = new ChatRateLimiter();
+
+type RateLimitConsumer = (
+  input: ConsumeRateLimitInput,
+) => Promise<ConsumeRateLimitResult>;
+
+export type DurableChatRateLimitResult =
+  | { allowed: true }
+  | {
+      allowed: false;
+      reason: "minute" | "day";
+      message: string;
+      retryAfterSeconds: number;
+    };
+
+export async function consumeDurableChatRateLimit({
+  subject,
+  costBytes,
+  consume = consumeRateLimit,
+}: {
+  subject: string;
+  costBytes: number;
+  consume?: RateLimitConsumer;
+}): Promise<DurableChatRateLimitResult> {
+  const minute = await consume({
+    scope: "chat:minute",
+    subject,
+    requestLimit: 8,
+    byteLimit: 8 * CHAT_REQUEST_MAX_BYTES,
+    windowSeconds: 60,
+    costBytes,
+  });
+  if (!minute.allowed) {
+    return {
+      allowed: false,
+      reason: "minute",
+      message: MINUTE_MESSAGE,
+      retryAfterSeconds: minute.retryAfterSeconds,
+    };
+  }
+
+  const day = await consume({
+    scope: "chat:day",
+    subject,
+    requestLimit: 80,
+    byteLimit: 80 * CHAT_REQUEST_MAX_BYTES,
+    windowSeconds: 86_400,
+    costBytes,
+  });
+  if (!day.allowed) {
+    return {
+      allowed: false,
+      reason: "day",
+      message: DAY_MESSAGE,
+      retryAfterSeconds: day.retryAfterSeconds,
+    };
+  }
+
+  return { allowed: true };
+}
+
+export async function consumeDurableChatFeedbackRateLimit({
+  subject,
+  costBytes,
+  consume = consumeRateLimit,
+}: {
+  subject: string;
+  costBytes: number;
+  consume?: RateLimitConsumer;
+}): Promise<ConsumeRateLimitResult> {
+  return consume({
+    scope: "chat:feedback",
+    subject,
+    requestLimit: 30,
+    byteLimit: 30 * 4 * 1024,
+    windowSeconds: 15 * 60,
+    costBytes,
+  });
+}

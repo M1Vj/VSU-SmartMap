@@ -2,9 +2,52 @@
 
 import { useCallback, useRef, useState, useEffect } from "react";
 import { prepareChatContextPayload, truncateHistory } from "@/lib/ai/history";
-import type { BoardingHouseMatch, ChatMessage, ChatState, FacilityMatch, EventMatch } from "@/lib/types";
+import type {
+  BoardingHouseMatch,
+  ChatFeedbackCredentials,
+  ChatMessage,
+  ChatState,
+  FacilityMatch,
+  EventMatch,
+} from "@/lib/types";
 
 const CHAT_STORAGE_KEY = "vsu-smartmap-chat";
+const CHAT_CONVERSATION_ID_KEY = "vsu-smartmap-chat-conversation-id";
+
+type StorageLike = Pick<Storage, "getItem" | "setItem">;
+
+export function getOrCreateConversationId(
+  storage: StorageLike,
+  createUuid: () => string = () => crypto.randomUUID(),
+) {
+  const stored = storage.getItem(CHAT_CONVERSATION_ID_KEY);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored ?? "")) {
+    return stored!;
+  }
+  const conversationId = createUuid();
+  storage.setItem(CHAT_CONVERSATION_ID_KEY, conversationId);
+  return conversationId;
+}
+
+export function buildChatRequestBody(input: {
+  message: string;
+  history: ReturnType<typeof prepareChatContextPayload>["history"];
+  summary: ReturnType<typeof prepareChatContextPayload>["summary"];
+  streaming: boolean;
+  conversationId: string;
+}) {
+  return input;
+}
+
+export function readFeedbackCredentials(payload: unknown): ChatFeedbackCredentials | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const { turnId, feedbackToken, requestId } = payload as Record<string, unknown>;
+  return typeof turnId === "string" &&
+    typeof feedbackToken === "string" &&
+    typeof requestId === "string"
+    ? { turnId, feedbackToken, requestId }
+    : undefined;
+}
 
 function createMessageId() {
   return typeof crypto !== "undefined" && crypto.randomUUID
@@ -63,9 +106,11 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
   });
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialized = useRef(false);
+  const conversationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!initialized.current) {
+      conversationIdRef.current = getOrCreateConversationId(localStorage);
       const storedMessages = loadMessagesFromStorage();
       if (storedMessages.length > 0) {
         setState((prev) => ({ ...prev, messages: storedMessages }));
@@ -124,12 +169,14 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: JSON.stringify(buildChatRequestBody({
             message: content,
             history: contextPayload.history,
             summary: contextPayload.summary,
             streaming,
-          }),
+            conversationId:
+              conversationIdRef.current ?? getOrCreateConversationId(localStorage),
+          })),
           signal: abortControllerRef.current!.signal,
         });
 
@@ -151,6 +198,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           let events: EventMatch[] | undefined;
           let boardingHouses: BoardingHouseMatch[] | undefined;
           let followUp: string | null = null;
+          let feedbackCredentials: ChatFeedbackCredentials | undefined;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -220,6 +268,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                   typeof maybeFollowUp === "string" && maybeFollowUp.trim()
                     ? maybeFollowUp
                     : null;
+                feedbackCredentials = readFeedbackCredentials(payload);
 
                 updateAssistantMessage((message) => ({
                   ...message,
@@ -228,6 +277,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                   events,
                   boardingHouses,
                   followUp,
+                  ...feedbackCredentials,
                 }));
               } else if (
                 type === "error" &&
@@ -254,6 +304,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                   events,
                   boardingHouses,
                   followUp,
+                  ...feedbackCredentials,
                 }
                 : message
             ),
@@ -267,6 +318,9 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           events?: EventMatch[];
           boardingHouses?: BoardingHouseMatch[];
           followUp?: string | null;
+          turnId?: string;
+          feedbackToken?: string;
+          requestId?: string;
           error?: string;
         };
 
@@ -283,6 +337,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           events: data.events,
           boardingHouses: data.boardingHouses,
           followUp: data.followUp ?? null,
+          ...readFeedbackCredentials(data),
         };
 
         setState((prev) => ({

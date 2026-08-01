@@ -5,6 +5,7 @@ import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { ChatAvatar } from "./chat-avatar";
 import { ChatMarkdown } from "./chat-markdown";
 import { ChatTimestamp } from "./chat-timestamp";
+import { ChatFeedback } from "./chat-feedback";
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -15,6 +16,14 @@ interface ChatMessageProps {
 export function ChatMessage({ message, onRetry, onFollowUp }: ChatMessageProps) {
   const { role, content, timestamp, isError, followUp } = message;
   const isAssistant = role === "assistant";
+  const feedbackCredentials =
+    message.turnId && message.feedbackToken && message.requestId
+      ? {
+          turnId: message.turnId,
+          feedbackToken: message.feedbackToken,
+          requestId: message.requestId,
+        }
+      : undefined;
 
   return (
     <div
@@ -67,6 +76,10 @@ export function ChatMessage({ message, onRetry, onFollowUp }: ChatMessageProps) 
           >
             {followUp}
           </button>
+        )}
+
+        {isAssistant && !isError && feedbackCredentials && (
+          <ChatFeedback credentials={feedbackCredentials} />
         )}
       </div>
     </div>

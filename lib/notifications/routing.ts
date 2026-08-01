@@ -29,6 +29,11 @@ export const NOTIFICATION_EVENTS = [
     label: "Suggestions",
     description: "A user submitted a map suggestion.",
   },
+  {
+    value: "chat_ops_alert",
+    label: "Chat operations alerts",
+    description: "The AI chat service needs administrator attention.",
+  },
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENTS)[number]["value"];

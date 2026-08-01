@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Building, Lightbulb, Bug, Info, Map, Globe, Route, Calendar, Brain, Home, Bell, Activity } from 'lucide-react';
+import { LayoutDashboard, Building, Lightbulb, Bug, Info, Map, Globe, Route, Calendar, Brain, Home, Bell, Activity, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ThemeSwitcher } from '@/components/theme-switcher';
@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: '/admin/events', label: 'Events', icon: Calendar },
   { href: '/admin/navigation', label: 'Navigation', icon: Route },
   { href: '/admin/ai-knowledge', label: 'AI Knowledge', icon: Brain },
+  { href: '/admin/chat-ops', label: 'Chat Operations', icon: Bot },
   { href: '/admin/notifications', label: 'Notifications', icon: Bell },
   { href: '/admin/suggestions', label: 'Suggestions', icon: Lightbulb },
   { href: '/admin/bugs', label: 'Bug Reports', icon: Bug },

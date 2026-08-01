@@ -27,7 +27,10 @@ export const LocationQuerySchema = z.object({
 });
 
 export const LocationResponseSchema = z.object({
-  response: z.string().describe("Natural language response to the user in their preferred language"),
+  response: z
+    .string()
+    .max(4000)
+    .describe("Natural language response to the user in their preferred language"),
   facilities: z
     .array(
       z.object({
