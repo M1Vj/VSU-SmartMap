@@ -60,13 +60,6 @@ type AppBugIncidentRow = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function normalizedOccurrenceTimestamp(value?: string): string {
-  const milliseconds = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(milliseconds)
-    ? new Date(milliseconds).toISOString()
-    : new Date().toISOString();
-}
-
 export type IncidentWithSample = IncidentRecord & {
   sampleEventId: string | null;
   sampleMessage: string | null;
@@ -134,7 +127,7 @@ function toInsertPayload(event: SanitizedLogEvent, fingerprint?: string, inciden
     metadata: event.metadata,
     breadcrumbs: event.breadcrumbs,
     fingerprint,
-    occurred_at: normalizedOccurrenceTimestamp(event.occurredAt),
+    occurred_at: event.occurredAt,
   };
 }
 

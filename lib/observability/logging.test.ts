@@ -88,6 +88,19 @@ test("sanitizeLogEventInput preserves canonical UUID identifiers that resemble p
   assert.equal(sanitized.requestId, identifier);
 });
 
+test("sanitizeLogEventInput normalizes missing and invalid occurrence timestamps", () => {
+  for (const occurredAt of [undefined, "not-a-timestamp"]) {
+    const sanitized = sanitizeLogEventInput({
+      source: "server",
+      level: "error",
+      eventName: "api.request_failed",
+      occurredAt,
+    });
+
+    assert.equal(Number.isFinite(Date.parse(String(sanitized.occurredAt))), true);
+  }
+});
+
 test("sanitizeLogEventInput recursively redacts nested strings, errors, and breadcrumbs", () => {
   const token = ["sk", "proj", "abcdefghijklmnopqrstuvwxyz123456"].join("-");
   const sanitized = sanitizeLogEventInput({
