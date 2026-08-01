@@ -37,9 +37,10 @@ export type LogEventInput = {
 };
 
 export type SanitizedLogEvent = Required<Pick<LogEventInput, "source" | "level" | "eventName">> &
-  Omit<LogEventInput, "source" | "level" | "eventName" | "metadata" | "breadcrumbs"> & {
+  Omit<LogEventInput, "source" | "level" | "eventName" | "metadata" | "breadcrumbs" | "occurredAt"> & {
     metadata: Record<string, unknown>;
     breadcrumbs: LogBreadcrumb[];
+    occurredAt: string;
   };
 
 export type IncidentRecord = {
@@ -116,6 +117,13 @@ function cleanString(value: string): string {
 function cleanIdentifier(value?: string): string | undefined {
   if (!value) return undefined;
   return UUID_PATTERN.test(value) ? value : cleanString(value);
+}
+
+function normalizeOccurrenceTimestamp(value?: string): string {
+  const milliseconds = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(milliseconds)
+    ? new Date(milliseconds).toISOString()
+    : new Date().toISOString();
 }
 
 function sanitizeValue(value: unknown, depth = 0, keyHint = ""): unknown {
@@ -204,7 +212,7 @@ export function sanitizeLogEventInput(input: LogEventInput): SanitizedLogEvent {
     environment: input.environment ? cleanString(input.environment) : undefined,
     metadata: isRecord(input.metadata) ? (sanitizeValue(input.metadata) as Record<string, unknown>) : {},
     breadcrumbs: normalizeBreadcrumbs(input.breadcrumbs),
-    occurredAt: input.occurredAt ? cleanString(input.occurredAt) : undefined,
+    occurredAt: normalizeOccurrenceTimestamp(input.occurredAt),
   };
 }
 
