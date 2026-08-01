@@ -58,3 +58,11 @@ test("chat route withholds provider chunks and replaces hard validation failures
   assert.match(routeSource, /fallbackError instanceof GroundingValidationError/);
   assert.match(routeSource, /enqueueGeneratedFinal\([\s\S]{0,220}request\.signal/);
 });
+
+test("withheld partial streams retry validated generation before static fallback", () => {
+  assert.doesNotMatch(routeSource, /validationReasons:\s*\["partial_stream_discarded"\]/);
+  assert.match(
+    routeSource,
+    /catch \(error\) \{[\s\S]{0,500}!request\.signal\.aborted[\s\S]{0,500}enqueueGeneratedFinal\(/,
+  );
+});
