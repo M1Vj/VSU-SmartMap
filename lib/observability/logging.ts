@@ -75,6 +75,7 @@ const MAX_BREADCRUMBS = 25;
 const REDACTED = "[REDACTED]";
 const SECRET_KEY_PATTERN =
   /password|passwd|secret|token|authorization|auth|cookie|session|api[_-]?key|access[_-]?key|refresh/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -110,6 +111,11 @@ export function redactSensitiveText(value: string): string {
 
 function cleanString(value: string): string {
   return truncateString(redactSensitiveText(value));
+}
+
+function cleanIdentifier(value?: string): string | undefined {
+  if (!value) return undefined;
+  return UUID_PATTERN.test(value) ? value : cleanString(value);
 }
 
 function sanitizeValue(value: unknown, depth = 0, keyHint = ""): unknown {
@@ -187,8 +193,8 @@ export function sanitizeLogEventInput(input: LogEventInput): SanitizedLogEvent {
     level: normalizeLevel(input.level),
     eventName: cleanString(input.eventName || "app.event"),
     message: input.message ? cleanString(input.message) : undefined,
-    sessionId: input.sessionId ? cleanString(input.sessionId) : undefined,
-    requestId: input.requestId ? cleanString(input.requestId) : undefined,
+    sessionId: cleanIdentifier(input.sessionId),
+    requestId: cleanIdentifier(input.requestId),
     route: cleanRoute(input.route),
     method: input.method ? cleanString(input.method.toUpperCase()) : undefined,
     statusCode: typeof input.statusCode === "number" ? input.statusCode : undefined,
