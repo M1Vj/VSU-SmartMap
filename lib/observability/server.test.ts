@@ -65,6 +65,11 @@ test("recordClientTelemetryEvents writes one direct batch with no incident linka
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       "persisted telemetry must always have a canonical UUID",
     );
+    assert.equal(
+      Number.isFinite(Date.parse(String(row.occurred_at))),
+      true,
+      "persisted telemetry must always have a valid occurrence timestamp",
+    );
     assert.equal(row.incident_id, null);
     assert.equal(row.fingerprint, null);
     assert.equal(row.source, "client");
