@@ -34,6 +34,7 @@ import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
 import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
+import { createRouteAnnouncementTracker } from "@/lib/navigation/route-announcement";
 import {
   areFacilityMarkerListsEquivalent,
   getVisibleFacilitiesForMapLoad,
@@ -471,7 +472,7 @@ function MapView({
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
-  const lastAnnouncedNavigationSessionId = useRef<number | null>(null);
+  const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
   const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
   const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
@@ -488,7 +489,13 @@ function MapView({
     setHasHydrated(true);
   }, []);
 
+  const dismissRouteFoundAnnouncement = useCallback((retiredSessionId: number) => {
+    const toastId = routeAnnouncementTracker.reset(retiredSessionId);
+    if (toastId) toast.dismiss(toastId);
+  }, [routeAnnouncementTracker]);
+
   const clearRouteState = useCallback(() => {
+    dismissRouteFoundAnnouncement(navigationSessionId);
     clearNavigation();
     setNavigationOrigin(null);
     setIsManualStartPending(false);
@@ -496,7 +503,7 @@ function MapView({
     setTargetFacilityId(undefined);
     setAvailableRoutes([]);
     setRouteReportOpen(false);
-  }, [clearNavigation]);
+  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
 
   useEffect(() => {
     setAvailableRoutes([]);
@@ -568,14 +575,21 @@ function MapView({
   }, []);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
-    if (lastAnnouncedNavigationSessionId.current === sessionId) return false;
-    lastAnnouncedNavigationSessionId.current = sessionId;
-    return true;
-  }, []);
+    return routeAnnouncementTracker.claim(sessionId);
+  }, [routeAnnouncementTracker]);
+
+  const hasRouteFoundAnnouncement = useCallback((sessionId: number) => {
+    return routeAnnouncementTracker.has(sessionId);
+  }, [routeAnnouncementTracker]);
+
+  const registerRouteFoundAnnouncement = useCallback((sessionId: number, toastId: string) => {
+    routeAnnouncementTracker.register(sessionId, toastId);
+  }, [routeAnnouncementTracker]);
 
   const beginNavigationToItem = useCallback((item: MapItem) => {
     const decision = resolveNavigationStart(position);
 
+    dismissRouteFoundAnnouncement(navigationSessionId);
     setNavigationSessionId((sessionId) => sessionId + 1);
     setTargetFacilityId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
@@ -591,7 +605,7 @@ function MapView({
     setNavigationOrigin("manual");
     setIsManualStartPending(true);
     setNavStart(null);
-  }, [position, setNavEnd, setNavStart]);
+  }, [dismissRouteFoundAnnouncement, navigationSessionId, position, setNavEnd, setNavStart]);
 
   useEffect(() => {
     if (!pendingNavigationFacility) {
@@ -703,7 +717,9 @@ function MapView({
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
               navigationSessionId={navigationSessionId}
+              hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
+              registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
               onRoutesFound={handleRoutesFound}
             />
           )}

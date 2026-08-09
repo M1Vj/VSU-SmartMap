@@ -25,7 +25,9 @@ interface NavigationLayerProps {
   edges: MapEdge[];
   waitingForUserLocation?: boolean;
   navigationSessionId?: number;
+  hasRouteFoundAnnouncement?: (sessionId: number) => boolean;
   claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
+  registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
   onRoutesFound?: (routes: PathResult[]) => void;
 }
 
@@ -38,7 +40,9 @@ export function NavigationLayer({
   edges,
   waitingForUserLocation,
   navigationSessionId,
+  hasRouteFoundAnnouncement,
   claimRouteFoundAnnouncement,
+  registerRouteFoundAnnouncement,
   onRoutesFound,
 }: NavigationLayerProps) {
   const [path, setPath] = useState<PathResult | null>(null);
@@ -63,12 +67,21 @@ export function NavigationLayer({
   );
 
   useEffect(() => {
+    const isSuccessAnnounced =
+      navigationSessionId === undefined || !hasRouteFoundAnnouncement
+        ? undefined
+        : () => hasRouteFoundAnnouncement(navigationSessionId);
+
     if (waitingForUserLocation) {
-      return coordinator.start({ loadingMessage: "Waiting for user location..." });
+      return coordinator.start({
+        loadingMessage: "Waiting for user location...",
+        sessionId: navigationSessionId,
+        isSuccessAnnounced,
+      });
     }
 
     if (!startPoint || !endPoint || !nodes || nodes.length === 0 || !edges || edges.length === 0) {
-      return coordinator.start({});
+      return coordinator.start({ sessionId: navigationSessionId, isSuccessAnnounced });
     }
 
     const makeNode = (id: string, point: { lat: number; lng: number }): MapNode => ({
@@ -241,13 +254,19 @@ export function NavigationLayer({
 
     return coordinator.start({
       loadingMessage: "Loading route...",
+      sessionId: navigationSessionId,
+      isSuccessAnnounced,
       shouldAnnounceSuccess:
         navigationSessionId === undefined || !claimRouteFoundAnnouncement
           ? undefined
           : () => claimRouteFoundAnnouncement(navigationSessionId),
+      onSuccess:
+        navigationSessionId === undefined || !registerRouteFoundAnnouncement
+          ? undefined
+          : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
       resolve: resolveRoute,
     });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, claimRouteFoundAnnouncement, coordinator]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, coordinator]);
 
   if (!path) return null;
 
