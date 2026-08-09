@@ -12,6 +12,7 @@ interface StartRouteRequest<Result> {
   loadingMessage?: string;
   successMessage?: string;
   errorMessage?: string;
+  shouldAnnounceSuccess?: () => boolean;
   resolve?: (signal: AbortSignal) => Promise<Result>;
 }
 
@@ -60,6 +61,14 @@ export function createRouteRequestCoordinator<Result>(
           const result = await options.resolve!(request.controller.signal);
           if (active !== request || request.controller.signal.aborted) return;
           callbacks.publish(result);
+          if (options.shouldAnnounceSuccess && !options.shouldAnnounceSuccess()) {
+            if (request.toastVisible) {
+              callbacks.dismiss(request.id);
+              request.toastVisible = false;
+            }
+            return;
+          }
+
           callbacks.success(options.successMessage ?? "Route found!", request.id);
           request.toastVisible = true;
         })()

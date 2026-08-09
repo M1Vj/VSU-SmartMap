@@ -94,6 +94,87 @@ test("active failure clears and shows an error", async () => {
   assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
 });
 
+test("recalculations publish while a shared navigation session announces success only once", async () => {
+  const { coordinator, events } = harness();
+  const first = deferred<string>();
+  const recalculation = deferred<string>();
+  let successClaimed = false;
+  const shouldAnnounceSuccess = () => {
+    if (successClaimed) return false;
+    successClaimed = true;
+    return true;
+  };
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    shouldAnnounceSuccess,
+    resolve: () => first.promise,
+  });
+  await Promise.resolve();
+  first.resolve("first route");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    shouldAnnounceSuccess,
+    resolve: () => recalculation.promise,
+  });
+  await Promise.resolve();
+  recalculation.resolve("recalculated route");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:recalculated route",
+  ]);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 2);
+  assert.equal(events.filter((event) => event.startsWith("dismiss:")).length, 2);
+});
+
+test("a shared announcement gate survives coordinator remounts and a new session can succeed", async () => {
+  const events: string[] = [];
+  let announcedSession: string | null = null;
+  const callbacks = {
+    clear: () => events.push("clear"),
+    publish: (route: string) => events.push(`publish:${route}`),
+    loading: (_message: string, id: string) => events.push(`loading:${id}`),
+    success: (_message: string, id: string) => events.push(`success:${id}`),
+    error: (_message: string, id: string) => events.push(`error:${id}`),
+    dismiss: (id: string) => events.push(`dismiss:${id}`),
+  };
+  const claimFor = (sessionId: string) => () => {
+    if (announcedSession === sessionId) return false;
+    announcedSession = sessionId;
+    return true;
+  };
+
+  createRouteRequestCoordinator(callbacks).start({
+    loadingMessage: "Loading",
+    shouldAnnounceSuccess: claimFor("navigation-one"),
+    resolve: async () => "first route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  createRouteRequestCoordinator(callbacks).start({
+    loadingMessage: "Loading",
+    shouldAnnounceSuccess: claimFor("navigation-one"),
+    resolve: async () => "route after remount",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+
+  createRouteRequestCoordinator(callbacks).start({
+    loadingMessage: "Loading",
+    shouldAnnounceSuccess: claimFor("navigation-two"),
+    resolve: async () => "new route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 2);
+});
+
 test("cleanup aborts and dismisses only its owned loading toast", async () => {
   const { coordinator, events } = harness();
   let firstSignal: AbortSignal | undefined;

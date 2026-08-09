@@ -24,6 +24,8 @@ interface NavigationLayerProps {
   nodes: MapNode[];
   edges: MapEdge[];
   waitingForUserLocation?: boolean;
+  navigationSessionId?: number;
+  claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
   onRoutesFound?: (routes: PathResult[]) => void;
 }
 
@@ -35,6 +37,8 @@ export function NavigationLayer({
   nodes,
   edges,
   waitingForUserLocation,
+  navigationSessionId,
+  claimRouteFoundAnnouncement,
   onRoutesFound,
 }: NavigationLayerProps) {
   const [path, setPath] = useState<PathResult | null>(null);
@@ -237,9 +241,13 @@ export function NavigationLayer({
 
     return coordinator.start({
       loadingMessage: "Loading route...",
+      shouldAnnounceSuccess:
+        navigationSessionId === undefined || !claimRouteFoundAnnouncement
+          ? undefined
+          : () => claimRouteFoundAnnouncement(navigationSessionId),
       resolve: resolveRoute,
     });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, coordinator]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, claimRouteFoundAnnouncement, coordinator]);
 
   if (!path) return null;
 
