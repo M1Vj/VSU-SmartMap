@@ -31,11 +31,10 @@ test("mobile attribution meets the top edge of the fixed student navigation", as
   assert.doesNotMatch(source, /4\.5625rem/);
 });
 
-test("route fitting reserves fixed mobile navigation and its safe area", async () => {
+test("the map wrapper does not automatically fit route bounds", async () => {
   const source = await readMapWrapperSource();
 
-  assert.match(source, /function getSafeAreaInsetBottom/);
-  assert.match(source, /paddingTopLeft:\s*\[36,\s*36\]/);
-  assert.match(source, /paddingBottomRight:\s*\[36,\s*mobileBottomPadding\]/);
-  assert.doesNotMatch(source, /padding:\s*\[36,\s*36\]/);
+  assert.doesNotMatch(source, /function getSafeAreaInsetBottom/);
+  assert.doesNotMatch(source, /function MapBoundsHandler/);
+  assert.doesNotMatch(source, /\.fitBounds\(/);
 });

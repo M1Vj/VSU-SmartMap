@@ -11,9 +11,7 @@ import { useApp } from "@/lib/context/app-context";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
 import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
-import type { LatLngBoundsExpression } from "leaflet";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
-import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 
 const DEVELOPER_ATTRIBUTION =
   '<a href="https://github.com/M1Vj" target="_blank" rel="noopener noreferrer">Developed by Vj F Mabansag</a>';
@@ -21,21 +19,7 @@ const DEVELOPER_ATTRIBUTION =
 type MapWrapperProps = {
   children?: React.ReactNode;
   className?: string;
-  bounds?: LatLngBoundsExpression | null;
 };
-
-function getSafeAreaInsetBottom() {
-  const probe = document.createElement("div");
-  probe.style.position = "fixed";
-  probe.style.visibility = "hidden";
-  probe.style.paddingBottom = "env(safe-area-inset-bottom, 0px)";
-  document.body.appendChild(probe);
-
-  const inset =
-    Number.parseFloat(window.getComputedStyle(probe).paddingBottom) || 0;
-  probe.remove();
-  return inset;
-}
 
 function DeveloperAttribution() {
   const map = useMap();
@@ -47,32 +31,6 @@ function DeveloperAttribution() {
       map.attributionControl.removeAttribution(DEVELOPER_ATTRIBUTION);
     };
   }, [map]);
-
-  return null;
-}
-
-function MapBoundsHandler({ bounds }: { bounds: LatLngBoundsExpression | null }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (bounds) {
-      const isMobile = window.matchMedia("(max-width: 768px)").matches;
-      const mobileBottomPadding = isMobile
-        ? 120 + getSafeAreaInsetBottom()
-        : 36;
-      const policy = getMapCameraPolicy({
-        owner: "route",
-        navigationOwnsViewport: true,
-        reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-      });
-      map.fitBounds(bounds, {
-        paddingTopLeft: [36, 36],
-        paddingBottomRight: [36, mobileBottomPadding],
-        maxZoom: 18,
-        animate: policy.animate,
-      });
-    }
-  }, [bounds, map]);
 
   return null;
 }
@@ -152,7 +110,7 @@ function add3dBuildingsLayer(mapLibreMap: MapLibreMap) {
   );
 }
 
-export function MapWrapper({ children, className, bounds }: MapWrapperProps) {
+export function MapWrapper({ children, className }: MapWrapperProps) {
   const { resolvedTheme } = useTheme();
   const { mapStyle } = useApp();
   const [mounted, setMounted] = useState(false);
@@ -219,7 +177,6 @@ export function MapWrapper({ children, className, bounds }: MapWrapperProps) {
         <DeveloperAttribution />
         <SmoothZoomControl position="bottomleft" />
         <SmoothWheelZoom />
-        <MapBoundsHandler bounds={bounds ?? null} />
         {children}
       </MapContainer>
     </div>

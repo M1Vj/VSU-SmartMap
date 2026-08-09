@@ -27,16 +27,12 @@ import { searchRooms } from "@/lib/supabase/queries/rooms";
 import { getMapNodes, getMapEdges } from "@/lib/supabase/queries/navigation";
 import { setCachedRooms } from "@/lib/cache/rooms-cache";
 import { useGeolocation } from "@/hooks/use-geolocation";
-import type { LatLng, LatLngBoundsExpression } from "leaflet";
+import type { LatLng } from "leaflet";
 import type { TransportMode } from "@/lib/types/graph";
 import { ReportRouteDialog } from "@/components/navigation/report-route-dialog";
 import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates";
-import { getRouteBounds } from "@/lib/map/route-bounds";
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
-import {
-  getNavigationControlsState,
-  getNavigationMapBounds,
-} from "@/lib/map/navigation-viewport";
+import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
 import {
   areFacilityMarkerListsEquivalent,
@@ -468,7 +464,6 @@ function MapView({
   const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
-  const [mapBounds, setMapBounds] = useState<LatLngBoundsExpression | null>(null);
   const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
   const [isManualStartPending, setIsManualStartPending] = useState(false);
   const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
@@ -498,7 +493,6 @@ function MapView({
     setManualLocationRequestPending(false);
     setTargetFacilityId(undefined);
     setAvailableRoutes([]);
-    setMapBounds(null);
     setRouteReportOpen(false);
   }, [clearNavigation]);
 
@@ -539,12 +533,6 @@ function MapView({
   }, [locationError, manualLocationRequestPending]);
 
   useEffect(() => {
-      if (!navStart || !navEnd) {
-          setMapBounds(null);
-      }
-  }, [navStart, navEnd]);
-
-  useEffect(() => {
     if (
       shouldClearRouteForSelectedItem({
         selectedItemId: selectedId,
@@ -575,7 +563,6 @@ function MapView({
 
   const handleRoutesFound = useCallback((routes: PathResult[]) => {
     setAvailableRoutes(routes);
-    setMapBounds(routes[0] ? getRouteBounds(routes[0].path) : null);
   }, []);
 
   const beginNavigationToItem = useCallback((item: MapItem) => {
@@ -660,7 +647,7 @@ function MapView({
   return (
     <div className="relative h-full w-full">
       <div className="relative h-full w-full overflow-hidden">
-        <MapContainerClient className="h-full w-full" bounds={getNavigationMapBounds(mapBounds)}>
+        <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
             items={filtered}
             selectedId={selectedId}
