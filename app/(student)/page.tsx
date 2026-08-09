@@ -471,6 +471,8 @@ function MapView({
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
+  const lastAnnouncedNavigationSessionId = useRef<number | null>(null);
+  const [navigationSessionId, setNavigationSessionId] = useState(0);
   const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
   const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
   const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
@@ -565,9 +567,16 @@ function MapView({
     setAvailableRoutes(routes);
   }, []);
 
+  const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
+    if (lastAnnouncedNavigationSessionId.current === sessionId) return false;
+    lastAnnouncedNavigationSessionId.current = sessionId;
+    return true;
+  }, []);
+
   const beginNavigationToItem = useCallback((item: MapItem) => {
     const decision = resolveNavigationStart(position);
 
+    setNavigationSessionId((sessionId) => sessionId + 1);
     setTargetFacilityId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
     setAvailableRoutes([]);
@@ -693,6 +702,8 @@ function MapView({
               nodes={graphData.nodes}
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
+              navigationSessionId={navigationSessionId}
+              claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               onRoutesFound={handleRoutesFound}
             />
           )}
