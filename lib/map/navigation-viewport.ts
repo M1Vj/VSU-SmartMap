@@ -1,5 +1,3 @@
-import type { LatLngBoundsExpression } from "leaflet";
-
 type NavigationControlsInput = {
   hasActiveRoute: boolean;
   isManualStartPending: boolean;
@@ -11,12 +9,6 @@ type NavigationControlsState = {
   canReportRoute: boolean;
   statusText: string | null;
 };
-
-export function getNavigationMapBounds(
-  routeBounds: LatLngBoundsExpression | null,
-): LatLngBoundsExpression | null {
-  return routeBounds;
-}
 
 export function getNavigationControlsState({
   hasActiveRoute,

@@ -21,6 +21,6 @@ export function getMapCameraPolicy({
   navigationOwnsViewport: boolean;
   reducedMotion: boolean;
 }) {
-  const shouldMove = owner === "route" || !navigationOwnsViewport;
+  const shouldMove = owner === "selection" && !navigationOwnsViewport;
   return { shouldMove, animate: shouldMove && !reducedMotion };
 }
