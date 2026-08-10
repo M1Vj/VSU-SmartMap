@@ -60,20 +60,40 @@ test("schedule facility search uses shared map ranking for code, alias, and room
     );
   }
 
-  const roomMatch = buildScheduleFacilitySearchOptions({
-    facilities: [scheduleSearchFacility],
-    rooms,
-    query: "DSTAT-201",
-  })[0];
-  const sharedRoomMatch = buildFacilitySearchOptions({
-    facilities: [scheduleSearchFacility],
-    rooms,
-    query: "DSTAT-201",
-  })[0];
-  assert.equal(roomMatch?.facility.id, "dstat");
-  assert.equal(roomMatch?.matchedRoomCode, "DSTAT-201");
-  assert.equal(roomMatch?.secondary, "DSTAT - Academic - Room DSTAT-201");
-  assert.deepEqual(roomMatch, sharedRoomMatch);
+  for (const query of ["DSTAT-201", "DSTAT201", "DSTAT 201", "dstat.201"]) {
+    const scheduleOptions = buildScheduleFacilitySearchOptions({
+      facilities: [scheduleSearchFacility],
+      rooms,
+      query,
+    });
+    const sharedOptions = buildFacilitySearchOptions({
+      facilities: [scheduleSearchFacility],
+      rooms,
+      query,
+    });
+    const roomMatch = scheduleOptions[0];
+    const sharedRoomMatch = sharedOptions[0];
+    assert.equal(roomMatch?.facility.id, "dstat");
+    assert.equal(roomMatch?.matchedRoomCode, "DSTAT-201");
+    assert.equal(roomMatch?.secondary, "DSTAT - Academic - Room DSTAT-201");
+    assert.deepEqual(roomMatch, sharedRoomMatch);
+  }
+});
+
+test("schedule facility search keeps punctuation-only queries literal", () => {
+  const punctuationFacility: Facility = {
+    ...scheduleSearchFacility,
+    id: "punctuation",
+    name: "Science (Annex)",
+    code: "SCI",
+  };
+  const options = buildScheduleFacilitySearchOptions({
+    facilities: [scheduleSearchFacility, punctuationFacility],
+    rooms: [],
+    query: "(",
+  });
+
+  assert.deepEqual(options.map((option) => option.facility.id), ["punctuation"]);
 });
 
 test("facility search selection preserves the typed room detail exactly", () => {

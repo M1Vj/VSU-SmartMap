@@ -1,4 +1,9 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import {
+  boundSearchQuery,
+  normalizeSearchCode,
+  roomMatchesSearch,
+} from "@/lib/map/search-suggestions";
 import { roomSchema } from "@/lib/validation";
 import { getSupabaseBrowserClient } from "../browser-client";
 
@@ -43,6 +48,42 @@ const toPostgrestError = (message: string): PostgrestError => ({
 
 const normalizeError = (error: PostgrestError | null) =>
   error ? { ...error, message: "Unable to complete room request" } : null;
+
+function escapeIlikePattern(value: string) {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+/**
+ * `.or()` receives a raw PostgREST logic expression. Values containing logic
+ * delimiters must be quoted; inside a quoted value, PostgREST uses backslash
+ * escapes for both a literal quote and a literal backslash.
+ */
+function quotePostgrestValue(value: string) {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+export function buildRoomSearchFilter(term: string) {
+  const normalizedTerm = boundSearchQuery(term);
+  const textPattern = `%${escapeIlikePattern(normalizedTerm)}%`;
+  const codeTerm = normalizeSearchCode(normalizedTerm);
+  const filters = [
+    `name.ilike.${quotePostgrestValue(textPattern)}`,
+    `description.ilike.${quotePostgrestValue(textPattern)}`,
+  ];
+
+  // `searchRooms({ term: "" })` is also used for the initial offline cache
+  // prefetch, so keep a non-null room-code candidate for that intentional
+  // full-list request. Punctuation-only user queries omit it to avoid turning
+  // a literal prose search into a canonical-code wildcard scan.
+  if (codeTerm.length > 0 || normalizedTerm.length === 0) {
+    const codePattern = codeTerm.length > 0
+      ? `%${[...codeTerm].map(escapeIlikePattern).join("%")}%`
+      : textPattern;
+    filters.unshift(`room_code.ilike.${quotePostgrestValue(codePattern)}`);
+  }
+
+  return filters.join(",");
+}
 
 const resolveClient = async (client?: MaybeClient) =>
   Promise.resolve(client ?? getSupabaseBrowserClient());
@@ -124,7 +165,7 @@ export async function searchRooms(params: {
   const query = client
     .from("rooms")
     .select(params.includeFacility ? selectWithFacility() : selectBase())
-    .or(`room_code.ilike.%${params.term}%,description.ilike.%${params.term}%`)
+    .or(buildRoomSearchFilter(params.term))
     .order("room_code", { ascending: true });
 
   if (params.facilityId) {
@@ -132,8 +173,14 @@ export async function searchRooms(params: {
   }
 
   const { data, error } = await query;
+  const rows = data as RoomRow[] | RoomRowWithFacility[] | null;
+  const filteredData = rows?.filter((room) => roomMatchesSearch({
+    room_code: room.room_code,
+    name: room.name,
+    description: room.description,
+  }, params.term)) ?? null;
   return {
-    data: data as RoomRow[] | RoomRowWithFacility[] | null,
+    data: filteredData,
     error: normalizeError(error),
   };
 }
