@@ -55,6 +55,10 @@ function boundedText(value: string, maximum = MAX_STRING_LENGTH): string {
   return redacted.length <= maximum ? redacted : `${redacted.slice(0, maximum)}[truncated]`;
 }
 
+function boundedRequestId(value: string): string {
+  return UUID_PATTERN.test(value) ? value : boundedText(value, 128);
+}
+
 function boundedValue(value: unknown, depth = 0, keyHint = ""): unknown {
   if (SECRET_KEY_PATTERN.test(keyHint)) return "[REDACTED]";
   if (typeof value === "string") return boundedText(value);
@@ -143,7 +147,7 @@ function normalizeEvent(
     eventName,
     ...(typeof candidate.message === "string" ? { message: boundedText(candidate.message) } : {}),
     ...(typeof candidate.sessionId === "string" ? { sessionId: candidate.sessionId } : {}),
-    ...(context.requestId ? { requestId: boundedText(context.requestId, 128) } : {}),
+    ...(context.requestId ? { requestId: boundedRequestId(context.requestId) } : {}),
     ...(route ? { route } : {}),
     ...(context.userAgent ? { userAgent: boundedText(context.userAgent, 512) } : {}),
     ...(context.release ? { release: boundedText(context.release, 128) } : {}),

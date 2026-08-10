@@ -111,3 +111,19 @@ test("strictly bounds and recursively redacts client-controlled context", () => 
   assert.equal((event.metadata?.extra as unknown[]).length, 10);
   assert.equal(event.metadata?.safe, "map render failed at line 42");
 });
+
+test("preserves canonical server request IDs while redacting phone-like text", () => {
+  const requestId = "20123456-7890-49e4-8f1d-be3669e84465";
+  const parsed = parseClientTelemetryPayload({
+    eventName: "browser.error",
+    message: "Call +63 917 123 4567 for help",
+  }, {
+    requestId,
+    receivedAt: new Date("2026-08-10T00:00:00.000Z"),
+  });
+
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.events[0]?.requestId, requestId);
+  assert.equal(parsed.events[0]?.message, "Call [REDACTED PHONE] for help");
+});
