@@ -42,6 +42,7 @@ interface FacilityDialogProps {
   submittingLabel?: string;
   children?: ReactNode;
   showSlug?: boolean;
+  imageAccept?: string;
 }
 
 const defaultCoordinates = MAP_DEFAULT_CENTER;
@@ -59,6 +60,7 @@ export function FacilityDialog({
   submittingLabel,
   children,
   showSlug = false,
+  imageAccept = STORAGE_LIMITS.acceptedTypes.join(','),
 }: FacilityDialogProps) {
   const initialValues = useMemo<UnifiedFacilityFormValues>(() => {
     if (facility) {
@@ -359,7 +361,7 @@ export function FacilityDialog({
                   <Input
                     id="image"
                     type="file"
-                    accept={STORAGE_LIMITS.acceptedTypes.join(',')}
+                    accept={imageAccept}
                     onChange={(event) => {
                       const nextFile = event.target.files?.[0];
                       if (nextFile) {
@@ -373,7 +375,10 @@ export function FacilityDialog({
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Max {STORAGE_LIMITS.inputMaxMB}MB. Types: {STORAGE_LIMITS.acceptedTypes.join(', ')}.
+                    Max {STORAGE_LIMITS.inputMaxMB}MB.{' '}
+                    {imageAccept === 'image/*'
+                      ? 'Supported image contents are verified on upload.'
+                      : `Types: ${STORAGE_LIMITS.acceptedTypes.join(', ')}.`}
                   </p>
                 </div>
 

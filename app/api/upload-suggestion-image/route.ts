@@ -84,7 +84,6 @@ export async function POST(request: Request) {
     );
     if (!verification.success) return jsonError("Upload verification failed.", 403);
 
-    const inspected = await inspectSuggestionImage(file);
     const ip = clientIp(request);
     const ownerHash = hashRateLimitSubject(ip);
     if (!ownerHash) return jsonError("Unable to accept upload.", 400);
@@ -95,13 +94,15 @@ export async function POST(request: Request) {
       requestLimit: UPLOAD_REQUEST_LIMIT,
       byteLimit: UPLOAD_BYTE_LIMIT,
       windowSeconds: UPLOAD_WINDOW_SECONDS,
-      costBytes: inspected.bytes.byteLength,
+      costBytes: file.size,
     });
     if (!quota.allowed) {
       return jsonError("Too many uploads. Please try again later.", 429, {
         "retry-after": String(quota.retryAfterSeconds),
       });
     }
+
+    const inspected = await inspectSuggestionImage(file);
 
     const uploadId = randomUUID();
     const { bucket, objectPath } = resolveSuggestionUploadTarget(
