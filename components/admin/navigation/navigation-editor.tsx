@@ -23,6 +23,11 @@ import { FacilitySelectorUnified } from "@/components/facility/facility-selector
 import { getDistance } from "@/lib/pathfinding/astar";
 import { canAddEditorEdge } from "@/lib/pathfinding/editor-edges";
 import { validateEditorGraph } from "@/lib/pathfinding/editor-graph";
+import {
+  decideNavigationConflict,
+  resolveNavigationConflictSnapshot,
+  type NavigationConflictSnapshotState,
+} from "@/lib/pathfinding/navigation-conflict";
 import type { FacilityLite } from "@/lib/types/facility";
 import { toast } from "sonner";
 
@@ -35,6 +40,8 @@ interface HistoryStackState {
   stack: HistoryState[];
   index: number;
 }
+
+type NavigationConflictState = NavigationConflictSnapshotState | { status: "loading" };
 
 const cloneHistoryNodes = (items: MapNode[]) =>
   items.map((n) => ({
@@ -87,6 +94,7 @@ export function NavigationEditor() {
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [graphRevision, setGraphRevision] = useState<number | null>(null);
+  const [graphConflict, setGraphConflict] = useState<NavigationConflictState | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -95,6 +103,7 @@ export function NavigationEditor() {
   const historyRef = useRef(historyState);
   const graphRevisionRef = useRef<number | null>(null);
   const operationRef = useRef<"idle" | "refreshing" | "saving">("idle");
+  const manualOverwriteRef = useRef(false);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -200,10 +209,92 @@ export function NavigationEditor() {
       index: 0,
     });
     lastSavedIndexRef.current = 0;
+    manualOverwriteRef.current = false;
+  }, []);
+
+  const handleKeepDraftAfterConflict = useCallback(() => {
+    if (graphConflict?.status !== "ready") return;
+    const decision = decideNavigationConflict(
+      graphConflict.snapshot,
+      { nodes: nodesRef.current, edges: edgesRef.current },
+      "keep-draft",
+    );
+
+    // The draft remains untouched. Advancing only the optimistic revision
+    // makes the next explicit Save an intentional overwrite of the latest
+    // server snapshot rather than an automatic retry.
+    graphRevisionRef.current = decision.revision;
+    setGraphRevision(decision.revision);
+    manualOverwriteRef.current = true;
+    setGraphConflict(null);
+    toast.info("Draft kept. Review it, then click Save to overwrite the latest server graph.");
+  }, [graphConflict]);
+
+  const handleDiscardDraftAfterConflict = useCallback(async () => {
+    if (graphConflict?.status !== "ready" || operationRef.current !== "idle") return;
+    const decision = decideNavigationConflict(
+      graphConflict.snapshot,
+      { nodes: nodesRef.current, edges: edgesRef.current },
+      "discard-draft",
+    );
+
+    operationRef.current = "refreshing";
+    setIsRefreshing(true);
+    try {
+      // Cache first, then hydrate React state. If the cache write fails, the
+      // local draft and conflict stay visible so a failed discard can never
+      // silently leave the editor with a different offline graph.
+      if (db) {
+        await db.transaction('rw', db.map_nodes, db.map_edges, async () => {
+          await db.map_nodes.clear();
+          await db.map_nodes.bulkAdd(decision.nodes);
+          await db.map_edges.clear();
+          await db.map_edges.bulkAdd(decision.edges);
+        });
+      }
+
+      commitLoadedGraph(decision.nodes, decision.edges, decision.revision);
+      setGraphConflict(null);
+      setSelectedNodeIds(new Set());
+      setSelectedEdgeIds(new Set());
+      setEdgeStartNodeId(null);
+      toast.success("Draft discarded. The latest server graph is now loaded.");
+    } catch (error) {
+      toast.error("Unable to discard the draft because the local cache could not be updated. Your draft is still preserved.");
+      console.error(error);
+    } finally {
+      operationRef.current = "idle";
+      setIsRefreshing(false);
+    }
+  }, [commitLoadedGraph, graphConflict]);
+
+  const handleRetryConflictSnapshot = useCallback(async () => {
+    if (operationRef.current !== "idle") return;
+    operationRef.current = "refreshing";
+    setIsRefreshing(true);
+    setGraphConflict({ status: "loading" });
+    try {
+      const snapshotRes = await getMapGraphSnapshot();
+      setGraphConflict(resolveNavigationConflictSnapshot(snapshotRes));
+    } catch (snapshotError) {
+      setGraphConflict(resolveNavigationConflictSnapshot({ data: null, error: snapshotError }));
+      console.error(snapshotError);
+    } finally {
+      operationRef.current = "idle";
+      setIsRefreshing(false);
+    }
   }, []);
 
   const handleRefresh = async () => {
     if (operationRef.current !== "idle" || isRefreshing || isSaving) return;
+    if (graphConflict) {
+      toast.info("Resolve the server graph conflict below before refreshing so your draft is not discarded.");
+      return;
+    }
+    if (manualOverwriteRef.current) {
+      toast.info("Click Save to confirm the draft overwrite before refreshing.");
+      return;
+    }
     operationRef.current = "refreshing";
     setIsRefreshing(true);
     try {
@@ -441,6 +532,13 @@ export function NavigationEditor() {
 
   const handleSave = useCallback(async (isAutosave = false) => {
     if (operationRef.current !== "idle" || isSaving || isRefreshing) return;
+    if (graphConflict) {
+      if (!isAutosave) toast.info("Resolve the server graph conflict below before saving.");
+      return;
+    }
+    if (isAutosave && manualOverwriteRef.current) {
+      return;
+    }
     if (graphRevision === null || graphRevisionRef.current === null) {
       toast.error("Cannot save until the server graph revision is available. Refresh and try again.");
       return;
@@ -466,10 +564,18 @@ export function NavigationEditor() {
       const result = await saveMapGraph(nodes, edges, expectedRevision);
       if (result.error || result.revision === null) {
         if (isStaleGraphRevisionError(result.error)) {
+          setGraphConflict({ status: "loading" });
+          try {
+            const latestSnapshot = await getMapGraphSnapshot();
+            setGraphConflict(resolveNavigationConflictSnapshot(latestSnapshot));
+          } catch (snapshotError) {
+            setGraphConflict(resolveNavigationConflictSnapshot({ data: null, error: snapshotError }));
+            console.error(snapshotError);
+          }
           toast.error(
             isAutosave
-              ? "Autosave skipped: the server graph changed. Refresh before saving."
-              : "The server graph changed. Refresh before saving your edits.",
+              ? "Autosave paused: the server graph changed. Review the conflict below."
+              : "The server graph changed. Your draft is preserved; choose how to resolve it below.",
             { id: toastId },
           );
           return;
@@ -479,6 +585,7 @@ export function NavigationEditor() {
 
       graphRevisionRef.current = result.revision;
       setGraphRevision(result.revision);
+      if (!isAutosave) manualOverwriteRef.current = false;
 
       // IndexedDB is a last-committed snapshot. Never write a failed draft to
       // it; only update it after the server RPC has committed successfully.
@@ -518,7 +625,7 @@ export function NavigationEditor() {
       operationRef.current = "idle";
       setIsSaving(false);
     }
-  }, [graphRevision, isSaving, isRefreshing, nodes, edges]);
+  }, [graphConflict, graphRevision, isSaving, isRefreshing, nodes, edges]);
 
   const saveRef = useRef(handleSave);
   useEffect(() => {
@@ -944,7 +1051,40 @@ export function NavigationEditor() {
         <div className="text-sm text-muted-foreground">
           Nodes: {nodes.length} | Edges: {edges.length}
         </div>
-        
+
+        {graphConflict && (
+          <div className="border border-amber-500/50 rounded p-3 bg-amber-500/10 space-y-3" role="alert">
+            <div className="font-medium text-sm">Server graph changed</div>
+            {graphConflict.status === "loading" && (
+              <p className="text-xs text-muted-foreground">Loading the latest committed graph. Your draft is preserved.</p>
+            )}
+            {graphConflict.status === "error" && (
+              <>
+                <p className="text-xs text-muted-foreground">{graphConflict.message}</p>
+                <Button variant="outline" size="sm" className="w-full" onClick={handleRetryConflictSnapshot}>
+                  Retry latest snapshot
+                </Button>
+              </>
+            )}
+            {graphConflict.status === "ready" && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Your local edits are still open. Keep them and explicitly save over revision {graphConflict.snapshot.revision},
+                  or discard them and load the server snapshot.
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  <Button variant="secondary" size="sm" onClick={handleKeepDraftAfterConflict}>
+                    Keep my draft
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={handleDiscardDraftAfterConflict}>
+                    Discard draft &amp; use server
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {(selectedNodeIds.size > 0 || selectedEdgeIds.size > 0) && (
             <div className="border rounded p-3 bg-muted/50 space-y-3">
                 <div className="font-medium flex justify-between items-center">

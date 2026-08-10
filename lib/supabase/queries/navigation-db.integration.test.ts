@@ -81,7 +81,19 @@ test(
 
     const { data: nonAdminRead, error: nonAdminReadError } = await student.rpc("read_map_graph");
     assert.equal(nonAdminReadError, null);
-    assert.deepEqual(nonAdminRead, []);
+    assert.ok(Array.isArray(nonAdminRead));
+    assert.equal(nonAdminRead.length, 1);
+    assert.equal((nonAdminRead[0] as { revision?: unknown }).revision, initial.data.revision);
+    assert.ok(Array.isArray((nonAdminRead[0] as { nodes?: unknown }).nodes));
+    assert.ok(Array.isArray((nonAdminRead[0] as { edges?: unknown }).edges));
+
+    const { error: studentWriteError } = await saveMapGraph(
+      initial.data.nodes,
+      initial.data.edges,
+      initial.data.revision,
+      student as never,
+    );
+    assert.equal((studentWriteError as { code?: string } | null)?.code, "42501");
 
     const probeNode: MapNode = {
       id: "00000000-0000-4000-8000-000000000099",
@@ -161,6 +173,51 @@ test(
       baselineNodes,
       [...baselineEdges, { ...firstEdge, id: "00000000-0000-4000-8000-000000000094" }],
     );
+
+    // Omit all columns that have table defaults. The RPC must normalize them
+    // before replacement so a new graph item round-trips with the same shape
+    // as a direct table insert, rather than persisting null metadata.
+    const sparseNode: MapNode = {
+      id: "00000000-0000-4000-8000-000000000091",
+      lat: 10.745,
+      lng: 124.795,
+      type: "node",
+    };
+    const sparseEdge = {
+      id: "00000000-0000-4000-8000-000000000090",
+      source_id: firstNode.id,
+      target_id: sparseNode.id,
+      weight: 1,
+    } as MapEdge;
+    const sparseCommit = await saveMapGraph(
+      [...baselineNodes, sparseNode],
+      [...baselineEdges, sparseEdge],
+      revision,
+      admin as never,
+    );
+    assert.equal(sparseCommit.error, null);
+    assert.equal(sparseCommit.revision, revision + 1);
+    revision += 1;
+
+    const roundTrip = await getMapGraphSnapshot(admin as never);
+    assert.equal(roundTrip.error, null);
+    assert.ok(roundTrip.data);
+    const roundTripNode = roundTrip.data.nodes.find((node) => node.id === sparseNode.id);
+    const roundTripEdge = roundTrip.data.edges.find((edge) => edge.id === sparseEdge.id);
+    assert.ok(roundTripNode);
+    assert.deepEqual(roundTripNode.building_ids, []);
+    assert.equal(roundTripNode.is_closed, false);
+    assert.equal(roundTripNode.closed_until_toggled, false);
+    assert.deepEqual(roundTripNode.closure_daily_schedule, {});
+    assert.equal(typeof (roundTripNode as MapNode & { created_at?: unknown }).created_at, "string");
+    assert.ok(roundTripEdge);
+    assert.equal(roundTripEdge.bidirectional, true);
+    assert.equal(roundTripEdge.type, "walkway");
+    assert.deepEqual(roundTripEdge.access, ["walking"]);
+    assert.equal(roundTripEdge.is_closed, false);
+    assert.equal(roundTripEdge.closed_until_toggled, false);
+    assert.deepEqual(roundTripEdge.closure_daily_schedule, {});
+    assert.equal(typeof (roundTripEdge as MapEdge & { created_at?: unknown }).created_at, "string");
 
     const final = await getMapGraphSnapshot(admin as never);
     assert.equal(final.error, null);

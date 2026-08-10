@@ -113,6 +113,30 @@ BEGIN
   INSERT INTO pg_temp.map_graph_edges_input
     SELECT * FROM jsonb_populate_recordset(NULL::public.map_edges, p_edges);
 
+  -- jsonb_populate_recordset returns NULL for omitted properties rather than
+  -- evaluating the table default. Normalize every column that has a schema
+  -- default before validating or replacing the graph so a newly-added node or
+  -- edge has the same shape as a row inserted through the table API. Keep
+  -- genuinely nullable metadata (for example closure timestamps/reasons)
+  -- nullable; these columns have no default in the navigation schema.
+  UPDATE pg_temp.map_graph_nodes_input
+     SET building_ids = coalesce(building_ids, ARRAY[]::UUID[]),
+         created_at = coalesce(created_at, now()),
+         is_closed = coalesce(is_closed, FALSE),
+         closed_until_toggled = coalesce(closed_until_toggled, FALSE),
+         closure_daily_schedule = coalesce(closure_daily_schedule, '{}'::JSONB)
+   WHERE TRUE;
+
+  UPDATE pg_temp.map_graph_edges_input
+     SET bidirectional = coalesce(bidirectional, TRUE),
+         created_at = coalesce(created_at, now()),
+         type = coalesce(type, 'walkway'),
+         access = coalesce(access, ARRAY['walking']::TEXT[]),
+         is_closed = coalesce(is_closed, FALSE),
+         closed_until_toggled = coalesce(closed_until_toggled, FALSE),
+         closure_daily_schedule = coalesce(closure_daily_schedule, '{}'::JSONB)
+   WHERE TRUE;
+
   IF EXISTS (
        SELECT 1
          FROM pg_temp.map_graph_nodes_input
@@ -143,12 +167,6 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'invalid graph node metadata' USING ERRCODE = 'P0001';
   END IF;
-
-  UPDATE pg_temp.map_graph_edges_input
-     SET type = coalesce(type, 'walkway'),
-         access = coalesce(access, ARRAY['walking']::TEXT[]),
-         bidirectional = coalesce(bidirectional, TRUE)
-   WHERE TRUE;
 
   IF EXISTS (
        SELECT 1
@@ -233,8 +251,8 @@ BEGIN
     closure_recurring_start, closure_recurring_end, closure_recurring_days,
     closure_daily_schedule, group_id
   )
-  SELECT id, source_id, target_id, weight, coalesce(bidirectional, TRUE), created_at,
-         coalesce(type, 'walkway'), coalesce(access, ARRAY['walking']::TEXT[]),
+  SELECT id, source_id, target_id, weight, bidirectional, created_at,
+         type, access,
          is_closed, closed_until_toggled, closed_from, closed_until, closure_reason,
          closure_recurring_start, closure_recurring_end, closure_recurring_days,
          closure_daily_schedule, group_id
@@ -251,7 +269,10 @@ END;
 $$;
 
 -- One read RPC gives the editor a coherent MVCC snapshot of revision and both
--- graph tables. Returning no row is the authorization boundary for non-admins.
+-- graph tables. The graph tables are already public-readable; allowing any
+-- authenticated session to call this read-only SECURITY DEFINER function keeps
+-- the prior snapshot-load behavior for break-glass admins whose app-role row
+-- is missing. The write RPC below remains strictly app-role-bound.
 CREATE OR REPLACE FUNCTION public.read_map_graph()
 RETURNS TABLE (
   revision BIGINT,
@@ -275,8 +296,7 @@ AS $$
            '[]'::JSONB
          ) AS edges
     FROM public.map_graph_state AS state
-   WHERE state.id = TRUE
-     AND public.has_app_role('admin');
+   WHERE state.id = TRUE;
 $$;
 
 REVOKE ALL ON FUNCTION public.read_map_graph()
