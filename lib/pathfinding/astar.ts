@@ -213,10 +213,15 @@ export function findPath(
   const openSet = new Set<string>([startNodeId]);
   const cameFrom = new Map<string, string>();
   const gScore = new Map<string, number>();
+  // Positive edge weights override traversal cost; zero is the legacy sentinel
+  // for geometric distance. An override may be smaller than the geometric
+  // distance, so that distance is not an admissible heuristic. Keeping the
+  // priority equal to known cost makes this Dijkstra's algorithm and guarantees
+  // the optimal route under the effective traversal costs.
   const fScore = new Map<string, number>();
 
   gScore.set(startNodeId, 0);
-  fScore.set(startNodeId, getDistance(startNode.lat, startNode.lng, endNode.lat, endNode.lng));
+  fScore.set(startNodeId, 0);
 
   const adj = new Map<string, MapEdge[]>();
   for (const edge of edges) {
@@ -272,8 +277,7 @@ export function findPath(
       if (tentativeGScore < (gScore.get(neighborId) ?? Infinity)) {
         cameFrom.set(neighborId, currentId);
         gScore.set(neighborId, tentativeGScore);
-        const h = getDistance(neighbor.lat, neighbor.lng, endNode.lat, endNode.lng);
-        fScore.set(neighborId, tentativeGScore + h);
+        fScore.set(neighborId, tentativeGScore);
         openSet.add(neighborId);
       }
     }

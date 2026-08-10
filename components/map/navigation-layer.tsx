@@ -11,7 +11,6 @@ import {
   isPointInsideRoutingBoundary,
   mergePathsAtTransitionGate,
 } from "@/lib/pathfinding/transition-gates";
-import { canUseStraightRouteFallback } from "@/lib/navigation/external-route-policy";
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
@@ -219,15 +218,6 @@ export function NavigationLayer({
       };
     };
 
-    const straightRoute = (from: { lat: number; lng: number }, to: { lat: number; lng: number }): PathResult => {
-      const totalDistance = getDistance(from.lat, from.lng, to.lat, to.lng);
-      return {
-        path: [makeNode("route-start", from), makeNode("route-end", to)],
-        totalDistance,
-        estimatedTime: calculateTime(totalDistance, mode),
-      };
-    };
-
     const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
@@ -241,15 +231,9 @@ export function NavigationLayer({
           isInside: isPointInsideRoutingBoundary,
           findGate: (outside, inside) => findClosestTransitionGate(outside, inside, nodes),
           buildInternalRoute,
-          straightRoute,
           externalPath: getExternalPath,
           mergeAtGate: mergePathsAtTransitionGate,
           calculateTime,
-          canUseStraightFallback: (startInside, endInside) =>
-            canUseStraightRouteFallback({
-              startInsideRoutingBoundary: startInside,
-              endInsideRoutingBoundary: endInside,
-            }),
         },
       });
     };

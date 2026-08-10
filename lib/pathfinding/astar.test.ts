@@ -41,3 +41,41 @@ test("findPath returns only the optimal route", () => {
 
   assert.deepEqual(route?.path.map((pathNode) => pathNode.id), ["A", "B", "C", "D"]);
 });
+
+test("findPath stays optimal when stored edge costs are lower than straight-line distance", () => {
+  const nodes = [
+    node("A", 0, 0),
+    node("B", 0.02, 0.02),
+    node("C", 0, 0.009),
+    node("D", 0, 0.01),
+  ];
+  const edges = [
+    edge("ab", "A", "B", 1),
+    edge("bd", "B", "D", 1),
+    edge("ac", "A", "C", 3),
+    edge("cd", "C", "D", 1),
+  ];
+
+  const route = findPath(nodes, edges, "A", "D", "walking");
+
+  assert.deepEqual(route?.path.map((pathNode) => pathNode.id), ["A", "B", "D"]);
+});
+
+test("zero-weight edges use geographic distance as their traversal cost", () => {
+  const nodes = [
+    node("A", 0, 0),
+    node("B", 0, 0.001),
+    node("C", 0.001, 0),
+    node("D", 0, 0.002),
+  ];
+  const edges = [
+    edge("ab", "A", "B", 0),
+    edge("bd", "B", "D", 0),
+    edge("ac", "A", "C", 0),
+    edge("cd", "C", "D", 0),
+  ];
+
+  const route = findPath(nodes, edges, "A", "D", "walking");
+
+  assert.deepEqual(route?.path.map((pathNode) => pathNode.id), ["A", "B", "D"]);
+});

@@ -12,7 +12,6 @@ interface NavigationRouteDependencies {
   isInside: (point: Point) => boolean;
   findGate: (outside: Point, inside: Point) => MapNode;
   buildInternalRoute: (from: Point, to: Point, destinationId?: string) => PathResult | null;
-  straightRoute: (from: Point, to: Point) => PathResult;
   externalPath: ExternalPath;
   mergeAtGate: (
     firstPath: MapNode[],
@@ -21,7 +20,6 @@ interface NavigationRouteDependencies {
     mode: TransportMode,
   ) => PathResult;
   calculateTime: (distance: number, mode: TransportMode) => number;
-  canUseStraightFallback?: (startInside: boolean, endInside: boolean) => boolean;
 }
 
 export async function resolveNavigationRoute({
@@ -45,8 +43,8 @@ export async function resolveNavigationRoute({
 
   if (startInside && endInside) {
     result = dependencies.buildInternalRoute(start, end, destinationId);
-    if (!result && dependencies.canUseStraightFallback?.(startInside, endInside)) {
-      result = dependencies.straightRoute(start, end);
+    if (!result) {
+      result = await dependencies.externalPath(start, end, mode, signal);
     }
   } else if (!startInside && endInside) {
     const gate = dependencies.findGate(start, end);
@@ -77,6 +75,6 @@ export async function resolveNavigationRoute({
     };
   }
 
-  if (!result) throw new Error("No route could be resolved.");
+  if (!result) throw new Error("External routing provider could not resolve this route.");
   return result;
 }

@@ -18,9 +18,8 @@ function dependencies(startInside: boolean, endInside: boolean) {
     dependencies: {
       isInside: (point: { lat: number }) => point.lat === 1 ? startInside : endInside,
       findGate: () => ({ id: "gate", lat: 3, lng: 3, type: "node" as const }),
-      buildInternalRoute: () => route("internal"),
-      straightRoute: () => route("straight"),
-      externalPath: async (_start: unknown, _end: unknown, _mode: unknown, signal?: AbortSignal) => {
+      buildInternalRoute: (): PathResult | null => route("internal"),
+      externalPath: async (_start: unknown, _end: unknown, _mode: unknown, signal?: AbortSignal): Promise<PathResult | null> => {
         if (signal) signals.push(signal);
         return route("external");
       },
@@ -66,6 +65,40 @@ test("inside to inside stays internal without calling an external provider", asy
 
   assert.equal(result.path[0].id, "internal");
   assert.deepEqual(signals, []);
+});
+
+test("an internal graph miss uses an actual external route instead of a straight line", async () => {
+  const { dependencies: deps, signals } = dependencies(true, true);
+  deps.buildInternalRoute = () => null;
+  const controller = new AbortController();
+
+  const result = await resolveNavigationRoute({
+    start: { lat: 1, lng: 1 },
+    end: { lat: 2, lng: 2 },
+    mode: "walking",
+    signal: controller.signal,
+    dependencies: deps,
+  });
+
+  assert.equal(result.path[0].id, "external");
+  assert.deepEqual(signals, [controller.signal]);
+});
+
+test("an internal graph miss reports failure when no real route provider succeeds", async () => {
+  const { dependencies: deps } = dependencies(true, true);
+  deps.buildInternalRoute = () => null;
+  deps.externalPath = async () => null;
+
+  await assert.rejects(
+    resolveNavigationRoute({
+      start: { lat: 1, lng: 1 },
+      end: { lat: 2, lng: 2 },
+      mode: "walking",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    }),
+    /could not resolve/i,
+  );
 });
 
 test("a geolocation update supersedes a delayed schedule handoff route", async () => {

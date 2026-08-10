@@ -49,16 +49,65 @@ export function isStaleGraphRevisionError(error: unknown): boolean {
 // Public map rendering still reads the two public graph tables independently;
 // the admin editor exclusively uses getMapGraphSnapshot below so its revision
 // and graph rows are coherent.
+const MAP_GRAPH_PAGE_SIZE = 1_000;
+
+type MapGraphTable = "map_nodes" | "map_edges";
+
+/**
+ * Read a map table in deterministic, bounded pages. The Data API applies a
+ * server-side row cap, so one unbounded select silently truncates larger
+ * graphs. Returning no rows when any page fails keeps callers from replacing a
+ * good cache with a partial graph.
+ */
+async function getMapGraphRows<T>(
+  supabase: SupabaseClient,
+  table: MapGraphTable,
+): Promise<{ data: T[] | null; error: unknown | null }> {
+  const rows: T[] = [];
+  let offset = 0;
+  let expectedCount: number | null = null;
+
+  for (;;) {
+    const { data, error, count } = await supabase
+      .from(table)
+      .select("*", { count: "exact" })
+      .order("id", { ascending: true })
+      .range(offset, offset + MAP_GRAPH_PAGE_SIZE - 1);
+
+    if (error) return { data: null, error };
+    if (!Array.isArray(data)) {
+      return { data: null, error: new Error(`Invalid ${table} response`) };
+    }
+
+    if (expectedCount === null && typeof count === "number" && Number.isSafeInteger(count) && count >= 0) {
+      expectedCount = count;
+    }
+
+    rows.push(...(data as T[]));
+    const nextOffset = offset + data.length;
+
+    if (data.length === 0) {
+      if (expectedCount !== null && nextOffset < expectedCount) {
+        return { data: null, error: new Error(`Incomplete ${table} response`) };
+      }
+      break;
+    }
+
+    if (expectedCount !== null && nextOffset >= expectedCount) break;
+    offset = nextOffset;
+  }
+
+  return { data: rows, error: null };
+}
+
 export async function getMapNodes(client?: MaybeClient) {
   const supabase = await resolveClient(client);
-  const { data, error } = await supabase.from("map_nodes").select("*");
-  return { data: data as MapNode[] | null, error };
+  return getMapGraphRows<MapNode>(supabase, "map_nodes");
 }
 
 export async function getMapEdges(client?: MaybeClient) {
   const supabase = await resolveClient(client);
-  const { data, error } = await supabase.from("map_edges").select("*");
-  return { data: data as MapEdge[] | null, error };
+  return getMapGraphRows<MapEdge>(supabase, "map_edges");
 }
 
 /**

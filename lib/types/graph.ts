@@ -31,6 +31,7 @@ export interface MapEdge {
   id: string;
   source_id: string;
   target_id: string;
+  /** Positive values override traversal cost; 0 derives cost from geographic distance. */
   weight: number;
   bidirectional: boolean;
   
