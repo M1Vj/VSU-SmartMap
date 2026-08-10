@@ -36,7 +36,6 @@ import { uploadEventProofClient } from "@/lib/supabase/storage-client";
 import { FacilitySelectorUnified } from "@/components/facility/facility-selector-unified";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const formSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters"),
@@ -51,10 +50,6 @@ const formSchema = z.object({
     .refine(
       (files) => files?.[0]?.size <= MAX_FILE_SIZE,
       'Max file size is 5MB.'
-    )
-    .refine(
-      (files) => ACCEPTED_IMAGE_TYPES.includes(files?.[0]?.type),
-      "Only .jpg, .png, and .webp formats are supported."
     ),
 });
 
@@ -298,7 +293,7 @@ export const SuggestionForm = React.memo(function SuggestionForm({ onSuccess, op
                   <Input
                     {...fieldProps}
                     type="file"
-                    accept={ACCEPTED_IMAGE_TYPES.join(",")}
+                    accept="image/*"
                     onChange={(e) => {
                       onChange(e.target.files);
                     }}

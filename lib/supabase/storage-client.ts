@@ -35,6 +35,13 @@ const validateFile = (file: File | Blob) => {
   return null;
 };
 
+const validateSuggestionFile = (file: File) => {
+  if (file.size > MAX_INPUT_BYTES) {
+    return `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max ${STORAGE_LIMITS.inputMaxMB} MB)`;
+  }
+  return null;
+};
+
 const compressAndValidate = async (
   file: File
 ): Promise<StorageResult<File>> => {
@@ -96,21 +103,15 @@ export const uploadSuggestionImageClient = async (
   file: File,
   turnstile: TurnstileToken,
 ): Promise<StorageResult<{ uploadId: string; path: string }>> => {
-  const validationError = validateFile(file);
+  const validationError = validateSuggestionFile(file);
   if (validationError) {
     return { data: null, error: { message: validationError } };
   }
 
-  const compressionResult = await compressAndValidate(file);
-  if (compressionResult.error) {
-    return { data: null, error: compressionResult.error };
-  }
-  const compressedFile = compressionResult.data!;
-
   return uploadPendingSuggestion(
     "map-suggestion-image",
     tempId,
-    compressedFile,
+    file,
     turnstile,
     "Unable to upload image",
   );
@@ -121,21 +122,15 @@ export const uploadEventProofClient = async (
   file: File,
   turnstile: TurnstileToken,
 ): Promise<StorageResult<{ uploadId: string; path: string }>> => {
-  const validationError = validateFile(file);
+  const validationError = validateSuggestionFile(file);
   if (validationError) {
     return { data: null, error: { message: validationError } };
   }
 
-  const compressionResult = await compressAndValidate(file);
-  if (compressionResult.error) {
-    return { data: null, error: compressionResult.error };
-  }
-  const compressedFile = compressionResult.data!;
-
   return uploadPendingSuggestion(
     "event-proof",
     tempId,
-    compressedFile,
+    file,
     turnstile,
     "Unable to upload proof",
   );

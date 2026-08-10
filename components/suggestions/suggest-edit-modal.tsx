@@ -149,6 +149,7 @@ export function SuggestEditModal({ facility, open, onOpenChange }: SuggestEditMo
       description="Propose updates to this facility. An admin will review before publishing."
       submitLabel="Submit suggestion"
       submittingLabel="Submitting..."
+      imageAccept="image/*"
     >
       <div className="px-6 pb-4 space-y-3">
         <TurnstileWidget
