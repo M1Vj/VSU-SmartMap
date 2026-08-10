@@ -212,8 +212,8 @@ BEGIN
 
   -- FK-safe replacement. The function is one transaction, so any constraint
   -- or insert failure restores both tables and leaves revision unchanged.
-  DELETE FROM public.map_edges;
-  DELETE FROM public.map_nodes;
+  DELETE FROM public.map_edges WHERE TRUE;
+  DELETE FROM public.map_nodes WHERE TRUE;
 
   INSERT INTO public.map_nodes (
     id, lat, lng, label, type, building_ids, floor_level, created_at,
