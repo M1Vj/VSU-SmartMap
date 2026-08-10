@@ -45,6 +45,7 @@ jobs:
       - run: npm run db:start
       - run: npm run db:reset
       - run: node tools/dev/bootstrap-local.mjs --skip-env-file
+      - run: NAVIGATION_DB_INTEGRATION=1 node --experimental-test-module-mocks --import tsx --test lib/supabase/queries/navigation-db.integration.test.ts
       - run: npm run qa:rls
       - if: always()
         run: npx --yes supabase@2.107.0 stop
