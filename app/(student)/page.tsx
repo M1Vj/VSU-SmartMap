@@ -489,10 +489,19 @@ function MapView({
     setHasHydrated(true);
   }, []);
 
-  const dismissRouteFoundAnnouncement = useCallback((retiredSessionId: number) => {
+  const dismissRouteFoundAnnouncement = useCallback((retiredSessionId?: number) => {
     const toastId = routeAnnouncementTracker.reset(retiredSessionId);
     if (toastId) toast.dismiss(toastId);
   }, [routeAnnouncementTracker]);
+
+  const releaseRouteFoundAnnouncement = useCallback(() => {
+    const toastId = routeAnnouncementTracker.releaseToast();
+    if (toastId) toast.dismiss(toastId);
+  }, [routeAnnouncementTracker]);
+
+  useEffect(() => {
+    return () => dismissRouteFoundAnnouncement();
+  }, [dismissRouteFoundAnnouncement]);
 
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
@@ -720,6 +729,7 @@ function MapView({
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
+              releaseRouteFoundAnnouncement={releaseRouteFoundAnnouncement}
               onRoutesFound={handleRoutesFound}
             />
           )}

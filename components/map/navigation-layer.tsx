@@ -28,6 +28,7 @@ interface NavigationLayerProps {
   hasRouteFoundAnnouncement?: (sessionId: number) => boolean;
   claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
   registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
+  releaseRouteFoundAnnouncement?: () => void;
   onRoutesFound?: (routes: PathResult[]) => void;
 }
 
@@ -43,6 +44,7 @@ export function NavigationLayer({
   hasRouteFoundAnnouncement,
   claimRouteFoundAnnouncement,
   registerRouteFoundAnnouncement,
+  releaseRouteFoundAnnouncement,
   onRoutesFound,
 }: NavigationLayerProps) {
   const [path, setPath] = useState<PathResult | null>(null);
@@ -264,9 +266,10 @@ export function NavigationLayer({
         navigationSessionId === undefined || !registerRouteFoundAnnouncement
           ? undefined
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
+      onError: releaseRouteFoundAnnouncement,
       resolve: resolveRoute,
     });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, coordinator]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator]);
 
   if (!path) return null;
 

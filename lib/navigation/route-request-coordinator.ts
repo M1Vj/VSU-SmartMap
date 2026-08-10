@@ -16,6 +16,7 @@ interface StartRouteRequest<Result> {
   isSuccessAnnounced?: () => boolean;
   shouldAnnounceSuccess?: () => boolean;
   onSuccess?: (id: string) => void;
+  onError?: () => void;
   resolve?: (signal: AbortSignal) => Promise<Result>;
 }
 
@@ -99,6 +100,7 @@ export function createRouteRequestCoordinator<Result>(
         })()
           .catch((error: unknown) => {
             if (active !== request || request.controller.signal.aborted) return;
+            options.onError?.();
             callbacks.reportError?.(error);
             callbacks.clear();
             callbacks.error(

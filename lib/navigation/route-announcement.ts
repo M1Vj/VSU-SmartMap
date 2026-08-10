@@ -20,13 +20,19 @@ export function createRouteAnnouncementTracker() {
       if (announcedSessionId === sessionId) announcedToastId = toastId;
     },
 
+    releaseToast() {
+      const toastId = announcedToastId;
+      announcedToastId = null;
+      return toastId;
+    },
+
     reset(retiredSessionId?: number) {
       const toastId = announcedToastId;
+      announcedToastId = null;
       if (retiredSessionId !== undefined) {
         retiredThroughSessionId = Math.max(retiredThroughSessionId, retiredSessionId);
       }
       announcedSessionId = null;
-      announcedToastId = null;
       return toastId;
     },
   };

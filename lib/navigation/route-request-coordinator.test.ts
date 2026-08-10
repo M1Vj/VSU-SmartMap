@@ -273,6 +273,67 @@ test("resetting an in-flight session prevents its stale completion from reclaimi
   assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
 });
 
+test("a failed silent recalculation dismisses the tracked success before its error", async () => {
+  const { coordinator, events } = harness();
+  const tracker = createRouteAnnouncementTracker();
+  const firstSession = 1;
+  const recalculation = deferred<string>();
+  const dismissTrackedSuccess = () => {
+    const toastId = tracker.releaseToast();
+    if (toastId) events.push(`dismiss:${toastId}`);
+  };
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    resolve: async () => "first route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstSuccessId = events
+    .find((event) => event.startsWith("success:"))!
+    .slice("success:".length);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    onError: dismissTrackedSuccess,
+    resolve: () => recalculation.promise,
+  });
+  await Promise.resolve();
+
+  recalculation.reject(new Error("recalculation failed"));
+  await assert.rejects(recalculation.promise);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 1);
+  assert.equal(events.indexOf(`dismiss:${firstSuccessId}`) < events.lastIndexOf("clear"), true);
+  assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
+  assert.equal(tracker.has(firstSession), true);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    resolve: async () => "recovered route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:recovered route",
+  ]);
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+});
+
 test("a shared announcement gate survives coordinator remounts and a new session can succeed", async () => {
   const events: string[] = [];
   let announcedSession: string | null = null;

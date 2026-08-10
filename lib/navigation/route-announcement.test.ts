@@ -28,6 +28,19 @@ test("a new session can claim and register a fresh toast after reset", () => {
   assert.equal(tracker.reset(), "new-toast");
 });
 
+test("releasing a toast preserves the announced session gate", () => {
+  const tracker = createRouteAnnouncementTracker();
+
+  assert.equal(tracker.claim(1), true);
+  tracker.register(1, "route-toast-1");
+
+  assert.equal(tracker.releaseToast(), "route-toast-1");
+  assert.equal(tracker.has(1), true);
+  assert.equal(tracker.claim(1), false);
+  assert.equal(tracker.releaseToast(), null);
+  assert.equal(tracker.reset(), null);
+});
+
 test("reset retires the old session until a later generation", () => {
   const tracker = createRouteAnnouncementTracker();
 
