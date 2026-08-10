@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createRouteRequestCoordinator } from "./route-request-coordinator.ts";
+import { createRouteAnnouncementTracker } from "./route-announcement.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -104,9 +105,12 @@ test("recalculations publish while a shared navigation session announces success
     successClaimed = true;
     return true;
   };
+  const isSuccessAnnounced = () => successClaimed;
 
   coordinator.start({
     loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced,
     shouldAnnounceSuccess,
     resolve: () => first.promise,
   });
@@ -116,6 +120,8 @@ test("recalculations publish while a shared navigation session announces success
 
   coordinator.start({
     loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced,
     shouldAnnounceSuccess,
     resolve: () => recalculation.promise,
   });
@@ -128,8 +134,204 @@ test("recalculations publish while a shared navigation session announces success
     "publish:first route",
     "publish:recalculated route",
   ]);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("dismiss:")).length, 0);
+});
+
+test("an immediate same-session recalculation preserves the first success toast", async () => {
+  const { coordinator, events } = harness();
+  let successClaimed = false;
+  const shouldAnnounceSuccess = () => {
+    if (successClaimed) return false;
+    successClaimed = true;
+    return true;
+  };
+  const isSuccessAnnounced = () => successClaimed;
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced,
+    shouldAnnounceSuccess,
+    resolve: async () => "first route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstSuccessId = events
+    .find((event) => event.startsWith("success:"))!
+    .slice("success:".length);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced,
+    shouldAnnounceSuccess,
+    resolve: async () => "recalculated route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:recalculated route",
+  ]);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+  assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 0);
+});
+
+test("a tracked success survives silent recalculation and is dismissed once before a new session", async () => {
+  const { coordinator, events } = harness();
+  const tracker = createRouteAnnouncementTracker();
+  const firstSession = 1;
+  const firstClaim = () => tracker.claim(firstSession);
+  const firstHasAnnouncement = () => tracker.has(firstSession);
+  const firstRegister = (toastId: string) => tracker.register(firstSession, toastId);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: firstHasAnnouncement,
+    shouldAnnounceSuccess: firstClaim,
+    onSuccess: firstRegister,
+    resolve: async () => "first route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstSuccessId = events
+    .find((event) => event.startsWith("success:"))!
+    .slice("success:".length);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: firstHasAnnouncement,
+    shouldAnnounceSuccess: firstClaim,
+    onSuccess: firstRegister,
+    resolve: async () => "recalculated route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 0);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+
+  const trackedToastId = tracker.reset();
+  assert.equal(trackedToastId, firstSuccessId);
+  if (trackedToastId) events.push(`dismiss:${trackedToastId}`);
+
+  const nextSession = 2;
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: nextSession,
+    isSuccessAnnounced: () => tracker.has(nextSession),
+    shouldAnnounceSuccess: () => tracker.claim(nextSession),
+    onSuccess: (toastId) => tracker.register(nextSession, toastId),
+    resolve: async () => "new route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 1);
   assert.equal(events.filter((event) => event.startsWith("loading:")).length, 2);
-  assert.equal(events.filter((event) => event.startsWith("dismiss:")).length, 2);
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 2);
+});
+
+test("resetting an in-flight session prevents its stale completion from reclaiming a toast", async () => {
+  const { coordinator, events } = harness();
+  const tracker = createRouteAnnouncementTracker();
+  const route = deferred<string>();
+  const sessionId = 1;
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId,
+    isSuccessAnnounced: () => tracker.has(sessionId),
+    shouldAnnounceSuccess: () => tracker.claim(sessionId),
+    onSuccess: (toastId) => tracker.register(sessionId, toastId),
+    resolve: () => route.promise,
+  });
+  await Promise.resolve();
+
+  assert.equal(tracker.reset(sessionId), null);
+  route.resolve("stale route");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 0);
+  assert.equal(tracker.has(sessionId), false);
+  assert.equal(tracker.claim(sessionId), false);
+
+  const nextSession = 2;
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: nextSession,
+    isSuccessAnnounced: () => tracker.has(nextSession),
+    shouldAnnounceSuccess: () => tracker.claim(nextSession),
+    onSuccess: (toastId) => tracker.register(nextSession, toastId),
+    resolve: async () => "new route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+});
+
+test("a failed silent recalculation dismisses the tracked success before its error", async () => {
+  const { coordinator, events } = harness();
+  const tracker = createRouteAnnouncementTracker();
+  const firstSession = 1;
+  const recalculation = deferred<string>();
+  const dismissTrackedSuccess = () => {
+    const toastId = tracker.releaseToast();
+    if (toastId) events.push(`dismiss:${toastId}`);
+  };
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    resolve: async () => "first route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstSuccessId = events
+    .find((event) => event.startsWith("success:"))!
+    .slice("success:".length);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    onError: dismissTrackedSuccess,
+    resolve: () => recalculation.promise,
+  });
+  await Promise.resolve();
+
+  recalculation.reject(new Error("recalculation failed"));
+  await assert.rejects(recalculation.promise);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 1);
+  assert.equal(events.indexOf(`dismiss:${firstSuccessId}`) < events.lastIndexOf("clear"), true);
+  assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
+  assert.equal(tracker.has(firstSession), true);
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    sessionId: firstSession,
+    isSuccessAnnounced: () => tracker.has(firstSession),
+    shouldAnnounceSuccess: () => tracker.claim(firstSession),
+    onSuccess: (toastId) => tracker.register(firstSession, toastId),
+    resolve: async () => "recovered route",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:recovered route",
+  ]);
+  assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
 });
 
 test("a shared announcement gate survives coordinator remounts and a new session can succeed", async () => {
@@ -148,25 +350,36 @@ test("a shared announcement gate survives coordinator remounts and a new session
     announcedSession = sessionId;
     return true;
   };
+  const isAnnouncedFor = (sessionId: string) => () => announcedSession === sessionId;
 
-  createRouteRequestCoordinator(callbacks).start({
+  const cleanupFirst = createRouteRequestCoordinator(callbacks).start({
     loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced: isAnnouncedFor("navigation-one"),
     shouldAnnounceSuccess: claimFor("navigation-one"),
     resolve: async () => "first route",
   });
   await new Promise((resolve) => setImmediate(resolve));
+  cleanupFirst();
 
-  createRouteRequestCoordinator(callbacks).start({
+  const cleanupAfterRemount = createRouteRequestCoordinator(callbacks).start({
     loadingMessage: "Loading",
+    sessionId: 1,
+    isSuccessAnnounced: isAnnouncedFor("navigation-one"),
     shouldAnnounceSuccess: claimFor("navigation-one"),
     resolve: async () => "route after remount",
   });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(events.filter((event) => event.startsWith("success:")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("dismiss:")).length, 0);
+  cleanupAfterRemount();
 
   createRouteRequestCoordinator(callbacks).start({
     loadingMessage: "Loading",
+    sessionId: 2,
+    isSuccessAnnounced: isAnnouncedFor("navigation-two"),
     shouldAnnounceSuccess: claimFor("navigation-two"),
     resolve: async () => "new route",
   });
