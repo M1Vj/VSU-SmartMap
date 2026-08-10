@@ -1,5 +1,9 @@
 import type { MapItem } from "@/lib/types/map";
 import type { FacilityCategory } from "@/lib/types/facility";
+import {
+  boundSearchQuery,
+  normalizeSearchCode,
+} from "@/lib/map/search-suggestions";
 
 export function filterMapItems(
   items: readonly MapItem[],
@@ -7,7 +11,8 @@ export function filterMapItems(
   selectedCategories?: FacilityCategory[],
   roomMatchedIds?: Set<string>,
 ) {
-  const normalizedTerm = term.trim().toLowerCase();
+  const normalizedTerm = boundSearchQuery(term).toLowerCase();
+  const codeTerm = normalizeSearchCode(normalizedTerm);
   const filtered = items.filter((item) => {
     if (item.kind === "boarding_house") {
       return (
@@ -25,7 +30,9 @@ export function filterMapItems(
     const matchesFacilityTerm =
       normalizedTerm.length === 0 ||
       item.name.toLowerCase().includes(normalizedTerm) ||
-      (item.code ? item.code.toLowerCase().includes(normalizedTerm) : false) ||
+      (item.code && codeTerm.length > 0
+        ? normalizeSearchCode(item.code).includes(codeTerm)
+        : false) ||
       (item.description ? item.description.toLowerCase().includes(normalizedTerm) : false);
 
     const matchesRoomSearch = roomMatchedIds?.has(item.id) ?? false;
