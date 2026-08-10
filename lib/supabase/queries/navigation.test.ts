@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveMapGraphSnapshotResult, saveMapGraph } from "./navigation.ts";
+import { getMapEdges, resolveMapGraphSnapshotResult, saveMapGraph } from "./navigation.ts";
 import type { MapEdge, MapNode } from "@/lib/types/graph";
 
 const node = (id: string): MapNode => ({
@@ -150,4 +150,76 @@ test("saveMapGraph rejects a second caller that reuses a committed revision", as
   assert.equal(state.revision, 10);
   assert.deepEqual(state.map_nodes, initialNodes);
   assert.deepEqual(state.map_edges, initialEdges);
+});
+
+test("getMapEdges retrieves every page when the graph exceeds the Data API row limit", async () => {
+  const allEdges = Array.from({ length: 1_067 }, (_, index) =>
+    edge(`edge-${String(index).padStart(4, "0")}`, "a", "b"),
+  );
+  const ranges: Array<[number, number]> = [];
+  const orders: Array<[string, { ascending: boolean } | undefined]> = [];
+
+  const client = {
+    from: (table: string) => {
+      assert.equal(table, "map_edges");
+      return {
+        select: (_columns: string, options?: { count?: string }) => {
+          assert.equal(options?.count, "exact");
+          return {
+            order: (column: string, orderOptions?: { ascending: boolean }) => {
+              orders.push([column, orderOptions]);
+              return {
+                range: async (from: number, to: number) => {
+                  ranges.push([from, to]);
+                  return {
+                    data: allEdges.slice(from, to + 1),
+                    error: null,
+                    count: allEdges.length,
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await getMapEdges(client as never);
+
+  assert.equal(result.error, null);
+  assert.equal(result.data?.length, 1_067);
+  assert.deepEqual(ranges, [[0, 999], [1_000, 1_999]]);
+  assert.deepEqual(orders, [
+    ["id", { ascending: true }],
+    ["id", { ascending: true }],
+  ]);
+});
+
+test("getMapEdges keeps paging when the server omits the exact count", async () => {
+  const allEdges = Array.from({ length: 5 }, (_, index) => edge(`edge-${index}`, "a", "b"));
+  const ranges: Array<[number, number]> = [];
+  const serverCap = 2;
+  const client = {
+    from: () => ({
+      select: () => ({
+        order: () => ({
+          range: async (from: number, to: number) => {
+            ranges.push([from, to]);
+            return {
+              data: allEdges.slice(from, Math.min(from + serverCap, to + 1)),
+              error: null,
+              count: null,
+            };
+          },
+        }),
+      }),
+    }),
+  };
+
+  const result = await getMapEdges(client as never);
+
+  assert.equal(result.error, null);
+  assert.equal(result.data?.length, 5);
+  assert.deepEqual(ranges, [[0, 999], [2, 1_001], [4, 1_003], [5, 1_004]]);
 });
