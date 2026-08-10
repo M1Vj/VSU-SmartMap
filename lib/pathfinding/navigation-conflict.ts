@@ -12,13 +12,23 @@ export type NavigationConflictSnapshotState =
 
 export type NavigationConflictChoice = "keep-draft" | "discard-draft";
 
+export interface NavigationHistoryIdentity {
+  /** Current cursor position, retained for diagnostics and regression tests. */
+  index: number;
+  /** Monotonic identity for the actual history entry at that position. */
+  token: number | null;
+}
+
 /**
- * A history cursor is clean only when it points at the exact snapshot that
- * was last persisted. Divergence in either direction (including undoing below
- * the saved cursor) must be reviewed before a refresh can replace the draft.
+ * A history cursor is clean only when its stable entry token matches the
+ * last-persisted entry token. Comparing tokens catches a branch that reuses
+ * the same numeric cursor position after undo.
  */
-export function isNavigationDraftDirty(historyIndex: number, lastSavedIndex: number): boolean {
-  return historyIndex !== lastSavedIndex;
+export function isNavigationDraftDirty(
+  current: NavigationHistoryIdentity,
+  saved: NavigationHistoryIdentity,
+): boolean {
+  return current.token !== saved.token;
 }
 
 export type NavigationConflictDecision =

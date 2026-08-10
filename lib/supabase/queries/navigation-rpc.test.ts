@@ -168,7 +168,7 @@ test("editor cache writes follow a successful RPC and failed drafts are never fi
   const refreshEnd = editor.indexOf("useEffect(() =>", refreshStart);
   assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
   const refreshHandler = editor.slice(refreshStart, refreshEnd);
-  assert.match(refreshHandler, /isNavigationDraftDirty\(historyIndexRef\.current, lastSavedIndexRef\.current\)/i);
+  assert.match(refreshHandler, /isNavigationDraftDirty\(currentHistoryIdentityRef\.current, savedHistoryIdentityRef\.current\)/i);
   const dirtyReviewIndex = refreshHandler.indexOf('setGraphConflict({ status: "loading" })');
   const dirtyReturnIndex = refreshHandler.indexOf("return;", dirtyReviewIndex);
   const hydrationIndex = refreshHandler.indexOf("commitLoadedGraph", dirtyReviewIndex);
@@ -177,6 +177,11 @@ test("editor cache writes follow a successful RPC and failed drafts are never fi
   assert.ok(dirtyReturnIndex > dirtyReviewIndex);
   assert.ok(hydrationIndex > dirtyReturnIndex);
   assert.ok(cacheWriteIndex > dirtyReturnIndex);
+  assert.match(editor, /interface HistoryState[\s\S]+id: number/);
+  assert.match(editor, /historyTokenCounterRef\.current/);
+  assert.match(editor, /currentHistoryIdentityRef\.current = \{ index: entryIndex, token: entryId \}/);
+  assert.match(editor, /savedHistoryIdentityRef\.current = expectedHistoryIdentity/);
+  assert.match(editor, /isNavigationDraftDirty\(currentHistoryIdentityRef\.current, savedHistoryIdentityRef\.current\)/);
 });
 
 test("database CI runs the navigation integration matrix after local bootstrap", async () => {

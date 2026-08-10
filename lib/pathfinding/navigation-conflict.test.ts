@@ -60,9 +60,51 @@ test("a failed snapshot remains an explicit conflict and never becomes an empty 
 });
 
 test("a refresh is dirty whenever the current history cursor diverges from the saved cursor", () => {
-  assert.equal(isNavigationDraftDirty(4, 4), false);
-  assert.equal(isNavigationDraftDirty(5, 4), true);
+  assert.equal(
+    isNavigationDraftDirty(
+      { index: 4, token: 12 },
+      { index: 4, token: 12 },
+    ),
+    false,
+  );
+  assert.equal(
+    isNavigationDraftDirty(
+      { index: 5, token: 13 },
+      { index: 4, token: 12 },
+    ),
+    true,
+  );
   // Undoing below the saved cursor is also a draft divergence and must not
   // silently hydrate over the user’s local history.
-  assert.equal(isNavigationDraftDirty(3, 4), true);
+  assert.equal(
+    isNavigationDraftDirty(
+      { index: 3, token: 11 },
+      { index: 4, token: 12 },
+    ),
+    true,
+  );
+});
+
+test("a branched history entry stays dirty even when it reuses the saved cursor position", () => {
+  const savedEntryId = 7;
+  const undoneEntryId = 6;
+  const branchedEntryId = 8;
+
+  // Saved N -> undo N-1 -> branch creates a different entry at N. Comparing
+  // stable entry identities catches this even though both entries occupy the
+  // same numeric history index.
+  assert.equal(
+    isNavigationDraftDirty(
+      { index: 3, token: undoneEntryId },
+      { index: 4, token: savedEntryId },
+    ),
+    true,
+  );
+  assert.equal(
+    isNavigationDraftDirty(
+      { index: 4, token: branchedEntryId },
+      { index: 4, token: savedEntryId },
+    ),
+    true,
+  );
 });

@@ -27,12 +27,14 @@ import {
   decideNavigationConflict,
   isNavigationDraftDirty,
   resolveNavigationConflictSnapshot,
+  type NavigationHistoryIdentity,
   type NavigationConflictSnapshotState,
 } from "@/lib/pathfinding/navigation-conflict";
 import type { FacilityLite } from "@/lib/types/facility";
 import { toast } from "sonner";
 
 interface HistoryState {
+  id: number;
   nodes: MapNode[];
   edges: MapEdge[];
 }
@@ -99,9 +101,10 @@ export function NavigationEditor() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
-  const historyIndexRef = useRef(historyIndex);
-  const lastSavedIndexRef = useRef(0);
   const historyRef = useRef(historyState);
+  const historyTokenCounterRef = useRef(0);
+  const currentHistoryIdentityRef = useRef<NavigationHistoryIdentity>({ index: -1, token: null });
+  const savedHistoryIdentityRef = useRef<NavigationHistoryIdentity>({ index: -1, token: null });
   const graphRevisionRef = useRef<number | null>(null);
   const operationRef = useRef<"idle" | "refreshing" | "saving">("idle");
   const manualOverwriteRef = useRef(false);
@@ -109,8 +112,7 @@ export function NavigationEditor() {
   useEffect(() => {
     nodesRef.current = nodes;
     edgesRef.current = edges;
-    historyIndexRef.current = historyIndex;
-  }, [nodes, edges, historyIndex]);
+  }, [nodes, edges]);
 
   useEffect(() => {
     historyRef.current = historyState;
@@ -130,7 +132,11 @@ export function NavigationEditor() {
   }, []);
 
   const pushHistory = useCallback((newNodes: MapNode[], newEdges: MapEdge[]) => {
+    const entryId = ++historyTokenCounterRef.current;
+    const entryIndex = historyRef.current.index + 1;
+    currentHistoryIdentityRef.current = { index: entryIndex, token: entryId };
     const newState = {
+      id: entryId,
       nodes: cloneHistoryNodes(newNodes),
       edges: cloneHistoryEdges(newEdges),
     };
@@ -152,6 +158,7 @@ export function NavigationEditor() {
     const prevState = current.stack[current.index - 1];
     if (!prevState) return;
 
+    currentHistoryIdentityRef.current = { index: current.index - 1, token: prevState.id };
     setNodes(prevState.nodes);
     setEdges(prevState.edges);
     setSelectedNodeIds(new Set());
@@ -169,6 +176,7 @@ export function NavigationEditor() {
     const nextState = current.stack[current.index + 1];
     if (!nextState) return;
 
+    currentHistoryIdentityRef.current = { index: current.index + 1, token: nextState.id };
     setNodes(nextState.nodes);
     setEdges(nextState.edges);
     setSelectedNodeIds(new Set());
@@ -201,15 +209,18 @@ export function NavigationEditor() {
   }, [pushHistory, validateAndReport]);
 
   const commitLoadedGraph = useCallback((serverNodes: MapNode[], serverEdges: MapEdge[], revision: number) => {
+    const entryId = ++historyTokenCounterRef.current;
+    const identity = { index: 0, token: entryId };
     setNodes(serverNodes);
     setEdges(serverEdges);
     setGraphRevision(revision);
     graphRevisionRef.current = revision;
     setHistoryState({
-      stack: [{ nodes: cloneHistoryNodes(serverNodes), edges: cloneHistoryEdges(serverEdges) }],
+      stack: [{ id: entryId, nodes: cloneHistoryNodes(serverNodes), edges: cloneHistoryEdges(serverEdges) }],
       index: 0,
     });
-    lastSavedIndexRef.current = 0;
+    currentHistoryIdentityRef.current = identity;
+    savedHistoryIdentityRef.current = identity;
     manualOverwriteRef.current = false;
   }, []);
 
@@ -297,7 +308,7 @@ export function NavigationEditor() {
       return;
     }
 
-    if (isNavigationDraftDirty(historyIndexRef.current, lastSavedIndexRef.current)) {
+    if (isNavigationDraftDirty(currentHistoryIdentityRef.current, savedHistoryIdentityRef.current)) {
       // A dirty refresh is a conflict review, not a discard action. Fetch the
       // latest coherent snapshot so the existing Keep/Discard choices can
       // resolve it, but leave the draft, history, and offline cache untouched.
@@ -379,13 +390,16 @@ export function NavigationEditor() {
           const loadedNodes = await db.map_nodes.toArray();
           const loadedEdges = await db.map_edges.toArray();
           if (loadedNodes.length > 0) {
+            const entryId = ++historyTokenCounterRef.current;
+            const identity = { index: 0, token: entryId };
             setNodes(loadedNodes);
             setEdges(loadedEdges);
             setHistoryState({
-              stack: [{ nodes: cloneHistoryNodes(loadedNodes), edges: cloneHistoryEdges(loadedEdges) }],
+              stack: [{ id: entryId, nodes: cloneHistoryNodes(loadedNodes), edges: cloneHistoryEdges(loadedEdges) }],
               index: 0,
             });
-            lastSavedIndexRef.current = 0;
+            currentHistoryIdentityRef.current = identity;
+            savedHistoryIdentityRef.current = identity;
           }
         }
       } finally {
@@ -566,7 +580,7 @@ export function NavigationEditor() {
       return;
     }
     const expectedRevision = graphRevisionRef.current;
-    const expectedHistoryIndex = historyIndexRef.current;
+    const expectedHistoryIdentity = { ...currentHistoryIdentityRef.current };
 
     const validation = validateEditorGraph(nodes, edges);
     if (!validation.ok) {
@@ -608,6 +622,7 @@ export function NavigationEditor() {
       graphRevisionRef.current = result.revision;
       setGraphRevision(result.revision);
       if (!isAutosave) manualOverwriteRef.current = false;
+      savedHistoryIdentityRef.current = expectedHistoryIdentity;
 
       // IndexedDB is a last-committed snapshot. Never write a failed draft to
       // it; only update it after the server RPC has committed successfully.
@@ -621,7 +636,6 @@ export function NavigationEditor() {
           });
         }
       } catch (cacheError) {
-        lastSavedIndexRef.current = expectedHistoryIndex;
         setLastSaved(new Date());
         toast.warning("Graph saved on server, but the local offline cache could not be updated.", { id: toastId });
         console.error(cacheError);
@@ -629,7 +643,6 @@ export function NavigationEditor() {
       }
 
       setLastSaved(new Date());
-      lastSavedIndexRef.current = expectedHistoryIndex;
       if (isAutosave) {
         toast.success("Autosaved to server", { id: toastId, duration: 2000 });
       } else {
@@ -656,7 +669,7 @@ export function NavigationEditor() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-        if (historyIndexRef.current > lastSavedIndexRef.current) {
+        if (isNavigationDraftDirty(currentHistoryIdentityRef.current, savedHistoryIdentityRef.current)) {
             saveRef.current(true);
         }
     }, 60000);
