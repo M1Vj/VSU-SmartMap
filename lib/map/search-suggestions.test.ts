@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_SEARCH_QUERY_LENGTH,
+  boundSearchQuery,
   getRoomMatchedFacilityIds,
   getSearchSuggestions,
 } from "./search-suggestions.ts";
@@ -49,6 +51,19 @@ test("getSearchSuggestions matches facilities by code", () => {
   assert.equal(suggestions[0]?.matchType, "code");
 });
 
+test("normalizes facility code separators while keeping code ranking exact", () => {
+  const suggestions = getSearchSuggestions({
+    facilities: [
+      facility({ id: "code", name: "Code Hall", code: "ABC-123" }),
+      facility({ id: "name", name: "ABC 123 Annex", code: "ANNEX" }),
+    ],
+    query: "abc 123",
+  });
+
+  assert.deepEqual(suggestions.map((suggestion) => suggestion.facility.id), ["code", "name"]);
+  assert.equal(suggestions[0]?.matchType, "code");
+});
+
 test("getSearchSuggestions matches legacy aliases in facility descriptions", () => {
   const suggestions = getSearchSuggestions({
     facilities: [
@@ -82,6 +97,62 @@ test("getRoomMatchedFacilityIds and getSearchSuggestions match rooms to their fa
 
   assert.deepEqual(suggestions.map((suggestion) => suggestion.facility.id), ["dstat"]);
   assert.equal(suggestions[0]?.matchType, "room");
+});
+
+test("matches room codes across punctuation, whitespace, and casing variants without matching prose", () => {
+  const rooms = [
+    { facility_id: "science", room_code: "ABC-123", name: "Science Lab" },
+    { facility_id: "prose", room_code: "ROOM-9", name: "ABC and 123 Annex" },
+  ];
+  const queries = ["ABC-123", "ABC123", "ABC 123", "abc.123", "aBc_123"];
+
+  for (const query of queries) {
+    assert.deepEqual([...getRoomMatchedFacilityIds(rooms, query)], ["science"]);
+
+    const suggestions = getSearchSuggestions({
+      facilities: [
+        facility({ id: "science", name: "Science Hall", code: "SCI" }),
+        facility({ id: "prose", name: "Prose Hall", code: "PROSE" }),
+      ],
+      query,
+      rooms,
+    });
+
+    assert.deepEqual(suggestions.map((suggestion) => suggestion.facility.id), ["science"]);
+    assert.equal(suggestions[0]?.matchType, "room");
+    assert.equal(suggestions[0]?.matchedRoomCode, "ABC-123");
+  }
+});
+
+test("treats punctuation-only queries as literal prose instead of canonical codes", () => {
+  const rooms = [
+    { facility_id: "code", room_code: "ABC", name: "Plain Room" },
+    { facility_id: "name", room_code: "XYZ", name: "Room (Annex)" },
+  ];
+
+  assert.deepEqual([...getRoomMatchedFacilityIds(rooms, "(")], ["name"]);
+  assert.deepEqual(
+    getSearchSuggestions({
+      facilities: [
+        facility({ id: "code", name: "ABC Hall", code: "ABC" }),
+        facility({ id: "name", name: "Room (Annex)", code: "XYZ" }),
+      ],
+      query: "(",
+      rooms,
+    }).map((suggestion) => suggestion.facility.id),
+    ["name"],
+  );
+});
+
+test("bounds search terms before matching or building remote requests", () => {
+  const query = ` ${"A".repeat(MAX_SEARCH_QUERY_LENGTH + 20)} `;
+  assert.equal(boundSearchQuery(query).length, MAX_SEARCH_QUERY_LENGTH);
+
+  const suggestions = getSearchSuggestions({
+    facilities: [facility({ id: "long", name: "A".repeat(MAX_SEARCH_QUERY_LENGTH), code: "LONG" })],
+    query,
+  });
+  assert.equal(suggestions.length, 1);
 });
 
 test("getSearchSuggestions ranks exact and prefix code matches before name and room matches", () => {
