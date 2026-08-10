@@ -12,6 +12,15 @@ export type NavigationConflictSnapshotState =
 
 export type NavigationConflictChoice = "keep-draft" | "discard-draft";
 
+/**
+ * A history cursor is clean only when it points at the exact snapshot that
+ * was last persisted. Divergence in either direction (including undoing below
+ * the saved cursor) must be reviewed before a refresh can replace the draft.
+ */
+export function isNavigationDraftDirty(historyIndex: number, lastSavedIndex: number): boolean {
+  return historyIndex !== lastSavedIndex;
+}
+
 export type NavigationConflictDecision =
   | {
       choice: "keep-draft";

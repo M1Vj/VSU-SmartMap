@@ -4,6 +4,7 @@ import test from "node:test";
 import type { MapEdge, MapNode } from "@/lib/types/graph";
 import {
   decideNavigationConflict,
+  isNavigationDraftDirty,
   resolveNavigationConflictSnapshot,
 } from "./navigation-conflict.ts";
 
@@ -56,4 +57,12 @@ test("a failed snapshot remains an explicit conflict and never becomes an empty 
       message: "The latest server graph could not be loaded. Your draft is still preserved.",
     },
   );
+});
+
+test("a refresh is dirty whenever the current history cursor diverges from the saved cursor", () => {
+  assert.equal(isNavigationDraftDirty(4, 4), false);
+  assert.equal(isNavigationDraftDirty(5, 4), true);
+  // Undoing below the saved cursor is also a draft divergence and must not
+  // silently hydrate over the user’s local history.
+  assert.equal(isNavigationDraftDirty(3, 4), true);
 });

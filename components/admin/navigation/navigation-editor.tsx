@@ -25,6 +25,7 @@ import { canAddEditorEdge } from "@/lib/pathfinding/editor-edges";
 import { validateEditorGraph } from "@/lib/pathfinding/editor-graph";
 import {
   decideNavigationConflict,
+  isNavigationDraftDirty,
   resolveNavigationConflictSnapshot,
   type NavigationConflictSnapshotState,
 } from "@/lib/pathfinding/navigation-conflict";
@@ -295,6 +296,27 @@ export function NavigationEditor() {
       toast.info("Click Save to confirm the draft overwrite before refreshing.");
       return;
     }
+
+    if (isNavigationDraftDirty(historyIndexRef.current, lastSavedIndexRef.current)) {
+      // A dirty refresh is a conflict review, not a discard action. Fetch the
+      // latest coherent snapshot so the existing Keep/Discard choices can
+      // resolve it, but leave the draft, history, and offline cache untouched.
+      operationRef.current = "refreshing";
+      setIsRefreshing(true);
+      setGraphConflict({ status: "loading" });
+      try {
+        const snapshotRes = await getMapGraphSnapshot();
+        setGraphConflict(resolveNavigationConflictSnapshot(snapshotRes));
+      } catch (snapshotError) {
+        setGraphConflict(resolveNavigationConflictSnapshot({ data: null, error: snapshotError }));
+        console.error(snapshotError);
+      } finally {
+        operationRef.current = "idle";
+        setIsRefreshing(false);
+      }
+      return;
+    }
+
     operationRef.current = "refreshing";
     setIsRefreshing(true);
     try {

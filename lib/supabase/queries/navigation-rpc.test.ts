@@ -163,6 +163,20 @@ test("editor cache writes follow a successful RPC and failed drafts are never fi
   assert.match(editor, /if \(graphConflict\)/i);
   assert.match(editor, /if \(manualOverwriteRef\.current\)/i);
   assert.match(editor, /setGraphConflict\(resolveNavigationConflictSnapshot\(\{ data: null, error: snapshotError \}\)\)/i);
+
+  const refreshStart = editor.indexOf("const handleRefresh = async () =>");
+  const refreshEnd = editor.indexOf("useEffect(() =>", refreshStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
+  const refreshHandler = editor.slice(refreshStart, refreshEnd);
+  assert.match(refreshHandler, /isNavigationDraftDirty\(historyIndexRef\.current, lastSavedIndexRef\.current\)/i);
+  const dirtyReviewIndex = refreshHandler.indexOf('setGraphConflict({ status: "loading" })');
+  const dirtyReturnIndex = refreshHandler.indexOf("return;", dirtyReviewIndex);
+  const hydrationIndex = refreshHandler.indexOf("commitLoadedGraph", dirtyReviewIndex);
+  const cacheWriteIndex = refreshHandler.indexOf("await db.map_nodes.clear()", dirtyReviewIndex);
+  assert.ok(dirtyReviewIndex >= 0);
+  assert.ok(dirtyReturnIndex > dirtyReviewIndex);
+  assert.ok(hydrationIndex > dirtyReturnIndex);
+  assert.ok(cacheWriteIndex > dirtyReturnIndex);
 });
 
 test("database CI runs the navigation integration matrix after local bootstrap", async () => {
