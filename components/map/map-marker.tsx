@@ -149,7 +149,7 @@ export function MapMarker({
       icon={icon}
       keyboard
       riseOnHover
-      zIndexOffset={isSelected ? 1000 : 0}
+      zIndexOffset={isSelected || isRouteDestination ? 1000 : 0}
       alt={accessibleName}
       eventHandlers={{
         click: () => {

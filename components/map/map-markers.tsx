@@ -32,14 +32,14 @@ export function MapMarkers({
   const zoomBucket = Math.min(20, Math.max(15, Math.floor(zoom)));
   const protectedIds = useMemo(() => {
     const ids = new Set<string>();
-    if (onMarkerTapOverride) {
+    if (minimizeNonDestinationMarkers || onMarkerTapOverride) {
       items.forEach((item) => ids.add(item.id));
       return ids;
     }
     if (selectedId != null) ids.add(selectedId);
     if (routeDestinationId != null) ids.add(routeDestinationId);
     return ids;
-  }, [items, onMarkerTapOverride, routeDestinationId, selectedId]);
+  }, [items, minimizeNonDestinationMarkers, onMarkerTapOverride, routeDestinationId, selectedId]);
   const renderItems = useMemo(
     () => getMapMarkerRenderItems(items, zoomBucket, { protectedIds }),
     [items, protectedIds, zoomBucket],

@@ -9,6 +9,9 @@ import {
   type DeclutterableItem,
 } from "./declutter";
 
+/** The first zoom where the existing fan-out guard separates co-located pins. */
+export const MIN_CLUSTER_EXPANSION_ZOOM = 19;
+
 export type MarkerCluster<T extends DeclutterableItem> = {
   readonly renderType: "cluster";
   readonly id: string;

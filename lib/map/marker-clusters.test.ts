@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getMapMarkerRenderItems } from "./marker-clusters.ts";
+import { spreadCoLocatedItems } from "./declutter.ts";
+import {
+  getMapMarkerRenderItems,
+  MIN_CLUSTER_EXPANSION_ZOOM,
+} from "./marker-clusters.ts";
 
 type TestItem = {
   readonly id: string;
@@ -117,4 +121,16 @@ test("keeps every marker individual for low-zoom manual-start taps", () => {
     rendered.map((entry) => entry.renderType === "marker" && entry.item.id),
     ["facility-a", "facility-b", "facility-c"],
   );
+});
+
+test("cluster expansion reaches a zoom where co-located markers fan out honestly", () => {
+  const source = [
+    item("facility-a", 10.7468, 124.7955),
+    item("facility-b", 10.7468, 124.7955),
+  ];
+
+  const spread = spreadCoLocatedItems(source, MIN_CLUSTER_EXPANSION_ZOOM);
+
+  assert.notDeepEqual(spread[0].displayCoordinates, source[0].coordinates);
+  assert.notDeepEqual(spread[0].displayCoordinates, spread[1].displayCoordinates);
 });
