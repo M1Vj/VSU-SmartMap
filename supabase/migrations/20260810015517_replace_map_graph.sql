@@ -147,7 +147,8 @@ BEGIN
   UPDATE pg_temp.map_graph_edges_input
      SET type = coalesce(type, 'walkway'),
          access = coalesce(access, ARRAY['walking']::TEXT[]),
-         bidirectional = coalesce(bidirectional, TRUE);
+         bidirectional = coalesce(bidirectional, TRUE)
+   WHERE TRUE;
 
   IF EXISTS (
        SELECT 1
