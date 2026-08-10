@@ -7,6 +7,7 @@ export type RoomSearchSource = {
   room_code?: string | null;
   roomCode?: string | null;
   name?: string | null;
+  description?: string | null;
 };
 
 export type SearchSuggestionMatchType = "code" | "name" | "alias" | "room";
@@ -30,9 +31,26 @@ type ScoredSuggestion = FacilitySearchSuggestion & {
 };
 
 const DEFAULT_LIMIT = 8;
+export const MAX_SEARCH_QUERY_LENGTH = 128;
+
+/**
+ * Search is user-controlled and is reused in both URL filters and local scans.
+ * Keep the rendered input untouched, but cap the value used by either path.
+ */
+export function boundSearchQuery(value: string | null | undefined) {
+  return value?.normalize("NFKC").trim().slice(0, MAX_SEARCH_QUERY_LENGTH) ?? "";
+}
 
 function normalize(value: string | null | undefined) {
-  return value?.trim().toLowerCase() ?? "";
+  return value?.normalize("NFKC").trim().toLowerCase() ?? "";
+}
+
+function normalizeQuery(value: string | null | undefined) {
+  return boundSearchQuery(value).toLowerCase();
+}
+
+export function normalizeSearchCode(value: string | null | undefined) {
+  return value?.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "") ?? "";
 }
 
 function getRoomFacilityId(room: RoomSearchSource) {
@@ -43,24 +61,36 @@ function getRoomCode(room: RoomSearchSource) {
   return room.room_code ?? room.roomCode ?? null;
 }
 
-function roomMatchesTerm(room: RoomSearchSource, term: string) {
-  const roomCode = normalize(getRoomCode(room));
+function roomMatchesTerm(room: RoomSearchSource, term: string, codeTerm: string) {
+  const roomCode = normalizeSearchCode(getRoomCode(room));
   const roomName = normalize(room.name);
-  return roomCode.includes(term) || roomName.includes(term);
+  const roomDescription = normalize(room.description);
+  return (
+    (codeTerm.length > 0 && roomCode.includes(codeTerm)) ||
+    roomName.includes(term) ||
+    roomDescription.includes(term)
+  );
+}
+
+export function roomMatchesSearch(room: RoomSearchSource, query: string) {
+  const term = normalizeQuery(query);
+  if (term.length === 0) return true;
+  return roomMatchesTerm(room, term, normalizeSearchCode(term));
 }
 
 export function getRoomMatchedFacilityIds(
   rooms: readonly RoomSearchSource[],
   query: string,
 ) {
-  const term = normalize(query);
+  const term = normalizeQuery(query);
+  const codeTerm = normalizeSearchCode(term);
   const ids = new Set<string>();
 
   if (term.length === 0) return ids;
 
   for (const room of rooms) {
     const facilityId = getRoomFacilityId(room);
-    if (!facilityId || !roomMatchesTerm(room, term)) continue;
+    if (!facilityId || !roomMatchesTerm(room, term, codeTerm)) continue;
     ids.add(facilityId);
   }
 
@@ -73,13 +103,14 @@ export function getSearchSuggestions({
   rooms = [],
   limit = DEFAULT_LIMIT,
 }: SearchSuggestionInput): FacilitySearchSuggestion[] {
-  const term = normalize(query);
+  const term = normalizeQuery(query);
+  const codeTerm = normalizeSearchCode(term);
   if (term.length === 0) return [];
 
   const roomMatches = new Map<string, string | undefined>();
   for (const room of rooms) {
     const facilityId = getRoomFacilityId(room);
-    if (!facilityId || !roomMatchesTerm(room, term) || roomMatches.has(facilityId)) continue;
+    if (!facilityId || !roomMatchesTerm(room, term, codeTerm) || roomMatches.has(facilityId)) continue;
     roomMatches.set(facilityId, getRoomCode(room) ?? undefined);
   }
 
@@ -87,20 +118,20 @@ export function getSearchSuggestions({
 
   facilities.forEach((facility, index) => {
     const name = normalize(facility.name);
-    const code = normalize(facility.code);
+    const code = normalizeSearchCode(facility.code);
     const description = normalize(facility.description);
     const roomCode = roomMatches.get(facility.id);
 
     let matchType: SearchSuggestionMatchType | null = null;
     let score = 0;
 
-    if (code && code === term) {
+    if (code && codeTerm && code === codeTerm) {
       matchType = "code";
       score = 100;
-    } else if (code && code.startsWith(term)) {
+    } else if (code && codeTerm && code.startsWith(codeTerm)) {
       matchType = "code";
       score = 90;
-    } else if (code && code.includes(term)) {
+    } else if (code && codeTerm && code.includes(codeTerm)) {
       matchType = "code";
       score = 80;
     } else if (name.startsWith(term)) {
