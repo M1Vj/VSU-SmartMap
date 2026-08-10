@@ -1,23 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  getNavigationControlsState,
-  getNavigationMapBounds,
-} from "./navigation-viewport.ts";
-
-test("getNavigationMapBounds keeps the current map view after route clear", () => {
-  assert.equal(getNavigationMapBounds(null), null);
-});
-
-test("getNavigationMapBounds fits only active route bounds", () => {
-  const bounds = [
-    [10.7441, 124.7912],
-    [10.7451, 124.7925],
-  ] satisfies [[number, number], [number, number]];
-
-  assert.equal(getNavigationMapBounds(bounds), bounds);
-});
+import { getNavigationControlsState } from "./navigation-viewport.ts";
 
 test("navigation controls expose route reporting only after a route exists", () => {
   assert.deepEqual(

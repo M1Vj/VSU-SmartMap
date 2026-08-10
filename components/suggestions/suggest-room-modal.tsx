@@ -337,7 +337,7 @@ export function SuggestRoomModal({
                     <input
                       id="room-image-upload"
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/*"
                       className="hidden"
                       onChange={handleFileChange}
                     />

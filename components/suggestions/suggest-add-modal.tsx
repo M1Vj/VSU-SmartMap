@@ -117,6 +117,7 @@ export function SuggestAddModal({ open, onOpenChange, onSuccess }: SuggestAddMod
       description="Share details for a new building or point of interest so we can add it to the map."
       submitLabel="Submit suggestion"
       submittingLabel="Submitting..."
+      imageAccept="image/*"
     >
       <div className="px-6 pb-4 space-y-3">
         <TurnstileWidget

@@ -27,17 +27,14 @@ import { searchRooms } from "@/lib/supabase/queries/rooms";
 import { getMapNodes, getMapEdges } from "@/lib/supabase/queries/navigation";
 import { setCachedRooms } from "@/lib/cache/rooms-cache";
 import { useGeolocation } from "@/hooks/use-geolocation";
-import type { LatLng, LatLngBoundsExpression } from "leaflet";
+import type { LatLng } from "leaflet";
 import type { TransportMode } from "@/lib/types/graph";
 import { ReportRouteDialog } from "@/components/navigation/report-route-dialog";
 import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates";
-import { getRouteBounds } from "@/lib/map/route-bounds";
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
-import {
-  getNavigationControlsState,
-  getNavigationMapBounds,
-} from "@/lib/map/navigation-viewport";
+import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
+import { createRouteAnnouncementTracker } from "@/lib/navigation/route-announcement";
 import {
   areFacilityMarkerListsEquivalent,
   getVisibleFacilitiesForMapLoad,
@@ -468,7 +465,6 @@ function MapView({
   const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
-  const [mapBounds, setMapBounds] = useState<LatLngBoundsExpression | null>(null);
   const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
   const [isManualStartPending, setIsManualStartPending] = useState(false);
   const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
@@ -476,6 +472,8 @@ function MapView({
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
+  const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
+  const [navigationSessionId, setNavigationSessionId] = useState(0);
   const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
   const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
   const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
@@ -491,16 +489,30 @@ function MapView({
     setHasHydrated(true);
   }, []);
 
+  const dismissRouteFoundAnnouncement = useCallback((retiredSessionId?: number) => {
+    const toastId = routeAnnouncementTracker.reset(retiredSessionId);
+    if (toastId) toast.dismiss(toastId);
+  }, [routeAnnouncementTracker]);
+
+  const releaseRouteFoundAnnouncement = useCallback(() => {
+    const toastId = routeAnnouncementTracker.releaseToast();
+    if (toastId) toast.dismiss(toastId);
+  }, [routeAnnouncementTracker]);
+
+  useEffect(() => {
+    return () => dismissRouteFoundAnnouncement();
+  }, [dismissRouteFoundAnnouncement]);
+
   const clearRouteState = useCallback(() => {
+    dismissRouteFoundAnnouncement(navigationSessionId);
     clearNavigation();
     setNavigationOrigin(null);
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setTargetFacilityId(undefined);
     setAvailableRoutes([]);
-    setMapBounds(null);
     setRouteReportOpen(false);
-  }, [clearNavigation]);
+  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
 
   useEffect(() => {
     setAvailableRoutes([]);
@@ -539,12 +551,6 @@ function MapView({
   }, [locationError, manualLocationRequestPending]);
 
   useEffect(() => {
-      if (!navStart || !navEnd) {
-          setMapBounds(null);
-      }
-  }, [navStart, navEnd]);
-
-  useEffect(() => {
     if (
       shouldClearRouteForSelectedItem({
         selectedItemId: selectedId,
@@ -575,12 +581,25 @@ function MapView({
 
   const handleRoutesFound = useCallback((routes: PathResult[]) => {
     setAvailableRoutes(routes);
-    setMapBounds(routes[0] ? getRouteBounds(routes[0].path) : null);
   }, []);
+
+  const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
+    return routeAnnouncementTracker.claim(sessionId);
+  }, [routeAnnouncementTracker]);
+
+  const hasRouteFoundAnnouncement = useCallback((sessionId: number) => {
+    return routeAnnouncementTracker.has(sessionId);
+  }, [routeAnnouncementTracker]);
+
+  const registerRouteFoundAnnouncement = useCallback((sessionId: number, toastId: string) => {
+    routeAnnouncementTracker.register(sessionId, toastId);
+  }, [routeAnnouncementTracker]);
 
   const beginNavigationToItem = useCallback((item: MapItem) => {
     const decision = resolveNavigationStart(position);
 
+    dismissRouteFoundAnnouncement(navigationSessionId);
+    setNavigationSessionId((sessionId) => sessionId + 1);
     setTargetFacilityId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
     setAvailableRoutes([]);
@@ -595,7 +614,7 @@ function MapView({
     setNavigationOrigin("manual");
     setIsManualStartPending(true);
     setNavStart(null);
-  }, [position, setNavEnd, setNavStart]);
+  }, [dismissRouteFoundAnnouncement, navigationSessionId, position, setNavEnd, setNavStart]);
 
   useEffect(() => {
     if (!pendingNavigationFacility) {
@@ -660,7 +679,7 @@ function MapView({
   return (
     <div className="relative h-full w-full">
       <div className="relative h-full w-full overflow-hidden">
-        <MapContainerClient className="h-full w-full" bounds={getNavigationMapBounds(mapBounds)}>
+        <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
             items={filtered}
             selectedId={selectedId}
@@ -706,6 +725,11 @@ function MapView({
               nodes={graphData.nodes}
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
+              navigationSessionId={navigationSessionId}
+              hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
+              claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
+              registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
+              releaseRouteFoundAnnouncement={releaseRouteFoundAnnouncement}
               onRoutesFound={handleRoutesFound}
             />
           )}

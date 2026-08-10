@@ -20,10 +20,10 @@ test("active navigation suppresses the selection move", () => {
   );
 });
 
-test("the winning route owns the fitBounds move", () => {
+test("route completion does not own a camera move", () => {
   assert.deepEqual(
     getMapCameraPolicy({ owner: "route", navigationOwnsViewport: true, reducedMotion: false }),
-    { shouldMove: true, animate: true },
+    { shouldMove: false, animate: false },
   );
 });
 
@@ -34,7 +34,7 @@ test("reduced motion keeps useful moves but disables animation", () => {
   );
   assert.deepEqual(
     getMapCameraPolicy({ owner: "route", navigationOwnsViewport: true, reducedMotion: true }),
-    { shouldMove: true, animate: false },
+    { shouldMove: false, animate: false },
   );
 });
 
@@ -49,7 +49,7 @@ test("pending navigation owns the camera before the destination is established",
   );
 });
 
-test("selected facility to pending navigation to route winner performs one handoff move", () => {
+test("selected facility to pending navigation keeps the camera stable while the route resolves", () => {
   const ownsDuringPending = doesNavigationOwnViewport({
     hasDestination: false,
     manualStartPending: false,
@@ -68,5 +68,5 @@ test("selected facility to pending navigation to route winner performs one hando
     }),
   ];
 
-  assert.equal(handoffPolicies.filter((policy) => policy.shouldMove).length, 1);
+  assert.equal(handoffPolicies.filter((policy) => policy.shouldMove).length, 0);
 });
