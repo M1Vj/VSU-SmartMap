@@ -8,6 +8,15 @@ let quotaCalls: Array<Record<string, unknown>> = [];
 let recordedBatches: unknown[][] = [];
 let recordError: Error | null = null;
 let quotaError: Error | null = null;
+const generatedRequestId = "20123456-7890-49e4-8f1d-be3669e84465";
+
+mock.module("node:crypto", {
+  namedExports: {
+    randomUUID() {
+      return generatedRequestId;
+    },
+  },
+});
 
 mock.module("@/lib/security/rate-limit", {
   namedExports: {
@@ -145,7 +154,7 @@ test("forces source, level, server context, and pathname before direct-batch rec
   assert.equal(recordedBatches.length, 1);
   const recorded = recordedBatches[0]?.[0] as Record<string, unknown>;
   assert.notEqual(recorded.requestId, "request-123");
-  assert.match(String(recorded.requestId), /^[0-9a-f-]{36}$/);
+  assert.equal(recorded.requestId, generatedRequestId);
   const { requestId: _serverRequestId, ...recordedWithoutRequestId } = recorded;
   assert.deepEqual(recordedWithoutRequestId, {
     source: "client",
