@@ -1,7 +1,7 @@
 import type { LatLng } from "@/lib/types/common";
 
-const FAN_OUT_MIN_ZOOM = 16;
-const OVERLAP_THRESHOLD_PIXELS = 34;
+export const FAN_OUT_MIN_ZOOM = 16;
+export const OVERLAP_THRESHOLD_PIXELS = 34;
 // Fan-out regime only: never group pins farther apart than one building
 // footprint — a larger pixel-derived tolerance chains unrelated buildings
 // into one ring far from their true locations. Below FAN_OUT_MIN_ZOOM the
@@ -18,7 +18,7 @@ const BASE_RADIUS_PIXELS = 24;
 const EARTH_METERS_PER_DEGREE = 111_320;
 const EQUATOR_METERS_PER_PIXEL = 156_543.03392;
 
-type DeclutterableItem = {
+export type DeclutterableItem = {
   readonly id: string;
   readonly coordinates: LatLng;
 };
@@ -66,7 +66,7 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
           lat: Math.min(overlapDegrees.lat, buildingDegrees.lat),
           lng: Math.min(overlapDegrees.lng, buildingDegrees.lng),
         };
-  const groups = groupOverlappingItems(items, toleranceDegrees);
+  const groups = groupItemsByDistance(items, toleranceDegrees);
 
   for (const group of groups) {
     if (group.length < 2) {
@@ -110,7 +110,7 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
   return output;
 }
 
-function groupOverlappingItems<T extends DeclutterableItem>(
+export function groupItemsByDistance<T extends DeclutterableItem>(
   items: readonly T[],
   tolerance: LatLng,
 ): IndexedItem<T>[][] {
@@ -143,7 +143,7 @@ function areCoordinatesNear(a: LatLng, b: LatLng, tolerance: LatLng) {
   );
 }
 
-function getCentroid(coordinates: readonly LatLng[]): LatLng {
+export function getCentroid(coordinates: readonly LatLng[]): LatLng {
   const total = coordinates.reduce(
     (sum, coordinate) => ({
       lat: sum.lat + coordinate.lat,
@@ -176,7 +176,7 @@ function getMetersAsDegrees(meters: number, lat: number): LatLng {
   };
 }
 
-function getPixelsAsDegrees(pixels: number, lat: number, zoomBucket: number): LatLng {
+export function getPixelsAsDegrees(pixels: number, lat: number, zoomBucket: number): LatLng {
   const latitudeScale = Math.max(0.1, Math.cos((lat * Math.PI) / 180));
   const metersPerPixel = (EQUATOR_METERS_PER_PIXEL * latitudeScale) / 2 ** zoomBucket;
   const meters = pixels * metersPerPixel;
