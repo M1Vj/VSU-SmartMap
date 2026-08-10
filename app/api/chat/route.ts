@@ -32,7 +32,6 @@ import { CHAT_HISTORY } from "@/lib/constants/chat";
 import { CHAT_MODEL_ID } from "@/lib/ai/genkit";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
 import { buildChatFallbackContent, shouldUseChatFallback } from "@/lib/ai/chat-fallback";
-import { shouldFinalizePartialStream } from "./streaming";
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 type ChatContext = {
@@ -556,40 +555,17 @@ export async function POST(request: Request) {
 
       return createSseResponse(async (controller) => {
         const send = (data: unknown) => enqueueSse(controller, data);
-        let lastResponseText = "";
         let finalSent = false;
 
         try {
           for await (const chunk of stream.stream) {
-            const output = (chunk as { output?: { response?: string } }).output;
-            if (!output?.response) continue;
-
-            const newText = output.response.slice(lastResponseText.length);
-            if (!newText) continue;
-
-            lastResponseText = output.response;
+            // Provider chunks are intentionally drained but never parsed or emitted.
+            // Only the completed structured response is safe to validate and expose.
+            void chunk;
           }
 
           const response = await stream.response;
           if (!response.output) {
-            if (shouldFinalizePartialStream(lastResponseText)) {
-              const fallbackPayload = await enqueueStaticFallback(controller, message, session);
-              await finalizeTurn(session, fallbackPayload, "static_fallback", {
-                validationStatus: "warn",
-                validationReasons: ["structured_output_missing"],
-                cacheState: "miss",
-                errorClass: "validation_error",
-              });
-              await notifyChatOpsAlert({
-                outcome: "static_fallback",
-                errorClass: "validation_error",
-                releaseId: AI_RELEASE_ID,
-                requestId: session.identity.requestId,
-              });
-              finalSent = true;
-              return;
-            }
-
             throw new Error("AI response missing output");
           }
 
@@ -655,34 +631,15 @@ export async function POST(request: Request) {
             feedbackToken: payload.feedbackToken,
             requestId: payload.requestId,
           });
+          finalSent = true;
           await finalizeTurn(session, payload, "live", { cacheState: "miss" });
           if (contextFreeQuestion) {
             await cacheSuccessfulFinalPayload(questionHash, message, payload);
           }
-          finalSent = true;
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to stream response";
+          if (finalSent) return;
 
-          if (!finalSent && shouldFinalizePartialStream(lastResponseText)) {
-            const fallbackPayload = await enqueueStaticFallback(controller, message, session);
-            const errorClass = classifyChatError(error);
-            await finalizeTurn(session, fallbackPayload, "static_fallback", {
-              validationStatus: "warn",
-              validationReasons: ["partial_stream_discarded"],
-              cacheState: "miss",
-              errorClass,
-            });
-            await notifyChatOpsAlert({
-              outcome: "static_fallback",
-              errorClass,
-              releaseId: AI_RELEASE_ID,
-              requestId: session.identity.requestId,
-            });
-            finalSent = true;
-            return;
-          }
-
-          if (shouldUseChatFallback(errorMessage)) {
+          if (!request.signal.aborted) {
             try {
               const payload = await enqueueGeneratedFinal(
                 controller,
@@ -720,33 +677,6 @@ export async function POST(request: Request) {
             }
             return;
           }
-
-          let userMessage = "Sorry, I encountered an error. Please try again.";
-
-          if (errorMessage.includes("429") || errorMessage.includes("quota") || errorMessage.includes("Too Many Requests")) {
-            userMessage = "I'm currently experiencing high traffic. Please wait a moment and try again.";
-          } else if (errorMessage.includes("rate limit") || errorMessage.includes("Max retries")) {
-            userMessage = "Too many requests right now. Please try again in a few seconds.";
-          } else if (errorMessage.includes("timeout") || errorMessage.includes("ETIMEDOUT")) {
-            userMessage = "The request timed out. Please try again.";
-          } else if (errorMessage.includes("network") || errorMessage.includes("ECONNREFUSED")) {
-            userMessage = "Network connection issue. Please check your connection and try again.";
-          }
-
-          const errorClass = classifyChatError(error);
-          await finalizeTurn(session, undefined, "error", {
-            validationStatus: "fail",
-            validationReasons: ["stream_failed"],
-            cacheState: "miss",
-            errorClass,
-          });
-          await notifyChatOpsAlert({
-            outcome: "error",
-            errorClass,
-            releaseId: AI_RELEASE_ID,
-            requestId: session.identity.requestId,
-          });
-          send({ type: "error", error: userMessage });
         } finally {
           closeSse(controller);
         }

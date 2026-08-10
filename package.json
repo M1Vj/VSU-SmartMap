@@ -73,12 +73,13 @@
     "zod": "^4.1.12"
   },
   "overrides": {
-    "@hono/node-server": "2.0.5",
+    "@hono/node-server": "2.0.10",
     "axios": "1.18.0",
     "express-rate-limit": "8.5.2",
     "fast-xml-parser": "5.10.1",
-    "hono": "4.12.26",
+    "hono": "4.12.27",
     "ip-address": "10.2.0",
+    "js-yaml": "4.3.0",
     "@opentelemetry/auto-instrumentations-node": "0.77.0",
     "@opentelemetry/core": "2.8.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "0.219.0",
@@ -109,7 +110,11 @@
     "@genkit-ai/core": {
       "ajv": "8.18.0"
     },
+    "@genkit-ai/telemetry-server": {
+      "body-parser": "1.20.6"
+    },
     "@genkit-ai/tools-common": {
+      "adm-zip": "0.6.0",
       "ajv": "8.18.0"
     },
     "@modelcontextprotocol/sdk": {
@@ -153,7 +158,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "fake-indexeddb": "6.2.5",
-    "genkit-cli": "^1.29.0",
+    "genkit-cli": "^1.40.1",
     "postcss": "8.5.24",
     "tailwindcss": "^3.4.1",
     "tailwindcss-animate": "^1.0.7",

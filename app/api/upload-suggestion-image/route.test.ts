@@ -10,7 +10,7 @@ let verifyCalls: Array<[string, string | undefined]> = [];
 let quotaCalls: Array<Record<string, unknown>> = [];
 let pendingInserts: PendingInsert[] = [];
 let deletedPendingIds: string[] = [];
-let storageUploads: Array<{ bucket: string; path: string; options: unknown }> = [];
+let storageUploads: Array<{ bucket: string; path: string; bytes: Buffer; options: unknown }> = [];
 let storageRemovals: Array<{ bucket: string; paths: string[] }> = [];
 let pendingInsertError: { message: string } | null = null;
 let storageUploadError: { message: string } | null = null;
@@ -69,8 +69,8 @@ mock.module("@/lib/supabase/server-client", {
         storage: {
           from(bucket: string) {
             return {
-              async upload(path: string, _bytes: Buffer, options: unknown) {
-                storageUploads.push({ bucket, path, options });
+              async upload(path: string, bytes: Buffer, options: unknown) {
+                storageUploads.push({ bucket, path, bytes, options });
                 return { error: storageUploadError };
               },
               async remove(paths: string[]) {
@@ -205,6 +205,41 @@ test("rejects spoofed image content before storage", async () => {
   assert.equal(storageUploads.length, 0);
 });
 
+test("rejects denied uploads before Sharp inspects the file", async () => {
+  quotaResult = { allowed: false, retryAfterSeconds: 41 };
+  const { POST } = await routeModule;
+  const response = await POST(await makeRequest({
+    file: new File(["not-image"], "fake.tiff", { type: "image/tiff" }),
+  }));
+
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "41");
+  assert.equal(quotaCalls[0]?.costBytes, 9);
+  assert.equal(storageUploads.length, 0);
+});
+
+test("normalizes decoded image content to WebP before private storage", async () => {
+  const jpeg = await sharp({
+    create: { width: 5, height: 4, channels: 3, background: "white" },
+  }).jpeg().toBuffer();
+  const { POST } = await routeModule;
+  const response = await POST(await makeRequest({
+    file: new File([Uint8Array.from(jpeg)], "photo.png", { type: "image/png" }),
+  }));
+
+  assert.equal(response.status, 201);
+  assert.equal(quotaCalls[0]?.costBytes, jpeg.byteLength);
+  assert.match(String(storageUploads[0]?.path), /\.webp$/);
+  assert.deepEqual(storageUploads[0]?.options, {
+    upsert: false,
+    contentType: "image/webp",
+    cacheControl: "3600",
+  });
+  const metadata = await sharp(storageUploads[0]?.bytes).metadata();
+  assert.equal(metadata.format, "webp");
+  assert.deepEqual([metadata.width, metadata.height], [5, 4]);
+});
+
 test("returns 429 with Retry-After when the durable request and byte quota rejects", async () => {
   quotaResult = { allowed: false, retryAfterSeconds: 73 };
   const { POST } = await routeModule;
@@ -287,4 +322,89 @@ test("client upload helpers send fixed kinds and Turnstile proof and return opaq
     { kind: "map-suggestion-image", tempId: TEMP_ID, token: "turnstile-token", key: "turnstile-idempotency" },
     { kind: "event-proof", tempId: TEMP_ID, token: "turnstile-token", key: "turnstile-idempotency" },
   ]);
+});
+
+test("suggestion client sends an unsupported-declaration raster to the server unchanged", async (t) => {
+  const captured: Array<{ file: File | null }> = [];
+  t.mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+    const form = init?.body as FormData;
+    captured.push({ file: form.get("file") as File | null });
+    return Response.json({
+      uploadId: "550e8400-e29b-41d4-a716-446655440000",
+      path: "fixed/path.webp",
+    }, { status: 201 });
+  });
+
+  const tiff = await sharp({
+    create: { width: 3, height: 2, channels: 3, background: "white" },
+  }).tiff().toBuffer();
+  const original = new File([Uint8Array.from(tiff)], "photo.heic", { type: "image/heic" });
+  const { uploadSuggestionImageClient } = await storageClientModule;
+  const result = await uploadSuggestionImageClient(TEMP_ID, original, {
+    token: "turnstile-token",
+    idempotencyKey: "turnstile-idempotency",
+  });
+
+  assert.equal(result.error, null);
+  assert.equal(captured.length, 1);
+  const sent = captured[0]?.file;
+  assert.ok(sent);
+  assert.equal(sent.name, original.name);
+  assert.equal(sent.type, original.type);
+  assert.deepEqual(
+    new Uint8Array(await sent.arrayBuffer()),
+    new Uint8Array(await original.arrayBuffer()),
+  );
+});
+
+test("event proof client sends an unsupported-declaration raster to the server unchanged", async (t) => {
+  const captured: Array<{ file: File | null }> = [];
+  t.mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+    const form = init?.body as FormData;
+    captured.push({ file: form.get("file") as File | null });
+    return Response.json({
+      uploadId: "550e8400-e29b-41d4-a716-446655440000",
+      path: "fixed/path.webp",
+    }, { status: 201 });
+  });
+
+  const tiff = await sharp({
+    create: { width: 3, height: 2, channels: 3, background: "white" },
+  }).tiff().toBuffer();
+  const original = new File([Uint8Array.from(tiff)], "proof.avif", { type: "application/octet-stream" });
+  const { uploadEventProofClient } = await storageClientModule;
+  const result = await uploadEventProofClient(TEMP_ID, original, {
+    token: "turnstile-token",
+    idempotencyKey: "turnstile-idempotency",
+  });
+
+  assert.equal(result.error, null);
+  const sent = captured[0]?.file;
+  assert.ok(sent);
+  assert.equal(sent.name, original.name);
+  assert.equal(sent.type, original.type);
+  assert.deepEqual(
+    new Uint8Array(await sent.arrayBuffer()),
+    new Uint8Array(await original.arrayBuffer()),
+  );
+});
+
+test("suggestion client keeps its 5 MB guard before sending", async (t) => {
+  let fetchCalls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    fetchCalls += 1;
+    return Response.json({ error: "should not send" }, { status: 500 });
+  });
+
+  const oversized = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "too-large.tiff", {
+    type: "application/octet-stream",
+  });
+  const { uploadSuggestionImageClient } = await storageClientModule;
+  const result = await uploadSuggestionImageClient(TEMP_ID, oversized, {
+    token: "turnstile-token",
+    idempotencyKey: "turnstile-idempotency",
+  });
+
+  assert.match(result.error?.message ?? "", /too large/i);
+  assert.equal(fetchCalls, 0);
 });

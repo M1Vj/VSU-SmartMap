@@ -74,6 +74,33 @@ test("redactSensitiveText removes credential and personal data values before tru
   assert.match(redacted, /\[REDACTED/);
 });
 
+test("sanitizeLogEventInput preserves canonical UUID identifiers that resemble phone numbers", () => {
+  const identifier = "20123456-7890-49e4-8f1d-be3669e84465";
+  const sanitized = sanitizeLogEventInput({
+    source: "client",
+    level: "info",
+    eventName: "page.view",
+    sessionId: identifier,
+    requestId: identifier,
+  });
+
+  assert.equal(sanitized.sessionId, identifier);
+  assert.equal(sanitized.requestId, identifier);
+});
+
+test("sanitizeLogEventInput normalizes missing and invalid occurrence timestamps", () => {
+  for (const occurredAt of [undefined, "not-a-timestamp"]) {
+    const sanitized = sanitizeLogEventInput({
+      source: "server",
+      level: "error",
+      eventName: "api.request_failed",
+      occurredAt,
+    });
+
+    assert.equal(Number.isFinite(Date.parse(String(sanitized.occurredAt))), true);
+  }
+});
+
 test("sanitizeLogEventInput recursively redacts nested strings, errors, and breadcrumbs", () => {
   const token = ["sk", "proj", "abcdefghijklmnopqrstuvwxyz123456"].join("-");
   const sanitized = sanitizeLogEventInput({

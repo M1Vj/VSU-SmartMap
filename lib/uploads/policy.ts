@@ -15,19 +15,40 @@ export const SUGGESTION_UPLOAD_KINDS = [
 ] as const;
 
 export type SuggestionUploadKind = (typeof SUGGESTION_UPLOAD_KINDS)[number];
-type SupportedImageFormat = "jpeg" | "png" | "webp";
+export const SUPPORTED_SOURCE_IMAGE_FORMATS = [
+  "jpeg",
+  "png",
+  "webp",
+  "tiff",
+  "gif",
+  "heif",
+] as const;
+type SupportedSourceImageFormat = (typeof SUPPORTED_SOURCE_IMAGE_FORMATS)[number];
 
-const CONTENT_TYPES: Record<SupportedImageFormat, string> = {
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
+const SUPPORTED_SOURCE_FORMATS = new Set<string>(SUPPORTED_SOURCE_IMAGE_FORMATS);
+const NORMALIZED_IMAGE_FORMAT = "webp" as const;
+const NORMALIZED_IMAGE_CONTENT_TYPE = "image/webp" as const;
+const NORMALIZED_IMAGE_EXTENSION = "webp" as const;
 
-const EXTENSIONS: Record<SupportedImageFormat, string> = {
-  jpeg: "jpg",
+const SOURCE_FORMAT_ALIASES: Record<string, SupportedSourceImageFormat> = {
+  avif: "heif",
+  jpeg: "jpeg",
+  jpg: "jpeg",
+  jpe: "jpeg",
   png: "png",
   webp: "webp",
+  tiff: "tiff",
+  tif: "tiff",
+  gif: "gif",
+  heif: "heif",
 };
+
+function resolveSourceFormat(value: string | undefined): SupportedSourceImageFormat | null {
+  const format = value ? SOURCE_FORMAT_ALIASES[value] : undefined;
+  if (!format || !SUPPORTED_SOURCE_FORMATS.has(format)) return null;
+  if (sharp.format[format]?.input.buffer !== true) return null;
+  return format;
+}
 
 export class UploadPolicyError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -50,54 +71,88 @@ export function resolveSuggestionUploadTarget(
   if (!UUID_PATTERN.test(tempId) || !UUID_PATTERN.test(uploadId)) {
     throw new UploadPolicyError("Invalid upload identifier.");
   }
-  if (!(format in EXTENSIONS)) throw new UploadPolicyError("Unsupported image format.");
+  if (!resolveSourceFormat(format)) throw new UploadPolicyError("Unsupported image format.");
 
   const prefix = kind === "map-suggestion-image" ? "suggestion-images/" : "";
   return {
     bucket: kind === "map-suggestion-image"
       ? STORAGE_BUCKETS.facilityImages
       : STORAGE_BUCKETS.eventProofs,
-    objectPath: `${prefix}${tempId}/${uploadId}.${EXTENSIONS[format as SupportedImageFormat]}`,
+    objectPath: `${prefix}${tempId}/${uploadId}.${NORMALIZED_IMAGE_EXTENSION}`,
   };
 }
 
 export async function inspectSuggestionImage(file: File) {
   if (file.size > MAX_IMAGE_BYTES) throw new UploadPolicyError("Image is too large.", 413);
-  if (!Object.values(CONTENT_TYPES).includes(file.type)) {
-    throw new UploadPolicyError("Unsupported image type.");
-  }
 
   const bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new UploadPolicyError("Image is too large.", 413);
+  }
+
   let metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>;
   try {
-    metadata = await sharp(bytes, { failOn: "warning" }).metadata();
-  } catch {
+    metadata = await sharp(bytes, {
+      failOn: "warning",
+      limitInputPixels: MAX_IMAGE_PIXELS,
+      pages: 1,
+    }).metadata();
+  } catch (error) {
+    if (error instanceof Error && error.message.toLowerCase().includes("pixel limit")) {
+      throw new UploadPolicyError("Image dimensions are too large.");
+    }
     throw new UploadPolicyError("File is not a valid image.");
   }
 
-  const format = metadata.format as SupportedImageFormat | undefined;
-  const width = metadata.width;
-  const height = metadata.height;
-  if (!format || !(format in CONTENT_TYPES) || !width || !height) {
-    throw new UploadPolicyError("File is not a valid supported image.");
+  const sourceFormat = resolveSourceFormat(metadata.format);
+  if (!sourceFormat) {
+    throw new UploadPolicyError("Unsupported image format.");
   }
-  if (CONTENT_TYPES[format] !== file.type) {
-    throw new UploadPolicyError("Declared image type does not match file contents.");
+  if ((metadata.pages ?? 1) > 1) {
+    throw new UploadPolicyError("Animated or multi-page images are not supported.");
+  }
+
+  const width = metadata.autoOrient?.width ?? metadata.width;
+  const height = metadata.autoOrient?.height ?? metadata.height;
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    throw new UploadPolicyError("File is not a valid supported image.");
   }
   if (
     width > MAX_IMAGE_DIMENSION ||
     height > MAX_IMAGE_DIMENSION ||
-    width * height > MAX_IMAGE_PIXELS
+    width > Math.floor(MAX_IMAGE_PIXELS / height)
   ) {
     throw new UploadPolicyError("Image dimensions are too large.");
   }
 
+  let normalizedBytes: Buffer;
+  try {
+    normalizedBytes = await sharp(bytes, {
+      failOn: "warning",
+      limitInputPixels: MAX_IMAGE_PIXELS,
+      pages: 1,
+    })
+      .rotate()
+      .webp({ quality: 82, effort: 4 })
+      .toBuffer();
+  } catch {
+    throw new UploadPolicyError("File is not a valid supported image.");
+  }
+  if (normalizedBytes.byteLength < 1) {
+    throw new UploadPolicyError("File is not a valid supported image.");
+  }
+  if (normalizedBytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new UploadPolicyError("Image is too large.", 413);
+  }
+
   return {
-    bytes,
-    format,
-    contentType: CONTENT_TYPES[format],
+    bytes: normalizedBytes,
+    format: NORMALIZED_IMAGE_FORMAT,
+    sourceFormat,
+    contentType: NORMALIZED_IMAGE_CONTENT_TYPE,
     width,
     height,
+    inputBytes: bytes.byteLength,
   };
 }
 

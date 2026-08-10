@@ -58,6 +58,8 @@ type AppBugIncidentRow = {
   updated_at: string;
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export type IncidentWithSample = IncidentRecord & {
   sampleEventId: string | null;
   sampleMessage: string | null;
@@ -105,7 +107,9 @@ function toExportLogEvent(row: AppLogEventRow): ExportLogEvent {
 
 function toInsertPayload(event: SanitizedLogEvent, fingerprint?: string, incidentId?: string) {
   return {
-    id: event.id,
+    id: typeof event.id === "string" && UUID_PATTERN.test(event.id)
+      ? event.id
+      : globalThis.crypto.randomUUID(),
     incident_id: incidentId,
     source: event.source,
     level: event.level,

@@ -37,9 +37,10 @@ export type LogEventInput = {
 };
 
 export type SanitizedLogEvent = Required<Pick<LogEventInput, "source" | "level" | "eventName">> &
-  Omit<LogEventInput, "source" | "level" | "eventName" | "metadata" | "breadcrumbs"> & {
+  Omit<LogEventInput, "source" | "level" | "eventName" | "metadata" | "breadcrumbs" | "occurredAt"> & {
     metadata: Record<string, unknown>;
     breadcrumbs: LogBreadcrumb[];
+    occurredAt: string;
   };
 
 export type IncidentRecord = {
@@ -75,6 +76,7 @@ const MAX_BREADCRUMBS = 25;
 const REDACTED = "[REDACTED]";
 const SECRET_KEY_PATTERN =
   /password|passwd|secret|token|authorization|auth|cookie|session|api[_-]?key|access[_-]?key|refresh/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -110,6 +112,18 @@ export function redactSensitiveText(value: string): string {
 
 function cleanString(value: string): string {
   return truncateString(redactSensitiveText(value));
+}
+
+function cleanIdentifier(value?: string): string | undefined {
+  if (!value) return undefined;
+  return UUID_PATTERN.test(value) ? value : cleanString(value);
+}
+
+function normalizeOccurrenceTimestamp(value?: string): string {
+  const milliseconds = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(milliseconds)
+    ? new Date(milliseconds).toISOString()
+    : new Date().toISOString();
 }
 
 function sanitizeValue(value: unknown, depth = 0, keyHint = ""): unknown {
@@ -187,8 +201,8 @@ export function sanitizeLogEventInput(input: LogEventInput): SanitizedLogEvent {
     level: normalizeLevel(input.level),
     eventName: cleanString(input.eventName || "app.event"),
     message: input.message ? cleanString(input.message) : undefined,
-    sessionId: input.sessionId ? cleanString(input.sessionId) : undefined,
-    requestId: input.requestId ? cleanString(input.requestId) : undefined,
+    sessionId: cleanIdentifier(input.sessionId),
+    requestId: cleanIdentifier(input.requestId),
     route: cleanRoute(input.route),
     method: input.method ? cleanString(input.method.toUpperCase()) : undefined,
     statusCode: typeof input.statusCode === "number" ? input.statusCode : undefined,
@@ -198,7 +212,7 @@ export function sanitizeLogEventInput(input: LogEventInput): SanitizedLogEvent {
     environment: input.environment ? cleanString(input.environment) : undefined,
     metadata: isRecord(input.metadata) ? (sanitizeValue(input.metadata) as Record<string, unknown>) : {},
     breadcrumbs: normalizeBreadcrumbs(input.breadcrumbs),
-    occurredAt: input.occurredAt ? cleanString(input.occurredAt) : undefined,
+    occurredAt: normalizeOccurrenceTimestamp(input.occurredAt),
   };
 }
 
