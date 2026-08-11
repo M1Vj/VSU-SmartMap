@@ -8,6 +8,8 @@ import { Loader2, Bug, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { uploadBugScreenshotClient } from "@/lib/supabase/storage-client";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
+import { prepareImagePreviewFile, validateImageSource } from "@/lib/utils/image-compression";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { verifyTurnstileToken } from "@/lib/turnstile";
@@ -114,22 +116,29 @@ export function ReportBugDialog({ open, onOpenChange }: ReportBugDialogProps) {
     }
   }, [open, reset, imagePreview, resetTurnstile]);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Image must be less than 5MB");
+      const validationError = validateImageSource(file);
+      if (validationError) {
+        toast.error(validationError);
+        e.target.value = "";
         return;
       }
 
-      // Revoke previous URL if it exists
-      if (imagePreview) {
-        URL.revokeObjectURL(imagePreview);
-      }
+      try {
+        const previewFile = await prepareImagePreviewFile(file);
+        if (imagePreview) {
+          URL.revokeObjectURL(imagePreview);
+        }
 
-      setSelectedImage(file);
-      const url = URL.createObjectURL(file);
-      setImagePreview(url);
+        setSelectedImage(file);
+        const url = URL.createObjectURL(previewFile);
+        setImagePreview(url);
+      } catch (previewError) {
+        toast.error(previewError instanceof Error ? previewError.message : "Could not preview this image.");
+        e.target.value = "";
+      }
     }
   };
 
@@ -326,7 +335,9 @@ export function ReportBugDialog({ open, onOpenChange }: ReportBugDialogProps) {
                     <p className="text-sm text-muted-foreground text-center">
                       Click to upload a screenshot
                       <br />
-                      <span className="text-xs text-muted-foreground/70">(Max 5MB)</span>
+                      <span className="text-xs text-muted-foreground/70">
+                        (Up to {STORAGE_LIMITS.imageInputMaxMB} MB; saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less)
+                      </span>
                     </p>
                   </div>
                 ) : (
@@ -356,7 +367,7 @@ export function ReportBugDialog({ open, onOpenChange }: ReportBugDialogProps) {
                   type="file"
                   ref={fileInputRef}
                   className="hidden"
-                  accept="image/*"
+                  accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
                   onChange={handleImageSelect}
                 />
               </div>

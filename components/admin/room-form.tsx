@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { roomSchema, type RoomFormValues } from '@/lib/validation/room';
 import { STORAGE_LIMITS } from '@/lib/constants/storage';
+import { prepareImagePreviewFile, validateImageSource } from '@/lib/utils/image-compression';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -194,21 +195,34 @@ export function RoomForm({
           <Input
             id="roomImage"
             type="file"
-            accept={STORAGE_LIMITS.acceptedTypes.join(',')}
-            onChange={(event) => {
+            accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
+            onChange={async (event) => {
               const nextFile = event.target.files?.[0];
               if (nextFile) {
-                if (preview && preview.startsWith('blob:')) {
-                  URL.revokeObjectURL(preview);
+                const validationError = validateImageSource(nextFile);
+                if (validationError) {
+                  setError(validationError);
+                  event.target.value = '';
+                  return;
                 }
-                setFile(nextFile);
-                setPreview(URL.createObjectURL(nextFile));
-                setClearImage(false);
+                try {
+                  const previewFile = await prepareImagePreviewFile(nextFile);
+                  if (preview && preview.startsWith('blob:')) {
+                    URL.revokeObjectURL(preview);
+                  }
+                  setFile(nextFile);
+                  setPreview(URL.createObjectURL(previewFile));
+                  setClearImage(false);
+                } catch (previewError) {
+                  setError(previewError instanceof Error ? previewError.message : 'Could not preview this image.');
+                  event.target.value = '';
+                }
               }
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Max {STORAGE_LIMITS.inputMaxMB}MB. Types: {STORAGE_LIMITS.acceptedTypes.join(', ')}.
+            Up to {STORAGE_LIMITS.imageInputMaxMB} MB. JPG, PNG, WebP, HEIC, or HEIF.
+            {' '}Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
           </p>
         </div>
 

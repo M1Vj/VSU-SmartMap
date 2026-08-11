@@ -18,6 +18,7 @@ import {
 } from "@/lib/auth/server";
 import { notifyAdmins } from "@/lib/notifications/service";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
 import {
   VERIFICATION_DOCUMENT_BUCKET,
   buildVerificationDocumentPath,
@@ -34,10 +35,8 @@ const ALLOWED_DOCUMENT_TYPES = new Set([
 
 const PHOTO_BUCKET = "boarding-house-photos";
 const MAX_PHOTOS = 8;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const MAX_PHOTO_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 const PHOTO_EXTENSIONS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
   "image/webp": "webp",
 };
 
@@ -780,10 +779,10 @@ async function syncListingPhotos(
 
   for (const file of newFiles) {
     if (!PHOTO_EXTENSIONS[file.type]) {
-      return { error: "Photos must be PNG, JPG, or WebP files." };
+      return { error: "Photos must be converted to WebP before upload." };
     }
     if (file.size > MAX_PHOTO_BYTES) {
-      return { error: "Each photo must be 5MB or smaller." };
+      return { error: `Each photo must be ${STORAGE_LIMITS.compressedMaxMB} MB or smaller after compression.` };
     }
   }
 
@@ -962,10 +961,10 @@ async function buildOfferingRowsWithImages(
   }
   for (const file of newFiles) {
     if (!PHOTO_EXTENSIONS[file.type]) {
-      return { error: "Room photos must be PNG, JPG, or WebP files." };
+      return { error: "Room photos must be converted to WebP before upload." };
     }
     if (file.size > MAX_PHOTO_BYTES) {
-      return { error: "Each room photo must be 5MB or smaller." };
+      return { error: `Each room photo must be ${STORAGE_LIMITS.compressedMaxMB} MB or smaller after compression.` };
     }
   }
 
@@ -1042,6 +1041,12 @@ function readFile(value: FormDataEntryValue | null): File | null {
 function validateDocument(file: File): string | null {
   if (!ALLOWED_DOCUMENT_TYPES.has(file.type)) {
     return "Documents must be PNG, JPG, WebP, or PDF files.";
+  }
+  if (file.type.startsWith("image/") && file.type !== "image/webp") {
+    return "Images must be converted to WebP before upload. PDFs remain unchanged.";
+  }
+  if (file.type === "image/webp" && file.size > STORAGE_LIMITS.compressedMaxMB * 1024 * 1024) {
+    return `Images must be ${STORAGE_LIMITS.compressedMaxMB} MB or smaller after compression.`;
   }
   if (file.size > MAX_DOCUMENT_BYTES) {
     return "Each document must be 10MB or smaller.";

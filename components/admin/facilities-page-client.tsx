@@ -13,6 +13,7 @@ import {
   updateFacilityAction,
 } from '@/app/admin/facilities/actions';
 import { uploadFacilityHeroClient } from '@/lib/supabase/storage-client';
+import { STORAGE_LIMITS } from '@/lib/constants/storage';
 import { ConfirmDialog } from './confirm-dialog';
 import { toast } from 'sonner';
 
@@ -138,7 +139,8 @@ export function FacilitiesPageClient({ facilities }: FacilitiesPageClientProps) 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
       setMessage(message);
-      toast.error('Failed to save facility');
+      toast.error('Failed to save facility', { description: message });
+      throw error;
     }
   };
 
@@ -206,6 +208,8 @@ export function FacilitiesPageClient({ facilities }: FacilitiesPageClientProps) 
         onSubmit={handleSubmit}
         onManageRooms={dialogFacility ? () => handleManageRooms(dialogFacility) : undefined}
         showSlug={true}
+        imageAccept={STORAGE_LIMITS.facilityHeroAcceptedTypes.join(',')}
+        imageMaxMB={STORAGE_LIMITS.facilityHeroInputMaxMB}
       />
       <RoomManagerDialog
         open={roomsOpen}

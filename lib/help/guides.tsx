@@ -492,7 +492,7 @@ const OWNER_LISTING_GUIDE: HelpGuide = {
         "The first photo is the cover students see first — use the arrows to reorder.",
       ],
       tips: [
-        "Photos are compressed in your browser before uploading, so large images are fine.",
+        "JPG, PNG, WebP, HEIC, and HEIF sources up to 30MB are converted in your browser to WebP at 1MB or less before uploading.",
       ],
     },
     {
@@ -555,7 +555,7 @@ const OWNER_APPLY_GUIDE: HelpGuide = {
       steps: [
         "Your display name and a reachable phone and email.",
         "A short note explaining your relationship to the property and who handles student inquiries.",
-        "An identity document (PNG, JPG, WebP, or PDF, up to 10MB).",
+        "An identity document (image sources up to 30MB are converted to WebP at 1MB or less; PDFs remain unchanged up to 10MB).",
         "Proof of authority to rent — for example a title, lease, or authorization letter (same file rules).",
       ],
     },

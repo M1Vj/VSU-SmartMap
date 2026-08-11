@@ -5,6 +5,7 @@ import Image from 'next/image';
 import type { Facility } from '@/lib/types/facility';
 import { FACILITY_CATEGORIES } from '@/lib/types/facility';
 import { STORAGE_LIMITS } from '@/lib/constants/storage';
+import { prepareImagePreviewFile, validateImageSource } from '@/lib/utils/image-compression';
 import { unifiedFacilitySchema, type UnifiedFacilityFormValues } from '@/lib/validation/facility';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -43,6 +44,7 @@ interface FacilityDialogProps {
   children?: ReactNode;
   showSlug?: boolean;
   imageAccept?: string;
+  imageMaxMB?: number;
 }
 
 const defaultCoordinates = MAP_DEFAULT_CENTER;
@@ -60,8 +62,10 @@ export function FacilityDialog({
   submittingLabel,
   children,
   showSlug = false,
-  imageAccept = STORAGE_LIMITS.acceptedTypes.join(','),
+  imageAccept = STORAGE_LIMITS.imageAcceptedTypes.join(','),
+  imageMaxMB,
 }: FacilityDialogProps) {
+  const resolvedImageMaxMB = imageMaxMB ?? STORAGE_LIMITS.imageInputMaxMB;
   const initialValues = useMemo<UnifiedFacilityFormValues>(() => {
     if (facility) {
       return {
@@ -153,7 +157,8 @@ export function FacilityDialog({
       await onSubmit(parsed.data, { file, clearImage });
     } catch (submitError) {
       console.error('Failed to save facility:', submitError);
-      setError('Failed to save facility');
+      const message = submitError instanceof Error ? submitError.message : 'An unexpected error occurred.';
+      setError(message);
     } finally {
       setSubmitting(false);
     }
@@ -324,7 +329,7 @@ export function FacilityDialog({
                 <div className="space-y-2">
                   <div className="flex items-center gap-1">
                     <Label htmlFor="image">Hero image</Label>
-                    <FieldHelp content="An attractive photo of the facility's exterior or main entrance. Max 5MB." />
+                    <FieldHelp content={`An attractive photo of the facility's exterior or main entrance. Max ${resolvedImageMaxMB}MB.`} />
                   </div>
                   {preview && (
                     <div className="rounded-lg border p-3 flex items-center gap-3">
@@ -362,23 +367,33 @@ export function FacilityDialog({
                     id="image"
                     type="file"
                     accept={imageAccept}
-                    onChange={(event) => {
+                    onChange={async (event) => {
                       const nextFile = event.target.files?.[0];
                       if (nextFile) {
-                        if (preview && preview.startsWith('blob:')) {
-                          URL.revokeObjectURL(preview);
+                        const validationError = validateImageSource(nextFile);
+                        if (validationError) {
+                          setError(validationError);
+                          event.target.value = '';
+                          return;
                         }
-                        setFile(nextFile);
-                        setPreview(URL.createObjectURL(nextFile));
-                        setClearImage(false);
+                        try {
+                          const previewFile = await prepareImagePreviewFile(nextFile);
+                          if (preview && preview.startsWith('blob:')) {
+                            URL.revokeObjectURL(preview);
+                          }
+                          setFile(nextFile);
+                          setPreview(URL.createObjectURL(previewFile));
+                          setClearImage(false);
+                        } catch (previewError) {
+                          setError(previewError instanceof Error ? previewError.message : 'Could not preview this image.');
+                          event.target.value = '';
+                        }
                       }
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Max {STORAGE_LIMITS.inputMaxMB}MB.{' '}
-                    {imageAccept === 'image/*'
-                      ? 'Supported image contents are verified on upload.'
-                      : `Types: ${STORAGE_LIMITS.acceptedTypes.join(', ')}.`}
+                    Up to {resolvedImageMaxMB} MB. JPG, PNG, WebP, HEIC, or HEIF.
+                    {' '}Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
                   </p>
                 </div>
 

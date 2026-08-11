@@ -55,6 +55,7 @@
     "dexie-react-hooks": "^4.2.0",
     "driver.js": "^1.6.0",
     "genkit": "^1.29.0",
+    "heic-to": "1.5.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.511.0",
     "mammoth": "^1.11.0",

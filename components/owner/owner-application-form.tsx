@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
+import { compressImage, validateImageSource } from "@/lib/utils/image-compression";
 
 export function OwnerApplicationForm({ email }: { email: string }) {
   const [error, setError] = useState("");
@@ -18,6 +20,23 @@ export function OwnerApplicationForm({ email }: { email: string }) {
   async function handleSubmit(formData: FormData) {
     setError("");
     setMessage("");
+
+    try {
+      for (const fieldName of ["identityDocument", "authorityDocument"]) {
+        const value = formData.get(fieldName);
+        if (!(value instanceof File) || value.size === 0 || value.type === "application/pdf") {
+          continue;
+        }
+        const validationError = validateImageSource(value);
+        if (validationError) throw new Error(validationError);
+        const { file } = await compressImage(value);
+        formData.set(fieldName, file, file.name);
+      }
+    } catch (processingError) {
+      setError(processingError instanceof Error ? processingError.message : "Could not process the selected document.");
+      return;
+    }
+
     const result = await submitOwnerApplication(formData);
     if (result?.error) setError(result.error);
     if (result?.message) setMessage(result.message);
@@ -93,10 +112,13 @@ function FileField({ label, name }: { label: string; name: string }) {
         id={name}
         name={name}
         type="file"
-        accept="image/png,image/jpeg,image/webp,application/pdf"
+        accept={`${STORAGE_LIMITS.imageAcceptedTypes.join(',')},application/pdf`}
         required
       />
-      <p className="text-xs text-muted-foreground">PNG, JPG, WebP, or PDF. Max 10MB.</p>
+      <p className="text-xs text-muted-foreground">
+        Images up to {STORAGE_LIMITS.imageInputMaxMB} MB are saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
+        {' '}PDFs remain unchanged (max 10 MB).
+      </p>
     </div>
   );
 }

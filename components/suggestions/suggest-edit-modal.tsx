@@ -7,6 +7,7 @@ import type { Facility } from "@/lib/types/facility";
 import type { UnifiedFacilityFormValues } from "@/lib/validation/facility";
 import { createSuggestionAction } from "@/app/actions/suggestions";
 import { uploadSuggestionImageClient } from "@/lib/supabase/storage-client";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 
@@ -149,7 +150,7 @@ export function SuggestEditModal({ facility, open, onOpenChange }: SuggestEditMo
       description="Propose updates to this facility. An admin will review before publishing."
       submitLabel="Submit suggestion"
       submittingLabel="Submitting..."
-      imageAccept="image/*"
+      imageAccept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
     >
       <div className="px-6 pb-4 space-y-3">
         <TurnstileWidget

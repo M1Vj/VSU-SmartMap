@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
 import { consumeRateLimit, hashRateLimitSubject } from "@/lib/security/rate-limit";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
 import { verifyTurnstileToken } from "@/lib/turnstile";
@@ -17,7 +18,7 @@ import {
 
 const UPLOAD_WINDOW_SECONDS = 15 * 60;
 const UPLOAD_REQUEST_LIMIT = 10;
-const UPLOAD_BYTE_LIMIT = 25 * 1024 * 1024;
+const UPLOAD_BYTE_LIMIT = STORAGE_LIMITS.imageInputMaxMB * 1024 * 1024;
 const UPLOAD_TTL_MS = 30 * 60 * 1000;
 
 function jsonError(error: string, status: number, headers?: HeadersInit) {

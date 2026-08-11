@@ -17,10 +17,29 @@ export const STORAGE_PATHS = {
     `${STORAGE_BUCKETS.facilityImages}/bug-reports/${reportId}`,
 } as const;
 
+const IMAGE_ACCEPTED_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".heic",
+  ".heif",
+] as const;
+
 export const STORAGE_LIMITS = {
-  inputMaxMB: 5,
+  inputMaxMB: 30,
+  imageInputMaxMB: 30,
   compressedMaxMB: 1,
-  acceptedTypes: ["image/png", "image/jpeg", "image/webp", ".png", ".jpg", ".jpeg", ".webp"] as const,
+  imageAcceptedTypes: IMAGE_ACCEPTED_TYPES,
+  // Backward-compatible aliases for existing image-upload callers.
+  facilityHeroInputMaxMB: 30,
+  acceptedTypes: IMAGE_ACCEPTED_TYPES,
+  facilityHeroAcceptedTypes: IMAGE_ACCEPTED_TYPES,
   compression: {
     quality: 0.8,
     maxWidthOrHeight: 1920,
