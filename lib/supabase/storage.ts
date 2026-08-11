@@ -12,8 +12,7 @@ type StorageResult<T> = {
 };
 
 const BUCKET = STORAGE_BUCKETS.facilityImages;
-const MAX_INPUT_BYTES = STORAGE_LIMITS.inputMaxMB * 1024 * 1024;
-const ACCEPTED = new Set<string>(STORAGE_LIMITS.acceptedTypes);
+const MAX_COMPRESSED_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 
 const stripBucket = (path: string) =>
   path.replace(new RegExp(`^${BUCKET}/?`), "");
@@ -27,11 +26,11 @@ const normalizeError = (message: string): StorageError => new StorageError(messa
 
 const validateFile = (file: File | Blob) => {
   const type = (file as File).type || "";
-  if (type && !ACCEPTED.has(type)) {
-    return `Unsupported file type: ${type}`;
+  if (type !== "image/webp") {
+    return "Images must be converted to WebP in the browser before storage.";
   }
-  if (file.size > MAX_INPUT_BYTES) {
-    return `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max ${STORAGE_LIMITS.inputMaxMB} MB)`;
+  if (file.size > MAX_COMPRESSED_BYTES) {
+    return `Image must be ${STORAGE_LIMITS.compressedMaxMB} MB or smaller after browser compression.`;
   }
   return null;
 };

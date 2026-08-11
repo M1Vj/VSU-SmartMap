@@ -1,8 +1,9 @@
 import sharp from "sharp";
 
-import { STORAGE_BUCKETS } from "@/lib/constants/storage";
+import { STORAGE_BUCKETS, STORAGE_LIMITS } from "@/lib/constants/storage";
 
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = STORAGE_LIMITS.imageInputMaxMB * 1024 * 1024;
+export const MAX_NORMALIZED_IMAGE_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 export const MAX_MULTIPART_BYTES = MAX_IMAGE_BYTES + 256 * 1024;
 const MAX_IMAGE_DIMENSION = 8_192;
 const MAX_IMAGE_PIXELS = 25_000_000;
@@ -141,8 +142,11 @@ export async function inspectSuggestionImage(file: File) {
   if (normalizedBytes.byteLength < 1) {
     throw new UploadPolicyError("File is not a valid supported image.");
   }
-  if (normalizedBytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new UploadPolicyError("Image is too large.", 413);
+  if (normalizedBytes.byteLength > MAX_NORMALIZED_IMAGE_BYTES) {
+    throw new UploadPolicyError(
+      `Image must be converted to ${STORAGE_LIMITS.compressedMaxMB} MB or smaller before storage.`,
+      413,
+    );
   }
 
   return {

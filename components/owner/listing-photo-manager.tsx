@@ -6,14 +6,13 @@ import { ArrowLeft, ArrowRight, ImagePlus, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { STORAGE_LIMITS } from "@/lib/constants/storage";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressImage, validateImageSource } from "@/lib/utils/image-compression";
 
 export type OwnerPhotoItem =
   | { key: string; kind: "existing"; id: string; url: string; alt: string }
   | { key: string; kind: "new"; file: File; url: string };
 
 const MAX_PHOTOS = 8;
-const ACCEPTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_COMPRESSED_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 
 export function ListingPhotoManager({
@@ -37,10 +36,11 @@ export function ListingPhotoManager({
     }
 
     const picked = Array.from(fileList);
-    const accepted = picked.filter((file) => ACCEPTED_TYPES.has(file.type));
-    if (accepted.length < picked.length) {
-      setNotice("Only PNG, JPG, or WebP images are supported.");
-    }
+    const rejected = picked
+      .map((file) => validateImageSource(file))
+      .filter((message): message is string => Boolean(message));
+    const accepted = picked.filter((file) => !validateImageSource(file));
+    if (rejected.length > 0) setNotice(rejected[0]);
     const toAdd = accepted.slice(0, remaining);
     if (accepted.length > remaining) {
       setNotice(`Only ${remaining} more photo(s) can be added.`);
@@ -66,9 +66,9 @@ export function ListingPhotoManager({
         });
       }
       onItemsChange([...items, ...nextItems]);
-    } catch {
+    } catch (error) {
       createdUrls.forEach((url) => URL.revokeObjectURL(url));
-      setNotice("Could not process one of the photos. Please try another image.");
+      setNotice(error instanceof Error ? error.message : "Could not process one of the photos. Please try another image.");
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -95,7 +95,8 @@ export function ListingPhotoManager({
       <p className="text-xs text-muted-foreground">
         Add up to {MAX_PHOTOS} photos. The first photo is the{" "}
         <span className="font-medium text-foreground">cover</span> students see first.
-        Images are compressed in your browser before upload.
+        Images up to {STORAGE_LIMITS.imageInputMaxMB} MB are compressed in your browser
+        to WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less before upload.
       </p>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -121,7 +122,7 @@ export function ListingPhotoManager({
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
         multiple
         className="sr-only"
         onChange={(event) => handleFiles(event.target.files)}

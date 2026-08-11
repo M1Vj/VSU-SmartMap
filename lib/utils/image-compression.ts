@@ -27,6 +27,43 @@ const COMPRESSION_STEPS: CompressionStep[] = [
 ];
 
 const HEIC_MIME_TYPES = new Set(["image/heic", "image/heif"]);
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/tiff",
+  "image/gif",
+  "image/avif",
+]);
+const SUPPORTED_IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".heic",
+  ".heif",
+  ".tif",
+  ".tiff",
+  ".gif",
+  ".avif",
+]);
+
+const imageExtension = (name: string) =>
+  name.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? "";
+
+export function validateImageSource(file: File): string | null {
+  const type = file.type.toLowerCase();
+  const extension = imageExtension(file.name);
+  if (!SUPPORTED_IMAGE_MIME_TYPES.has(type) && !SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
+    return "This image type is not supported. Choose a PNG, JPG, WebP, HEIC, or HEIF image.";
+  }
+  if (file.size > STORAGE_LIMITS.imageInputMaxMB * 1024 * 1024) {
+    return `This image is ${(file.size / 1024 / 1024).toFixed(2)} MB. Choose an image up to ${STORAGE_LIMITS.imageInputMaxMB} MB; it will be converted to WebP and compressed to ${STORAGE_LIMITS.compressedMaxMB} MB before upload.`;
+  }
+  return null;
+}
 
 const hasHeicExtension = (name: string) => /\.(heic|heif)$/i.test(name);
 
@@ -62,6 +99,8 @@ async function decodeHeic(file: File): Promise<File> {
 export async function compressImage(file: File): Promise<CompressionResult> {
   const { compression, compressedMaxMB } = STORAGE_LIMITS;
   const targetBytes = compressedMaxMB * 1024 * 1024;
+  const validationError = validateImageSource(file);
+  if (validationError) throw new Error(validationError);
   const compressionSource = await decodeHeic(file);
 
   const webpName = file.name.includes(".")
@@ -110,6 +149,12 @@ export async function compressImage(file: File): Promise<CompressionResult> {
   const finalFile = new File([compressedBlob], webpName, {
     type: "image/webp",
   });
+
+  if (finalFile.size > targetBytes) {
+    throw new Error(
+      `This image could not be compressed to ${compressedMaxMB} MB or less. Try a simpler image.`,
+    );
+  }
 
   return {
     file: finalFile,

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import type { Facility } from '@/lib/types/facility';
 import { FACILITY_CATEGORIES } from '@/lib/types/facility';
 import { STORAGE_LIMITS } from '@/lib/constants/storage';
+import { validateImageSource } from '@/lib/utils/image-compression';
 import { unifiedFacilitySchema, type UnifiedFacilityFormValues } from '@/lib/validation/facility';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -61,10 +62,10 @@ export function FacilityDialog({
   submittingLabel,
   children,
   showSlug = false,
-  imageAccept = STORAGE_LIMITS.acceptedTypes.join(','),
+  imageAccept = STORAGE_LIMITS.imageAcceptedTypes.join(','),
   imageMaxMB,
 }: FacilityDialogProps) {
-  const resolvedImageMaxMB = imageMaxMB ?? STORAGE_LIMITS.inputMaxMB;
+  const resolvedImageMaxMB = imageMaxMB ?? STORAGE_LIMITS.imageInputMaxMB;
   const initialValues = useMemo<UnifiedFacilityFormValues>(() => {
     if (facility) {
       return {
@@ -369,6 +370,12 @@ export function FacilityDialog({
                     onChange={(event) => {
                       const nextFile = event.target.files?.[0];
                       if (nextFile) {
+                        const validationError = validateImageSource(nextFile);
+                        if (validationError) {
+                          setError(validationError);
+                          event.target.value = '';
+                          return;
+                        }
                         if (preview && preview.startsWith('blob:')) {
                           URL.revokeObjectURL(preview);
                         }
@@ -379,10 +386,8 @@ export function FacilityDialog({
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Up to {resolvedImageMaxMB} MB.{' '}
-                    {imageAccept === 'image/*'
-                      ? 'Supported image contents are verified on upload.'
-                      : <>JPG, PNG, WebP, HEIC, or HEIF. Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.</>}
+                    Up to {resolvedImageMaxMB} MB. JPG, PNG, WebP, HEIC, or HEIF.
+                    {' '}Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
                   </p>
                 </div>
 

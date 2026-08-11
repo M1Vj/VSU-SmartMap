@@ -25,6 +25,8 @@ import { uploadSuggestionImageClient } from "@/lib/supabase/storage-client";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { FieldHelp } from "@/components/ui/field-help";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
+import { validateImageSource } from "@/lib/utils/image-compression";
 
 function hasRoomChanges(
   initialData: RoomFormValues,
@@ -197,6 +199,13 @@ export function SuggestRoomModal({
     const selected = e.target.files?.[0];
     if (!selected) return;
 
+    const validationError = validateImageSource(selected);
+    if (validationError) {
+      setError(validationError);
+      e.target.value = "";
+      return;
+    }
+
     if (preview) URL.revokeObjectURL(preview);
     setFile(selected);
     setPreview(URL.createObjectURL(selected));
@@ -337,10 +346,14 @@ export function SuggestRoomModal({
                     <input
                       id="room-image-upload"
                       type="file"
-                      accept="image/*"
+                      accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
                       className="hidden"
                       onChange={handleFileChange}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Up to {STORAGE_LIMITS.imageInputMaxMB} MB. JPG, PNG, WebP, HEIC, or HEIF.
+                      {' '}Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
+                    </p>
                   </div>
                 ) : (
                   <div className="relative mt-2 aspect-video w-full overflow-hidden rounded-md border">

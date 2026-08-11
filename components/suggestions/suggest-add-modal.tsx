@@ -6,6 +6,7 @@ import { FacilityDialog } from "@/components/admin/facility-dialog";
 import type { UnifiedFacilityFormValues } from "@/lib/validation/facility";
 import { createSuggestionAction } from "@/app/actions/suggestions";
 import { uploadSuggestionImageClient } from "@/lib/supabase/storage-client";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 
@@ -117,7 +118,7 @@ export function SuggestAddModal({ open, onOpenChange, onSuccess }: SuggestAddMod
       description="Share details for a new building or point of interest so we can add it to the map."
       submitLabel="Submit suggestion"
       submittingLabel="Submitting..."
-      imageAccept="image/*"
+      imageAccept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
     >
       <div className="px-6 pb-4 space-y-3">
         <TurnstileWidget

@@ -34,8 +34,9 @@ import { submitEventSuggestion } from "@/lib/actions/events";
 import { EVENT_CATEGORIES } from "@/lib/types/events";
 import { uploadEventProofClient } from "@/lib/supabase/storage-client";
 import { FacilitySelectorUnified } from "@/components/facility/facility-selector-unified";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_FILE_SIZE = STORAGE_LIMITS.imageInputMaxMB * 1024 * 1024;
 
 const formSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters"),
@@ -49,7 +50,7 @@ const formSchema = z.object({
     .refine((files) => files?.length === 1, "Proof image is required")
     .refine(
       (files) => files?.[0]?.size <= MAX_FILE_SIZE,
-      'Max file size is 5MB.'
+      `Max file size is ${STORAGE_LIMITS.imageInputMaxMB} MB. Images are converted to WebP before upload.`
     ),
 });
 
@@ -293,7 +294,7 @@ export const SuggestionForm = React.memo(function SuggestionForm({ onSuccess, op
                   <Input
                     {...fieldProps}
                     type="file"
-                    accept="image/*"
+                    accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
                     onChange={(e) => {
                       onChange(e.target.files);
                     }}
@@ -303,7 +304,8 @@ export const SuggestionForm = React.memo(function SuggestionForm({ onSuccess, op
                 </div>
               </FormControl>
               <FormDescription className="text-[11px]">
-                Upload an official memo or poster (max 5MB).
+                Upload an official memo or poster (up to {STORAGE_LIMITS.imageInputMaxMB} MB).
+                {' '}It is converted to WebP and compressed to {STORAGE_LIMITS.compressedMaxMB} MB or less before upload.
               </FormDescription>
               <FormMessage />
             </FormItem>

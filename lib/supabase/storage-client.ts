@@ -1,5 +1,5 @@
 import { STORAGE_BUCKETS, STORAGE_LIMITS, STORAGE_PATHS } from "@/lib/constants/storage";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressImage, validateImageSource } from "@/lib/utils/image-compression";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { getSupabaseBrowserClient } from "./browser-client";
 
@@ -9,10 +9,8 @@ type StorageResult<T> = {
 };
 
 const BUCKET = STORAGE_BUCKETS.facilityImages;
-const MAX_INPUT_BYTES = STORAGE_LIMITS.inputMaxMB * 1024 * 1024;
-const FACILITY_HERO_MAX_INPUT_BYTES = STORAGE_LIMITS.facilityHeroInputMaxMB * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
-const ACCEPTED = new Set<string>(STORAGE_LIMITS.acceptedTypes);
+const FACILITY_HERO_MAX_INPUT_BYTES = STORAGE_LIMITS.imageInputMaxMB * 1024 * 1024;
 const FACILITY_HERO_ACCEPTED = new Set<string>(STORAGE_LIMITS.facilityHeroAcceptedTypes);
 const BUCKET_REGEX = new RegExp(`^${BUCKET}/?`);
 
@@ -24,17 +22,9 @@ const makePath = (prefix: string, filename: string) => {
 };
 
 const validateFile = (file: File | Blob) => {
-  const type = (file as File).type || "";
-  if (!type) {
-    return "File type is required and must be valid.";
-  }
-  if (!ACCEPTED.has(type)) {
-    return `Unsupported file type: ${type}`;
-  }
-  if (file.size > MAX_INPUT_BYTES) {
-    return `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max ${STORAGE_LIMITS.inputMaxMB} MB)`;
-  }
-  return null;
+  return file instanceof File
+    ? validateImageSource(file)
+    : "File type is required and must be valid.";
 };
 
 const validateFacilityHeroFile = (file: File) => {
@@ -44,16 +34,13 @@ const validateFacilityHeroFile = (file: File) => {
     return "This image type is not supported. Choose a JPG, PNG, WebP, HEIC, or HEIF image.";
   }
   if (file.size > FACILITY_HERO_MAX_INPUT_BYTES) {
-    return `This image is ${(file.size / 1024 / 1024).toFixed(2)} MB. Choose an image up to ${STORAGE_LIMITS.facilityHeroInputMaxMB} MB; it will be converted to WebP and compressed to ${STORAGE_LIMITS.compressedMaxMB} MB before upload.`;
+    return `This image is ${(file.size / 1024 / 1024).toFixed(2)} MB. Choose an image up to ${STORAGE_LIMITS.imageInputMaxMB} MB; it will be converted to WebP and compressed to ${STORAGE_LIMITS.compressedMaxMB} MB before upload.`;
   }
   return null;
 };
 
 const validateSuggestionFile = (file: File) => {
-  if (file.size > MAX_INPUT_BYTES) {
-    return `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max ${STORAGE_LIMITS.inputMaxMB} MB)`;
-  }
-  return null;
+  return validateImageSource(file);
 };
 
 const compressAndValidate = async (
@@ -122,10 +109,15 @@ export const uploadSuggestionImageClient = async (
     return { data: null, error: { message: validationError } };
   }
 
+  const compressionResult = await compressAndValidate(file);
+  if (compressionResult.error) {
+    return { data: null, error: compressionResult.error };
+  }
+
   return uploadPendingSuggestion(
     "map-suggestion-image",
     tempId,
-    file,
+    compressionResult.data!,
     turnstile,
     "Unable to upload image",
   );
@@ -141,10 +133,15 @@ export const uploadEventProofClient = async (
     return { data: null, error: { message: validationError } };
   }
 
+  const compressionResult = await compressAndValidate(file);
+  if (compressionResult.error) {
+    return { data: null, error: compressionResult.error };
+  }
+
   return uploadPendingSuggestion(
     "event-proof",
     tempId,
-    file,
+    compressionResult.data!,
     turnstile,
     "Unable to upload proof",
   );

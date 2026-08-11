@@ -87,8 +87,23 @@ mock.module("@/lib/supabase/server-client", {
 
 mock.module("@/lib/utils/image-compression", {
   namedExports: {
+    validateImageSource(file: File) {
+      if (file.size > 30 * 1024 * 1024) {
+        return "This image is too large. Choose an image up to 30 MB.";
+      }
+      return null;
+    },
     async compressImage(file: File) {
-      return { file };
+      const webpName = file.name.replace(/\.[^.]+$/, ".webp");
+      const output = new File([new Uint8Array(512 * 1024)], webpName, {
+        type: "image/webp",
+      });
+      return {
+        file: output,
+        originalSize: file.size,
+        compressedSize: output.size,
+        format: "webp",
+      };
     },
   },
 });
@@ -171,7 +186,7 @@ test("rejects caller-selected buckets and malformed or traversal temp IDs", asyn
 
 test("rejects oversized content-length before CAPTCHA and form parsing", async () => {
   const { POST } = await routeModule;
-  const response = await POST(await makeRequest({ contentLength: 6 * 1024 * 1024 }));
+  const response = await POST(await makeRequest({ contentLength: 31 * 1024 * 1024 }));
   assert.equal(response.status, 413);
   assert.equal(verifyCalls.length, 0);
 });
@@ -324,7 +339,7 @@ test("client upload helpers send fixed kinds and Turnstile proof and return opaq
   ]);
 });
 
-test("suggestion client sends an unsupported-declaration raster to the server unchanged", async (t) => {
+test("suggestion client converts a HEIC source to WebP before sending it to the server", async (t) => {
   const captured: Array<{ file: File | null }> = [];
   t.mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
     const form = init?.body as FormData;
@@ -335,10 +350,9 @@ test("suggestion client sends an unsupported-declaration raster to the server un
     }, { status: 201 });
   });
 
-  const tiff = await sharp({
-    create: { width: 3, height: 2, channels: 3, background: "white" },
-  }).tiff().toBuffer();
-  const original = new File([Uint8Array.from(tiff)], "photo.heic", { type: "image/heic" });
+  const original = new File([new Uint8Array(2 * 1024 * 1024)], "photo.heic", {
+    type: "image/heic",
+  });
   const { uploadSuggestionImageClient } = await storageClientModule;
   const result = await uploadSuggestionImageClient(TEMP_ID, original, {
     token: "turnstile-token",
@@ -349,15 +363,12 @@ test("suggestion client sends an unsupported-declaration raster to the server un
   assert.equal(captured.length, 1);
   const sent = captured[0]?.file;
   assert.ok(sent);
-  assert.equal(sent.name, original.name);
-  assert.equal(sent.type, original.type);
-  assert.deepEqual(
-    new Uint8Array(await sent.arrayBuffer()),
-    new Uint8Array(await original.arrayBuffer()),
-  );
+  assert.equal(sent.name, "photo.webp");
+  assert.equal(sent.type, "image/webp");
+  assert.ok(sent.size <= 1024 * 1024);
 });
 
-test("event proof client sends an unsupported-declaration raster to the server unchanged", async (t) => {
+test("event proof client converts a HEIF source to WebP before sending it to the server", async (t) => {
   const captured: Array<{ file: File | null }> = [];
   t.mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
     const form = init?.body as FormData;
@@ -368,10 +379,9 @@ test("event proof client sends an unsupported-declaration raster to the server u
     }, { status: 201 });
   });
 
-  const tiff = await sharp({
-    create: { width: 3, height: 2, channels: 3, background: "white" },
-  }).tiff().toBuffer();
-  const original = new File([Uint8Array.from(tiff)], "proof.avif", { type: "application/octet-stream" });
+  const original = new File([new Uint8Array(2 * 1024 * 1024)], "proof.heif", {
+    type: "image/heif",
+  });
   const { uploadEventProofClient } = await storageClientModule;
   const result = await uploadEventProofClient(TEMP_ID, original, {
     token: "turnstile-token",
@@ -381,23 +391,20 @@ test("event proof client sends an unsupported-declaration raster to the server u
   assert.equal(result.error, null);
   const sent = captured[0]?.file;
   assert.ok(sent);
-  assert.equal(sent.name, original.name);
-  assert.equal(sent.type, original.type);
-  assert.deepEqual(
-    new Uint8Array(await sent.arrayBuffer()),
-    new Uint8Array(await original.arrayBuffer()),
-  );
+  assert.equal(sent.name, "proof.webp");
+  assert.equal(sent.type, "image/webp");
+  assert.ok(sent.size <= 1024 * 1024);
 });
 
-test("suggestion client keeps its 5 MB guard before sending", async (t) => {
+test("suggestion client accepts image sources through 30 MB but rejects larger files before sending", async (t) => {
   let fetchCalls = 0;
   t.mock.method(globalThis, "fetch", async () => {
     fetchCalls += 1;
     return Response.json({ error: "should not send" }, { status: 500 });
   });
 
-  const oversized = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "too-large.tiff", {
-    type: "application/octet-stream",
+  const oversized = new File([new Uint8Array(30 * 1024 * 1024 + 1)], "too-large.jpg", {
+    type: "image/jpeg",
   });
   const { uploadSuggestionImageClient } = await storageClientModule;
   const result = await uploadSuggestionImageClient(TEMP_ID, oversized, {
@@ -405,6 +412,6 @@ test("suggestion client keeps its 5 MB guard before sending", async (t) => {
     idempotencyKey: "turnstile-idempotency",
   });
 
-  assert.match(result.error?.message ?? "", /too large/i);
+  assert.match(result.error?.message ?? "", /up to 30 MB/i);
   assert.equal(fetchCalls, 0);
 });

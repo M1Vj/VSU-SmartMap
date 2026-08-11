@@ -3,10 +3,18 @@ import test, { mock } from "node:test";
 
 const MIB = 1024 * 1024;
 const uploadCalls: Array<{ bucket: string; path: string; file: File }> = [];
+const compressionCalls: File[] = [];
 
 mock.module("@/lib/utils/image-compression", {
   namedExports: {
+    validateImageSource(file: File) {
+      if (file.size > 30 * MIB) {
+        return "This image is too large. Choose an image up to 30 MB.";
+      }
+      return null;
+    },
     async compressImage(file: File) {
+      compressionCalls.push(file);
       const webpName = file.name.replace(/\.[^.]+$/, ".webp");
       return {
         file: new File([new Uint8Array(MIB)], webpName, { type: "image/webp" }),
@@ -48,6 +56,7 @@ const storageClientModule = import("./storage-client.ts");
 
 test.beforeEach(() => {
   uploadCalls.length = 0;
+  compressionCalls.length = 0;
 });
 
 test("accepts a facility hero source image up to 30 MB and uploads a 1 MB WebP", async () => {
@@ -114,5 +123,52 @@ test("explains which facility hero formats are supported", async () => {
     result.error?.message,
     "This image type is not supported. Choose a JPG, PNG, WebP, HEIC, or HEIF image.",
   );
+  assert.equal(uploadCalls.length, 0);
+});
+
+test("accepts a room image source up to 30 MB and uploads a WebP no larger than 1 MB", async () => {
+  const { uploadRoomImageClient } = await storageClientModule;
+  const source = new File(
+    [new Uint8Array(Math.ceil(29.5 * MIB))],
+    "room-photo.jpg",
+    { type: "image/jpeg" },
+  );
+
+  const result = await uploadRoomImageClient("facility-123", "room-456", source);
+
+  assert.equal(result.error, null);
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0]?.file.type, "image/webp");
+  assert.equal(uploadCalls[0]?.file.size, MIB);
+  assert.equal(compressionCalls[0], source);
+});
+
+test("accepts HEIF screenshot sources and converts them before storage", async () => {
+  const { uploadBugScreenshotClient } = await storageClientModule;
+  const source = new File([new Uint8Array(2 * MIB)], "route.heif", {
+    type: "image/heif",
+  });
+
+  const result = await uploadBugScreenshotClient("report-123", source);
+
+  assert.equal(result.error, null);
+  assert.equal(uploadCalls.length, 1);
+  assert.match(uploadCalls[0]?.path ?? "", /route\.webp$/);
+  assert.equal(uploadCalls[0]?.file.type, "image/webp");
+});
+
+test("rejects image sources above 30 MB before any compression or storage upload", async () => {
+  const { uploadRoomImageClient } = await storageClientModule;
+  const source = new File(
+    [new Uint8Array(30 * MIB + 1)],
+    "too-large-room.jpg",
+    { type: "image/jpeg" },
+  );
+
+  const result = await uploadRoomImageClient("facility-123", "room-456", source);
+
+  assert.equal(result.data, null);
+  assert.match(result.error?.message ?? "", /up to 30 MB/i);
+  assert.equal(compressionCalls.length, 0);
   assert.equal(uploadCalls.length, 0);
 });

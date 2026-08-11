@@ -9,6 +9,8 @@ import { toast } from "sonner";
 
 import { createClient } from "@/lib/supabase/client";
 import { uploadBugScreenshotClient } from "@/lib/supabase/storage-client";
+import { STORAGE_LIMITS } from "@/lib/constants/storage";
+import { validateImageSource } from "@/lib/utils/image-compression";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { verifyTurnstileToken } from "@/lib/turnstile";
@@ -159,8 +161,10 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image must be less than 5MB");
+    const validationError = validateImageSource(file);
+    if (validationError) {
+      toast.error(validationError);
+      e.target.value = "";
       return;
     }
 
@@ -424,7 +428,9 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
                     <p className="text-sm text-muted-foreground text-center">
                       Click to upload a screenshot
                       <br />
-                      <span className="text-xs text-muted-foreground/70">(Max 5MB)</span>
+                      <span className="text-xs text-muted-foreground/70">
+                        (Up to {STORAGE_LIMITS.imageInputMaxMB} MB; saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less)
+                      </span>
                     </p>
                   </div>
                 ) : (
@@ -450,7 +456,7 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
                   type="file"
                   ref={fileInputRef}
                   className="hidden"
-                  accept="image/*"
+                  accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
                   onChange={handleImageSelect}
                 />
               </div>
@@ -484,4 +490,3 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
     </Dialog>
   );
 }
-

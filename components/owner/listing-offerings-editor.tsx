@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { STORAGE_LIMITS } from "@/lib/constants/storage";
-import { compressImage } from "@/lib/utils/image-compression";
+import { compressImage, validateImageSource } from "@/lib/utils/image-compression";
 
 export type OfferingImageState =
   | { kind: "none" }
@@ -32,7 +32,6 @@ export type OfferingRow = {
 };
 
 const MAX_OFFERINGS = 10;
-const IMAGE_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_COMPRESSED_IMAGE_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 
 export function makeEmptyOffering(): OfferingRow {
@@ -237,8 +236,9 @@ function RoomImageField({
     const file = fileList?.[0];
     if (!file) return;
     setNotice("");
-    if (!IMAGE_ACCEPTED_TYPES.has(file.type)) {
-      setNotice("Use a PNG, JPG, or WebP image.");
+    const validationError = validateImageSource(file);
+    if (validationError) {
+      setNotice(validationError);
       if (inputRef.current) inputRef.current.value = "";
       return;
     }
@@ -249,8 +249,8 @@ function RoomImageField({
         throw new Error("Compressed room photo exceeds the target size.");
       }
       onPick({ kind: "new", file: output, url: URL.createObjectURL(output) });
-    } catch {
-      setNotice("Could not process this room photo. Please try another image.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not process this room photo. Please try another image.");
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -310,10 +310,13 @@ function RoomImageField({
         ref={inputRef}
         id={`offering-${index}-image`}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
         className="sr-only"
         onChange={(event) => handleFile(event.target.files)}
       />
+      <p className="text-xs text-muted-foreground">
+        Up to {STORAGE_LIMITS.imageInputMaxMB} MB. Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.
+      </p>
     </div>
   );
 }

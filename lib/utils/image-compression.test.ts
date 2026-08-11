@@ -57,3 +57,16 @@ test("decodes HEIC before converting it to a WebP no larger than 1 MB", async ()
   assert.equal(result.file.type, "image/webp");
   assert.ok(result.file.size <= 1024 * 1024);
 });
+
+test("rejects image sources above the shared 30 MB input limit", async () => {
+  const { compressImage } = await imageCompressionModule;
+  const source = new File([new Uint8Array(30 * 1024 * 1024 + 1)], "too-large.jpg", {
+    type: "image/jpeg",
+  });
+
+  await assert.rejects(
+    compressImage(source),
+    /up to 30 MB/i,
+  );
+  assert.equal(compressionInputs.length, 0);
+});

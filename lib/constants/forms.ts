@@ -1,3 +1,5 @@
+import { STORAGE_LIMITS } from "./storage";
+
 export const VALIDATION_LIMITS = {
   room: {
     code: { min: 1, max: 16 },
@@ -15,7 +17,8 @@ export const VALIDATION_LIMITS = {
     notes: { max: 500 },
   },
   storage: {
-    inputMaxMB: 5,
-    acceptedTypes: ["image/png", "image/jpeg", "image/webp"] as const,
+    inputMaxMB: STORAGE_LIMITS.imageInputMaxMB,
+    compressedMaxMB: STORAGE_LIMITS.compressedMaxMB,
+    acceptedTypes: STORAGE_LIMITS.imageAcceptedTypes,
   },
 } as const;
