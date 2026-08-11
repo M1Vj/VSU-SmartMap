@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { uploadBugScreenshotClient } from "@/lib/supabase/storage-client";
 import { STORAGE_LIMITS } from "@/lib/constants/storage";
-import { validateImageSource } from "@/lib/utils/image-compression";
+import { prepareImagePreviewFile, validateImageSource } from "@/lib/utils/image-compression";
 import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { verifyTurnstileToken } from "@/lib/turnstile";
@@ -157,7 +157,7 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
     imagePreview,
   ]);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -168,13 +168,19 @@ export function ReportRouteDialog({ open, onOpenChange, context }: ReportRouteDi
       return;
     }
 
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-    }
+    try {
+      const previewFile = await prepareImagePreviewFile(file);
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
 
-    setSelectedImage(file);
-    const url = URL.createObjectURL(file);
-    setImagePreview(url);
+      setSelectedImage(file);
+      const url = URL.createObjectURL(previewFile);
+      setImagePreview(url);
+    } catch (previewError) {
+      toast.error(previewError instanceof Error ? previewError.message : "Could not preview this image.");
+      e.target.value = "";
+    }
   };
 
   const removeImage = () => {

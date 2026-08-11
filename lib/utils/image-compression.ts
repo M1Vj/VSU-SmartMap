@@ -96,6 +96,12 @@ async function decodeHeic(file: File): Promise<File> {
   }
 }
 
+export async function prepareImagePreviewFile(file: File): Promise<File> {
+  const validationError = validateImageSource(file);
+  if (validationError) throw new Error(validationError);
+  return decodeHeic(file);
+}
+
 export async function compressImage(file: File): Promise<CompressionResult> {
   const { compression, compressedMaxMB } = STORAGE_LIMITS;
   const targetBytes = compressedMaxMB * 1024 * 1024;

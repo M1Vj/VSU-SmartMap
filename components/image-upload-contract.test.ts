@@ -18,3 +18,18 @@ test("every browser image picker advertises the shared HEIC/HEIF and WebP conver
   assert.match(storage, /"image\/heif"/);
   assert.match(storage, /inputMaxMB: 30/);
 });
+
+test("image previews decode HEIC before creating browser object URLs", async () => {
+  const sources = await Promise.all([
+    readFile(new URL("./admin/facility-dialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./admin/room-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./bugs/report-bug-dialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./navigation/report-route-dialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./suggestions/suggest-room-modal.tsx", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of sources) {
+    assert.match(source, /prepareImagePreviewFile/);
+    assert.match(source, /URL\.createObjectURL\(previewFile\)/);
+  }
+});

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { roomSchema, type RoomFormValues } from '@/lib/validation/room';
 import { STORAGE_LIMITS } from '@/lib/constants/storage';
-import { validateImageSource } from '@/lib/utils/image-compression';
+import { prepareImagePreviewFile, validateImageSource } from '@/lib/utils/image-compression';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -196,7 +196,7 @@ export function RoomForm({
             id="roomImage"
             type="file"
             accept={STORAGE_LIMITS.imageAcceptedTypes.join(',')}
-            onChange={(event) => {
+            onChange={async (event) => {
               const nextFile = event.target.files?.[0];
               if (nextFile) {
                 const validationError = validateImageSource(nextFile);
@@ -205,12 +205,18 @@ export function RoomForm({
                   event.target.value = '';
                   return;
                 }
-                if (preview && preview.startsWith('blob:')) {
-                  URL.revokeObjectURL(preview);
+                try {
+                  const previewFile = await prepareImagePreviewFile(nextFile);
+                  if (preview && preview.startsWith('blob:')) {
+                    URL.revokeObjectURL(preview);
+                  }
+                  setFile(nextFile);
+                  setPreview(URL.createObjectURL(previewFile));
+                  setClearImage(false);
+                } catch (previewError) {
+                  setError(previewError instanceof Error ? previewError.message : 'Could not preview this image.');
+                  event.target.value = '';
                 }
-                setFile(nextFile);
-                setPreview(URL.createObjectURL(nextFile));
-                setClearImage(false);
               }
             }}
           />

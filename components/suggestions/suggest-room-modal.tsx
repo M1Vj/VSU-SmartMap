@@ -26,7 +26,7 @@ import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import type { TurnstileToken } from "@/lib/types/turnstile";
 import { FieldHelp } from "@/components/ui/field-help";
 import { STORAGE_LIMITS } from "@/lib/constants/storage";
-import { validateImageSource } from "@/lib/utils/image-compression";
+import { prepareImagePreviewFile, validateImageSource } from "@/lib/utils/image-compression";
 
 function hasRoomChanges(
   initialData: RoomFormValues,
@@ -195,7 +195,7 @@ export function SuggestRoomModal({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
 
@@ -206,11 +206,17 @@ export function SuggestRoomModal({
       return;
     }
 
-    if (preview) URL.revokeObjectURL(preview);
-    setFile(selected);
-    setPreview(URL.createObjectURL(selected));
-    // Clear the existing imageUrl in values so we know we have a new file
-    setValues({ ...values, imageUrl: undefined });
+    try {
+      const previewFile = await prepareImagePreviewFile(selected);
+      if (preview) URL.revokeObjectURL(preview);
+      setFile(selected);
+      setPreview(URL.createObjectURL(previewFile));
+      // Clear the existing imageUrl in values so we know we have a new file
+      setValues({ ...values, imageUrl: undefined });
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "Could not preview this image.");
+      e.target.value = "";
+    }
   };
 
   const clearImage = () => {

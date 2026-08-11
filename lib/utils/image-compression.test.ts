@@ -70,3 +70,18 @@ test("rejects image sources above the shared 30 MB input limit", async () => {
   );
   assert.equal(compressionInputs.length, 0);
 });
+
+test("decodes HEIC into a browser-readable preview without changing the upload source", async () => {
+  const { prepareImagePreviewFile } = await imageCompressionModule;
+  const source = new File([new Uint8Array(2 * 1024 * 1024)], "preview.heic", {
+    type: "image/heic",
+  });
+
+  const preview = await prepareImagePreviewFile(source);
+
+  assert.equal(heicConversions.length, 1);
+  assert.equal(preview.name, "preview.jpg");
+  assert.equal(preview.type, "image/jpeg");
+  assert.equal(source.name, "preview.heic");
+  assert.equal(source.type, "image/heic");
+});

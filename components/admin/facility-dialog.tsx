@@ -5,7 +5,7 @@ import Image from 'next/image';
 import type { Facility } from '@/lib/types/facility';
 import { FACILITY_CATEGORIES } from '@/lib/types/facility';
 import { STORAGE_LIMITS } from '@/lib/constants/storage';
-import { validateImageSource } from '@/lib/utils/image-compression';
+import { prepareImagePreviewFile, validateImageSource } from '@/lib/utils/image-compression';
 import { unifiedFacilitySchema, type UnifiedFacilityFormValues } from '@/lib/validation/facility';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -367,7 +367,7 @@ export function FacilityDialog({
                     id="image"
                     type="file"
                     accept={imageAccept}
-                    onChange={(event) => {
+                    onChange={async (event) => {
                       const nextFile = event.target.files?.[0];
                       if (nextFile) {
                         const validationError = validateImageSource(nextFile);
@@ -376,12 +376,18 @@ export function FacilityDialog({
                           event.target.value = '';
                           return;
                         }
-                        if (preview && preview.startsWith('blob:')) {
-                          URL.revokeObjectURL(preview);
+                        try {
+                          const previewFile = await prepareImagePreviewFile(nextFile);
+                          if (preview && preview.startsWith('blob:')) {
+                            URL.revokeObjectURL(preview);
+                          }
+                          setFile(nextFile);
+                          setPreview(URL.createObjectURL(previewFile));
+                          setClearImage(false);
+                        } catch (previewError) {
+                          setError(previewError instanceof Error ? previewError.message : 'Could not preview this image.');
+                          event.target.value = '';
                         }
-                        setFile(nextFile);
-                        setPreview(URL.createObjectURL(nextFile));
-                        setClearImage(false);
                       }
                     }}
                   />
