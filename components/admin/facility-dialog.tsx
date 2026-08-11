@@ -43,6 +43,7 @@ interface FacilityDialogProps {
   children?: ReactNode;
   showSlug?: boolean;
   imageAccept?: string;
+  imageMaxMB?: number;
 }
 
 const defaultCoordinates = MAP_DEFAULT_CENTER;
@@ -61,7 +62,9 @@ export function FacilityDialog({
   children,
   showSlug = false,
   imageAccept = STORAGE_LIMITS.acceptedTypes.join(','),
+  imageMaxMB,
 }: FacilityDialogProps) {
+  const resolvedImageMaxMB = imageMaxMB ?? STORAGE_LIMITS.inputMaxMB;
   const initialValues = useMemo<UnifiedFacilityFormValues>(() => {
     if (facility) {
       return {
@@ -153,7 +156,8 @@ export function FacilityDialog({
       await onSubmit(parsed.data, { file, clearImage });
     } catch (submitError) {
       console.error('Failed to save facility:', submitError);
-      setError('Failed to save facility');
+      const message = submitError instanceof Error ? submitError.message : 'An unexpected error occurred.';
+      setError(message);
     } finally {
       setSubmitting(false);
     }
@@ -324,7 +328,7 @@ export function FacilityDialog({
                 <div className="space-y-2">
                   <div className="flex items-center gap-1">
                     <Label htmlFor="image">Hero image</Label>
-                    <FieldHelp content="An attractive photo of the facility's exterior or main entrance. Max 5MB." />
+                    <FieldHelp content={`An attractive photo of the facility's exterior or main entrance. Max ${resolvedImageMaxMB}MB.`} />
                   </div>
                   {preview && (
                     <div className="rounded-lg border p-3 flex items-center gap-3">
@@ -375,10 +379,10 @@ export function FacilityDialog({
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Max {STORAGE_LIMITS.inputMaxMB}MB.{' '}
+                    Up to {resolvedImageMaxMB} MB.{' '}
                     {imageAccept === 'image/*'
                       ? 'Supported image contents are verified on upload.'
-                      : `Types: ${STORAGE_LIMITS.acceptedTypes.join(', ')}.`}
+                      : <>JPG, PNG, WebP, HEIC, or HEIF. Saved as WebP at {STORAGE_LIMITS.compressedMaxMB} MB or less.</>}
                   </p>
                 </div>
 

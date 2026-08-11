@@ -26,9 +26,43 @@ const COMPRESSION_STEPS: CompressionStep[] = [
   { quality: 0.1, maxDimension: 500 },
 ];
 
+const HEIC_MIME_TYPES = new Set(["image/heic", "image/heif"]);
+
+const hasHeicExtension = (name: string) => /\.(heic|heif)$/i.test(name);
+
+async function decodeHeic(file: File): Promise<File> {
+  if (!HEIC_MIME_TYPES.has(file.type.toLowerCase()) && !hasHeicExtension(file.name)) {
+    return file;
+  }
+
+  try {
+    const { heicTo, isHeic } = await import("heic-to/csp");
+    if (!(await isHeic(file))) {
+      throw new Error("The selected file is not a valid HEIC or HEIF image.");
+    }
+
+    const jpeg = await heicTo({
+      blob: file,
+      type: "image/jpeg",
+      quality: 0.92,
+    });
+    const jpegName = file.name.includes(".")
+      ? file.name.replace(/\.[^.]+$/, ".jpg")
+      : `${file.name}.jpg`;
+
+    return new File([jpeg], jpegName, { type: "image/jpeg" });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown decoding error";
+    throw new Error(
+      `We couldn't read this HEIC/HEIF image. It may be damaged or use an unsupported variant. Try exporting it as JPEG, PNG, or WebP. (${detail})`,
+    );
+  }
+}
+
 export async function compressImage(file: File): Promise<CompressionResult> {
   const { compression, compressedMaxMB } = STORAGE_LIMITS;
   const targetBytes = compressedMaxMB * 1024 * 1024;
+  const compressionSource = await decodeHeic(file);
 
   const webpName = file.name.includes(".")
     ? file.name.replace(/\.[^.]+$/, ".webp")
@@ -44,7 +78,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
     };
 
     try {
-      const compressedBlob = await imageCompression(file, options);
+      const compressedBlob = await imageCompression(compressionSource, options);
       const compressedFile = new File([compressedBlob], webpName, {
         type: "image/webp",
       });
@@ -65,7 +99,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
   }
 
   const finalStep = COMPRESSION_STEPS[COMPRESSION_STEPS.length - 1];
-  const compressedBlob = await imageCompression(file, {
+  const compressedBlob = await imageCompression(compressionSource, {
     maxSizeMB: compressedMaxMB,
     maxWidthOrHeight: finalStep.maxDimension,
     useWebWorker: compression.useWebWorker,

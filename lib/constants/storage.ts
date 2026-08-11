@@ -19,8 +19,22 @@ export const STORAGE_PATHS = {
 
 export const STORAGE_LIMITS = {
   inputMaxMB: 5,
+  facilityHeroInputMaxMB: 30,
   compressedMaxMB: 1,
   acceptedTypes: ["image/png", "image/jpeg", "image/webp", ".png", ".jpg", ".jpeg", ".webp"] as const,
+  facilityHeroAcceptedTypes: [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".heic",
+    ".heif",
+  ] as const,
   compression: {
     quality: 0.8,
     maxWidthOrHeight: 1920,

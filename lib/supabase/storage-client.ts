@@ -10,8 +10,10 @@ type StorageResult<T> = {
 
 const BUCKET = STORAGE_BUCKETS.facilityImages;
 const MAX_INPUT_BYTES = STORAGE_LIMITS.inputMaxMB * 1024 * 1024;
+const FACILITY_HERO_MAX_INPUT_BYTES = STORAGE_LIMITS.facilityHeroInputMaxMB * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = STORAGE_LIMITS.compressedMaxMB * 1024 * 1024;
 const ACCEPTED = new Set<string>(STORAGE_LIMITS.acceptedTypes);
+const FACILITY_HERO_ACCEPTED = new Set<string>(STORAGE_LIMITS.facilityHeroAcceptedTypes);
 const BUCKET_REGEX = new RegExp(`^${BUCKET}/?`);
 
 const stripBucket = (path: string) => path.replace(BUCKET_REGEX, "");
@@ -31,6 +33,18 @@ const validateFile = (file: File | Blob) => {
   }
   if (file.size > MAX_INPUT_BYTES) {
     return `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max ${STORAGE_LIMITS.inputMaxMB} MB)`;
+  }
+  return null;
+};
+
+const validateFacilityHeroFile = (file: File) => {
+  const type = file.type.toLowerCase();
+  const extension = file.name.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? "";
+  if (!FACILITY_HERO_ACCEPTED.has(type) && !FACILITY_HERO_ACCEPTED.has(extension)) {
+    return "This image type is not supported. Choose a JPG, PNG, WebP, HEIC, or HEIF image.";
+  }
+  if (file.size > FACILITY_HERO_MAX_INPUT_BYTES) {
+    return `This image is ${(file.size / 1024 / 1024).toFixed(2)} MB. Choose an image up to ${STORAGE_LIMITS.facilityHeroInputMaxMB} MB; it will be converted to WebP and compressed to ${STORAGE_LIMITS.compressedMaxMB} MB before upload.`;
   }
   return null;
 };
@@ -73,7 +87,7 @@ export const uploadFacilityHeroClient = async (
   facilityId: string,
   file: File,
 ): Promise<StorageResult<{ path: string; publicUrl: string | null }>> => {
-  const validationError = validateFile(file);
+  const validationError = validateFacilityHeroFile(file);
   if (validationError) {
     return { data: null, error: { message: validationError } };
   }
