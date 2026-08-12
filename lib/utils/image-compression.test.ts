@@ -71,7 +71,7 @@ test("rejects image sources above the shared 30 MB input limit", async () => {
   assert.equal(compressionInputs.length, 0);
 });
 
-test("decodes HEIC into a browser-readable preview without changing the upload source", async () => {
+test("decodes and re-encodes HEIC into a safe WebP preview without changing the upload source", async () => {
   const { prepareImagePreviewFile } = await imageCompressionModule;
   const source = new File([new Uint8Array(2 * 1024 * 1024)], "preview.heic", {
     type: "image/heic",
@@ -80,8 +80,27 @@ test("decodes HEIC into a browser-readable preview without changing the upload s
   const preview = await prepareImagePreviewFile(source);
 
   assert.equal(heicConversions.length, 1);
-  assert.equal(preview.name, "preview.jpg");
-  assert.equal(preview.type, "image/jpeg");
+  assert.equal(compressionInputs.length, 1);
+  assert.equal(compressionInputs[0]?.file.type, "image/jpeg");
+  assert.equal(preview.name, "preview.webp");
+  assert.equal(preview.type, "image/webp");
+  assert.ok(preview.size <= 1024 * 1024);
   assert.equal(source.name, "preview.heic");
   assert.equal(source.type, "image/heic");
+});
+
+test("re-encodes browser-readable image previews as WebP", async () => {
+  const { prepareImagePreviewFile } = await imageCompressionModule;
+  const source = new File([new Uint8Array(256 * 1024)], "preview.png", {
+    type: "image/png",
+  });
+
+  const preview = await prepareImagePreviewFile(source);
+
+  assert.equal(heicConversions.length, 0);
+  assert.equal(compressionInputs.length, 1);
+  assert.equal(compressionInputs[0]?.file, source);
+  assert.equal(compressionInputs[0]?.options.fileType, "image/webp");
+  assert.equal(preview.name, "preview.webp");
+  assert.equal(preview.type, "image/webp");
 });

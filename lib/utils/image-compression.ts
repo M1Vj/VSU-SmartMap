@@ -97,9 +97,8 @@ async function decodeHeic(file: File): Promise<File> {
 }
 
 export async function prepareImagePreviewFile(file: File): Promise<File> {
-  const validationError = validateImageSource(file);
-  if (validationError) throw new Error(validationError);
-  return decodeHeic(file);
+  const result = await compressImage(file);
+  return result.file;
 }
 
 export async function compressImage(file: File): Promise<CompressionResult> {
