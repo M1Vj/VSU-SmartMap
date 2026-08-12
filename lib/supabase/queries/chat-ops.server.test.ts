@@ -40,6 +40,9 @@ test("serializeChatOpsCsv neutralizes formulas and excludes restricted fields", 
   }]);
   assert.match(csv, /"'=HYPERLINK/);
   assert.match(csv, /"'\+SUM/);
+  assert.match(csv, /"traffic_type"/);
+  assert.match(csv, /"retrieved_count"/);
+  assert.match(csv, /"user"/);
   assert.doesNotMatch(csv, /feedback_token_hash|metadata|input_tokens/i);
 });
 
@@ -139,4 +142,49 @@ test("getChatOpsDashboard returns an empty read model when queries fail", async 
   assert.equal(result.turns.length, 0);
   assert.equal(result.feedback.length, 0);
   assert.equal(result.summary.totalTurns, 0);
+  assert.equal(result.summary.userTurns, 0);
+  assert.equal(result.summary.syntheticTurns, 0);
+});
+
+test("getChatOpsDashboard excludes synthetic checks from user quality metrics", async () => {
+  const userTurn = {
+    id: "user-turn", created_at: "2026-08-01T01:00:00.000Z", release_id: "release",
+    request_id: "request-user", user_message: "Where is the room?", assistant_message: "Unavailable",
+    outcome: "static_fallback", requested_model: "model-a", selected_model: "model-a",
+    latency_ms: 900, time_to_first_token_ms: 900, cache_state: "miss", retrieved_record_ids: [],
+    validation_status: "warn", validation_reasons: ["provider_fallback"], injection_signals: [],
+    error_class: "provider_error", review_status: "unreviewed",
+  };
+  const syntheticTurn = {
+    ...userTurn,
+    id: "synthetic-turn", request_id: "request-synthetic", user_message: "synthetic_chat_health_check",
+    outcome: "synthetic", latency_ms: 10, time_to_first_token_ms: 10, cache_state: "synthetic_direct",
+    validation_status: "pass", validation_reasons: [], error_class: null,
+  };
+  const client = {
+    from(table: string) {
+      const builder = {
+        select() { return builder; }, order() { return builder; }, gte() { return builder; },
+        eq() { return builder; },
+        range() {
+          return Promise.resolve({
+            data: table === "ai_chat_turns" ? [syntheticTurn, userTurn] : [],
+            error: null,
+          });
+        },
+      };
+      return builder;
+    },
+  };
+
+  const result = await getChatOpsDashboard(client as never);
+  assert.equal(result.summary.totalTurns, 2);
+  assert.equal(result.summary.userTurns, 1);
+  assert.equal(result.summary.syntheticTurns, 1);
+  assert.equal(result.summary.fallbackRate, 1);
+  assert.equal(result.summary.latencyP50Ms, 900);
+  assert.equal(result.summary.ttftP50Ms, 900);
+  assert.equal(result.summary.validationWarnings, 1);
+  assert.deepEqual(result.summary.models, { "model-a": 1 });
+  assert.deepEqual(result.summary.outcomes, { synthetic: 1, static_fallback: 1 });
 });

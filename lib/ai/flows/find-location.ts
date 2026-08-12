@@ -1,7 +1,6 @@
 import { flow } from "@genkit-ai/core";
 import {
   runWithKeyRotation,
-  streamWithKeyRotation,
   type GenerationRunMetadata,
 } from "../genkit";
 import {
@@ -116,7 +115,32 @@ type ChatPromptResult = {
   groundingContext: GroundingContext;
 };
 
-async function buildChatPrompt(input: LocationQuery): Promise<ChatPromptResult> {
+type RetrievalMode = "default" | "none";
+
+async function buildChatPrompt(
+  input: LocationQuery,
+  retrievalMode: RetrievalMode = "default",
+): Promise<ChatPromptResult> {
+  if (retrievalMode === "none") {
+    const groundingContext: GroundingContext = {
+      facilities: [],
+      events: [],
+      boardingHouses: [],
+    };
+    return {
+      prompt: renderGroundedChatPrompt({
+        userQuery: input.query,
+        summary: null,
+        conversationHistory: [],
+        knowledge: [],
+        facilities: [],
+        events: [],
+        boardingHouses: [],
+      }),
+      groundingContext,
+    };
+  }
+
   const { data: facilitiesContext } = await getFacilitiesForChatCached();
   const facilities = facilitiesContext || [];
   const contextData = input.context || {};
@@ -206,19 +230,22 @@ export type FindLocationOperations = {
 
 export async function executeFindLocation(
   input: LocationQuery,
-  options?: { abortSignal?: AbortSignal },
+  options?: { abortSignal?: AbortSignal; retrievalMode?: RetrievalMode },
 ): Promise<{
   output: LocationResponse;
   operations: FindLocationOperations;
 }>;
 export async function executeFindLocation(
   input: LocationQuery,
-  options: { abortSignal?: AbortSignal } = {},
+  options: { abortSignal?: AbortSignal; retrievalMode?: RetrievalMode } = {},
 ): Promise<{
   output: LocationResponse;
   operations: FindLocationOperations;
 }> {
-  const { prompt, groundingContext } = await buildChatPrompt(input);
+  const { prompt, groundingContext } = await buildChatPrompt(
+    input,
+    options.retrievalMode ?? "default",
+  );
   let generation: GenerationRunMetadata | undefined;
   const rawOutput = await runWithKeyRotation(async (ai) => {
     const result = await ai.generate({
@@ -253,33 +280,3 @@ export const findLocationFlow = flow(
     return (await executeFindLocation(input)).output;
   }
 );
-
-export async function streamFindLocation(
-  input: LocationQuery,
-  options: { abortSignal?: AbortSignal } = {},
-) {
-  const { prompt, groundingContext } = await buildChatPrompt(input);
-  let generation: GenerationRunMetadata | undefined;
-
-  const result = await streamWithKeyRotation(async (ai) => {
-    // Stream chunks cannot be safely reference-validated before the structured output is complete.
-    // The stream consumer must validate the final assembled output before persistence or card rendering.
-    return await ai.generateStream({
-      prompt: prompt,
-      output: { schema: LocationResponseSchema },
-      config: CHAT_GENERATION_CONFIG,
-      abortSignal: options.abortSignal,
-    });
-  }, (metadata) => {
-    generation = metadata;
-  });
-
-  return {
-    ...result,
-    operations: {
-      generation,
-      groundingContext,
-      retrievedRecordIds: collectGroundingRecordIds(groundingContext),
-    },
-  };
-}

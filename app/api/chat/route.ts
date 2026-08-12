@@ -1,7 +1,5 @@
 import {
   executeFindLocation,
-  sanitizeGeneratedLocationResponse,
-  streamFindLocation,
   type FindLocationOperations,
 } from "@/lib/ai/flows/find-location";
 import { findFallbackFacilityRefs } from "@/lib/ai/facility-fallback-match";
@@ -156,8 +154,12 @@ function enqueueSse(controller: ReadableStreamDefaultController<Uint8Array>, dat
 }
 
 function closeSse(controller: ReadableStreamDefaultController<Uint8Array>) {
-  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-  controller.close();
+  try {
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+  } catch {
+    // A disconnected client may already have canceled the stream.
+  }
 }
 
 function getPreviousQueries(history: unknown): string[] {
@@ -340,53 +342,6 @@ async function buildStaticFallbackPayload(message: string): Promise<FinalChatPay
   };
 }
 
-async function enqueueGeneratedFinal(
-  controller: ReadableStreamDefaultController<Uint8Array>,
-  message: string,
-  context: ChatContext,
-  session?: ChatTurnSession,
-  abortSignal?: AbortSignal,
-) {
-  const generated = await buildFinalChatPayload(message, context, abortSignal);
-  if (generated.operations?.grounding.outcome === "fail") {
-    throw new GroundingValidationError(generated.operations);
-  }
-  const payload = session ? attachTurnCredential(generated, session) : generated;
-
-  enqueueSse(controller, {
-    type: "final",
-    content: payload.content,
-    facilities: payload.facilities,
-    events: payload.events,
-    boardingHouses: payload.boardingHouses,
-    turnId: payload.turnId,
-    feedbackToken: payload.feedbackToken,
-    requestId: payload.requestId,
-  });
-  return payload;
-}
-
-async function enqueueStaticFallback(
-  controller: ReadableStreamDefaultController<Uint8Array>,
-  message: string,
-  session?: ChatTurnSession,
-) {
-  const fallback = await buildStaticFallbackPayload(message);
-  const payload = session ? attachTurnCredential(fallback, session) : fallback;
-
-  enqueueSse(controller, {
-    type: "final",
-    content: payload.content,
-    facilities: payload.facilities,
-    events: payload.events,
-    boardingHouses: payload.boardingHouses,
-    turnId: payload.turnId,
-    feedbackToken: payload.feedbackToken,
-    requestId: payload.requestId,
-  });
-  return payload;
-}
-
 function isContextFreeQuestion(context: ChatContext): boolean {
   return context.conversationHistory.length === 0 && !context.summary;
 }
@@ -500,128 +455,18 @@ export async function POST(request: Request) {
     }
 
     if (streaming) {
-      let stream: Awaited<ReturnType<typeof streamFindLocation>>;
-
-      try {
-        stream = await streamFindLocation({ query: message, context }, {
-          abortSignal: request.signal,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Failed to start stream";
-        if (shouldUseChatFallback(errorMessage)) {
-          return createSseResponse(async (controller) => {
-            try {
-              const payload = await enqueueGeneratedFinal(
-                controller,
-                message,
-                context,
-                session,
-                request.signal,
-              );
-              session.markFirstToken();
-              await finalizeTurn(session, payload, "generated_fallback", { cacheState: "miss" });
-            } catch (fallbackError) {
-              const payload = await enqueueStaticFallback(controller, message, session);
-              if (fallbackError instanceof GroundingValidationError) {
-                payload.operations = fallbackError.operations;
-              }
-              session.markFirstToken();
-              const errorClass = classifyChatError(fallbackError);
-              const fallbackOutcome = fallbackError instanceof GroundingValidationError
-                ? "validation_failed"
-                : "static_fallback";
-              await finalizeTurn(session, payload, fallbackOutcome, {
-                validationStatus: fallbackError instanceof GroundingValidationError ? undefined : "warn",
-                validationReasons: fallbackError instanceof GroundingValidationError
-                  ? undefined
-                  : ["provider_fallback"],
-                cacheState: "miss",
-                errorClass,
-              });
-              await notifyChatOpsAlert({
-                outcome: fallbackOutcome,
-                errorClass,
-                releaseId: AI_RELEASE_ID,
-                requestId: session.identity.requestId,
-              });
-            } finally {
-              closeSse(controller);
-            }
-          });
-        }
-
-        throw error;
-      }
-
       return createSseResponse(async (controller) => {
-        const send = (data: unknown) => enqueueSse(controller, data);
         let finalSent = false;
-
         try {
-          for await (const chunk of stream.stream) {
-            // Provider chunks are intentionally drained but never parsed or emitted.
-            // Only the completed structured response is safe to validate and expose.
-            void chunk;
+          const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+          if (generatedPayload.operations?.grounding.outcome === "fail") {
+            throw new GroundingValidationError(generatedPayload.operations);
           }
-
-          const response = await stream.response;
-          if (!response.output) {
-            throw new Error("AI response missing output");
-          }
-
-          const grounding = sanitizeGeneratedLocationResponse(
-            response.output,
-            stream.operations.groundingContext,
-          );
-          const groundedOutput = grounding.response;
-          if (grounding.outcome === "fail") {
-            const fallbackPayload = attachTurnCredential({
-              ...(await buildStaticFallbackPayload(message)),
-              operations: {
-                generation: stream.operations.generation,
-                grounding,
-                retrievedRecordIds: stream.operations.retrievedRecordIds,
-              },
-            }, session);
-            session.markFirstToken();
-            send({ type: "chunk", content: fallbackPayload.content });
-            send({ type: "final", ...clientPayload(fallbackPayload) });
-            await finalizeTurn(session, fallbackPayload, "validation_failed", {
-              cacheState: "miss",
-              errorClass: "validation_error",
-            });
-            await notifyChatOpsAlert({
-              outcome: "validation_failed",
-              errorClass: "validation_error",
-              releaseId: AI_RELEASE_ID,
-              requestId: session.identity.requestId,
-            });
-            finalSent = true;
-            return;
-          }
-          const matches = await resolveFacilityMatches(groundedOutput.facilities);
-          const eventMatches = await resolveEventMatches(groundedOutput.events);
-          const boardingHouseMatches = await resolveBoardingHouseMatches(groundedOutput.boardingHouses);
-          const payload: FinalChatPayload = attachTurnCredential({
-            content: groundedOutput.response,
-            facilities: matches.length > 0 ? matches : undefined,
-            events: eventMatches.length > 0 ? eventMatches : undefined,
-            boardingHouses: boardingHouseMatches.length > 0 ? boardingHouseMatches : undefined,
-            cacheRefs: {
-              facilities: groundedOutput.facilities,
-              events: groundedOutput.events,
-              boardingHouses: groundedOutput.boardingHouses,
-            },
-            operations: {
-              generation: stream.operations.generation,
-              grounding,
-              retrievedRecordIds: stream.operations.retrievedRecordIds,
-            },
-          }, session);
+          const payload = attachTurnCredential(generatedPayload, session);
 
           session.markFirstToken();
-          send({ type: "chunk", content: payload.content });
-          send({
+          enqueueSse(controller, { type: "chunk", content: payload.content });
+          enqueueSse(controller, {
             type: "final",
             content: payload.content,
             facilities: payload.facilities,
@@ -638,45 +483,42 @@ export async function POST(request: Request) {
           }
         } catch (error) {
           if (finalSent) return;
-
-          if (!request.signal.aborted) {
-            try {
-              const payload = await enqueueGeneratedFinal(
-                controller,
-                message,
-                context,
-                session,
-                request.signal,
-              );
-              session.markFirstToken();
-              await finalizeTurn(session, payload, "generated_fallback", { cacheState: "miss" });
-            } catch (fallbackError) {
-              const payload = await enqueueStaticFallback(controller, message, session);
-              if (fallbackError instanceof GroundingValidationError) {
-                payload.operations = fallbackError.operations;
-              }
-              session.markFirstToken();
-              const errorClass = classifyChatError(fallbackError);
-              const fallbackOutcome = fallbackError instanceof GroundingValidationError
-                ? "validation_failed"
-                : "static_fallback";
-              await finalizeTurn(session, payload, fallbackOutcome, {
-                validationStatus: fallbackError instanceof GroundingValidationError ? undefined : "warn",
-                validationReasons: fallbackError instanceof GroundingValidationError
-                  ? undefined
-                  : ["provider_fallback"],
-                cacheState: "miss",
-                errorClass,
-              });
-              await notifyChatOpsAlert({
-                outcome: fallbackOutcome,
-                errorClass,
-                releaseId: AI_RELEASE_ID,
-                requestId: session.identity.requestId,
-              });
-            }
+          if (request.signal.aborted) {
+            await finalizeTurn(session, undefined, "error", {
+              validationStatus: "warn",
+              validationReasons: ["request_aborted"],
+              cacheState: "miss",
+              errorClass: "request_aborted",
+            });
             return;
           }
+
+          const fallback = await buildStaticFallbackPayload(message);
+          const payload = attachTurnCredential(fallback, session);
+          if (error instanceof GroundingValidationError) {
+            payload.operations = error.operations;
+          }
+          session.markFirstToken();
+          enqueueSse(controller, { type: "chunk", content: payload.content });
+          enqueueSse(controller, { type: "final", ...clientPayload(payload) });
+          const errorClass = classifyChatError(error);
+          const fallbackOutcome = error instanceof GroundingValidationError
+            ? "validation_failed"
+            : "static_fallback";
+          await finalizeTurn(session, payload, fallbackOutcome, {
+            validationStatus: error instanceof GroundingValidationError ? undefined : "warn",
+            validationReasons: error instanceof GroundingValidationError
+              ? undefined
+              : ["provider_fallback"],
+            cacheState: "miss",
+            errorClass,
+          });
+          await notifyChatOpsAlert({
+            outcome: fallbackOutcome,
+            errorClass,
+            releaseId: AI_RELEASE_ID,
+            requestId: session.identity.requestId,
+          });
         } finally {
           closeSse(controller);
         }

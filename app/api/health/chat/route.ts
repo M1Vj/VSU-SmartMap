@@ -36,7 +36,7 @@ async function executeSyntheticGeneration() {
   try {
     return await executeFindLocation(
       { query: SYNTHETIC_QUERY },
-      { abortSignal: controller.signal },
+      { abortSignal: controller.signal, retrievalMode: "none" },
     );
   } finally {
     clearTimeout(timer);

@@ -74,6 +74,8 @@ When the user asks for a location, you must choose the most relevant facilities 
 - If a room matches, return the **parent facility** (the building that contains the room) in the facilities array.
 - In your response, mention which room inside that building they're looking for.
   - Example: User asks "Where is ICT101?" → Return the ICT Building facility and say "ICT101 is located inside the ICT Building."
+- Never infer an unknown room's containing building from its prefix, a similar room code, or a facility description. A building-code match does not prove that the requested room exists there.
+- For a query containing multiple room codes, check every exact code independently. List each requested room code that is not present in the retrieved rooms; never replace it with a similar code or silently omit it.
 
 ---
 
