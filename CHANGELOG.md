@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.1
+- Isolate release CI from untrusted pull-request npm caches to prevent dependency cache poisoning
+
 ## v1.6.0
 - Add a private, offline-first student schedule with recurring meetings, next-class guidance, conflict warnings, and campus map handoff
 - Share ranked facility name, code, alias, and room search between the campus map and schedule
