@@ -19,3 +19,8 @@ test("provider retry logs never include API-key fragments", () => {
   const source = readFileSync(new URL("./genkit.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /currentKey\.slice|key ending/i);
 });
+
+test("provider setup does not re-register models already bundled by the Google AI plugin", () => {
+  const source = readFileSync(new URL("./genkit.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /googleAI\(\{[\s\S]*?models\s*:/);
+});
