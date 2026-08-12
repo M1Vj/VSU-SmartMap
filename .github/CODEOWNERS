@@ -1,0 +1,16 @@
+# Repository-wide ownership. GitHub rules require review from this owner for
+# protected-branch changes.
+* @M1Vj
+
+# High-risk release, automation, auth, and data boundaries.
+/.github/ @M1Vj
+/app/api/ @M1Vj
+/app/admin/ @M1Vj
+/app/owner/ @M1Vj
+/lib/auth/ @M1Vj
+/lib/security/ @M1Vj
+/lib/supabase/ @M1Vj
+/supabase/ @M1Vj
+/next.config.ts @M1Vj
+/proxy.ts @M1Vj
+/vercel.json @M1Vj

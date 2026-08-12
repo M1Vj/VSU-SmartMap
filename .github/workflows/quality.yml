@@ -9,12 +9,28 @@ permissions:
   contents: read
 
 jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+
   app:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -24,20 +40,16 @@ jobs:
       - run: npm test
       - run: npm run eval:chat
       - run: npm run build
-      # Was --audit-level=high, which became unpassable: the outstanding
-      # advisories against next carry the range >=9.3.4-canary.0, so they match
-      # every modern release and npm's only proposed remedy is a downgrade to
-      # next@9.3.3. A gate that no commit can satisfy blocks every PR without
-      # protecting anything. Criticals still fail the build, and dependabot
-      # still reports highs. Put this back to high once next ships a fix.
-      - run: npm audit --omit=dev --audit-level=critical
+      - run: npm audit --omit=dev --audit-level=high
 
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -47,5 +59,7 @@ jobs:
       - run: node tools/dev/bootstrap-local.mjs --skip-env-file
       - run: NAVIGATION_DB_INTEGRATION=1 node --experimental-test-module-mocks --import tsx --test lib/supabase/queries/navigation-db.integration.test.ts
       - run: npm run qa:rls
+      - run: npm run qa:rls:schedules
+      - run: node tools/qa/rls-authenticated-student-hardening.mjs
       - if: always()
         run: npx --yes supabase@2.107.0 stop
