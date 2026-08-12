@@ -68,7 +68,7 @@ export function createGenerationRunMetadata(
 
 const createGenkit = (apiKey: string, modelId = CHAT_MODEL_ID) => {
   return genkit({
-    plugins: [googleAI({ apiKey, models: [modelId] })],
+    plugins: [googleAI({ apiKey })],
     model: gemini(modelId),
   });
 };
