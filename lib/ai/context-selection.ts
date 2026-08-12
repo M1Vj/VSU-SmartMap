@@ -9,10 +9,14 @@ const STOP_WORDS = new Set([
   "are",
   "at",
   "ba",
+  "building",
+  "campus",
   "do",
   "does",
+  "find",
   "for",
   "from",
+  "get",
   "how",
   "i",
   "in",
@@ -24,13 +28,18 @@ const STOP_WORDS = new Set([
   "near",
   "ng",
   "on",
+  "place",
+  "rm",
+  "room",
   "sa",
   "saan",
   "the",
   "there",
+  "this",
   "to",
   "where",
   "with",
+  "vsu",
   "yung",
 ]);
 
@@ -85,8 +94,27 @@ export function tokenizeForRetrieval(input: string): string[] {
   return Array.from(expanded);
 }
 
-function scoreFacility(facility: FacilityChatContext, tokens: readonly string[]): number {
-  if (tokens.length === 0) return 0;
+type FacilityScore = { score: number; strong: boolean };
+
+function normalizeCode(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function rawQueryTokens(input: string): Set<string> {
+  return new Set(
+    input
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 2),
+  );
+}
+
+function scoreFacility(
+  facility: FacilityChatContext,
+  query: string,
+  tokens: readonly string[],
+): FacilityScore {
+  if (tokens.length === 0) return { score: 0, strong: false };
 
   const name = facility.name.toLowerCase();
   const code = facility.code?.toLowerCase();
@@ -96,9 +124,23 @@ function scoreFacility(facility: FacilityChatContext, tokens: readonly string[])
     ?.map((room) => `${room.roomCode} ${room.name ?? ""}`)
     .join(" ")
     .toLowerCase();
+  const queryCode = normalizeCode(query);
+  const queryTokens = rawQueryTokens(query);
+  const exactRoomCode = facility.rooms?.some((room) => {
+    const roomCodes = [room.roomCode, room.roomCode.split("/")[0] ?? ""]
+      .map(normalizeCode)
+      .filter((roomCode) => roomCode.length >= 4);
+    return roomCodes.some((roomCode) => queryCode.includes(roomCode));
+  }) ?? false;
+  const exactFacilityCode = Boolean(
+    code && code.length >= 2 && queryTokens.has(normalizeCode(code)),
+  );
+  const normalizedName = name.replace(/[^a-z0-9]+/g, " ").trim();
+  const exactName = normalizedName.length >= 4
+    && query.toLowerCase().replace(/[^a-z0-9]+/g, " ").includes(normalizedName);
 
-  return tokens.reduce((score, token) => {
-    const exactName = name === token;
+  const score = tokens.reduce((currentScore, token) => {
+    const exactNameToken = name === token;
     const nameMatch = name.includes(token);
     const codeMatch = code === token || code?.includes(token);
     const roomMatch = roomText?.includes(token);
@@ -106,8 +148,8 @@ function scoreFacility(facility: FacilityChatContext, tokens: readonly string[])
     const categoryMatch = categoryTerms.includes(token);
 
     return (
-      score +
-      (exactName ? 30 : 0) +
+      currentScore +
+      (exactNameToken ? 30 : 0) +
       (codeMatch ? 24 : 0) +
       (roomMatch ? 22 : 0) +
       (nameMatch ? 12 : 0) +
@@ -115,6 +157,11 @@ function scoreFacility(facility: FacilityChatContext, tokens: readonly string[])
       (descriptionMatch ? 2 : 0)
     );
   }, 0);
+
+  return {
+    score: score + (exactRoomCode ? 160 : 0) + (exactFacilityCode ? 100 : 0) + (exactName ? 80 : 0),
+    strong: exactRoomCode || exactFacilityCode || exactName,
+  };
 }
 
 export function buildRetrievalQuery(
@@ -133,18 +180,22 @@ export function buildRetrievalQuery(
 export function selectFacilitiesForChatContext(
   facilities: readonly FacilityChatContext[],
   query: string,
-  limit = 32
+  limit = 12
 ): FacilityChatContext[] {
   const tokens = tokenizeForRetrieval(query);
   if (tokens.length === 0) return [];
 
-  return facilities
+  const ranked = facilities
     .map((facility, index) => ({
       facility,
       index,
-      score: scoreFacility(facility, tokens),
+      ...scoreFacility(facility, query, tokens),
     }))
-    .filter(({ score }) => score > 0)
+    .filter(({ score }) => score > 0);
+  const hasStrongMatch = ranked.some(({ strong }) => strong);
+
+  return ranked
+    .filter(({ strong }) => !hasStrongMatch || strong)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return a.facility.name.localeCompare(b.facility.name) || a.index - b.index;

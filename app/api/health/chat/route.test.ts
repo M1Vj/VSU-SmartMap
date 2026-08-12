@@ -20,8 +20,12 @@ let alertError: Error | null = null;
 
 mock.module("@/lib/ai/flows/find-location", {
   namedExports: {
-    async executeFindLocation(input: unknown, options?: { abortSignal?: AbortSignal }) {
-      generationCalls.push({ input, hasAbortSignal: options?.abortSignal instanceof AbortSignal });
+    async executeFindLocation(input: unknown, options?: { abortSignal?: AbortSignal; retrievalMode?: string }) {
+      generationCalls.push({
+        input,
+        hasAbortSignal: options?.abortSignal instanceof AbortSignal,
+        retrievalMode: options?.retrievalMode,
+      });
       if (generationError) throw generationError;
       return generationResult;
     },
@@ -125,6 +129,7 @@ test("health route runs a direct fixed synthetic generation and returns transcri
       query: "Synthetic health check: reply briefly that the campus assistant is operational without referring to any person, place, event, or listing.",
     },
     hasAbortSignal: true,
+    retrievalMode: "none",
   });
   assert.equal(body.ok, true);
   assert.equal(body.releaseId, "ai_test_release");

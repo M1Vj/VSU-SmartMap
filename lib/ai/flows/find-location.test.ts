@@ -4,26 +4,37 @@ import test, { mock } from "node:test";
 
 import { LocationResponseSchema } from "../schemas/location.ts";
 
+let facilityReads = 0;
+let eventReads = 0;
+let knowledgeReads = 0;
+let boardingReads = 0;
+let generatedPrompts: string[] = [];
+
 mock.module("@genkit-ai/core", {
   namedExports: { flow: (_options: unknown, handler: unknown) => handler },
 });
 mock.module("../genkit", {
   namedExports: {
-    runWithKeyRotation: async () => undefined,
+    runWithKeyRotation: async (run: (ai: { generate(input: { prompt: string }): Promise<unknown> }) => Promise<unknown>) => run({
+      async generate(input: { prompt: string }) {
+        generatedPrompts.push(input.prompt);
+        return { output: { response: "Synthetic operational response", facilities: [] } };
+      },
+    }),
     streamWithKeyRotation: async () => undefined,
   },
 });
 mock.module("@/lib/supabase/queries/facilities.server", {
-  namedExports: { getFacilitiesForChatCached: async () => ({ data: [] }) },
+  namedExports: { getFacilitiesForChatCached: async () => { facilityReads += 1; return { data: [] }; } },
 });
 mock.module("@/lib/supabase/queries/ai-knowledge.server", {
-  namedExports: { getAiKnowledgeForChatCached: async () => ({ data: [] }) },
+  namedExports: { getAiKnowledgeForChatCached: async () => { knowledgeReads += 1; return { data: [] }; } },
 });
 mock.module("@/lib/supabase/queries/boarding-houses.server", {
-  namedExports: { getBoardingHousesForChatCached: async () => ({ data: [] }) },
+  namedExports: { getBoardingHousesForChatCached: async () => { boardingReads += 1; return { data: [] }; } },
 });
 mock.module("@/lib/actions/events", {
-  namedExports: { getEventsCached: async () => ({ data: [] }) },
+  namedExports: { getEventsCached: async () => { eventReads += 1; return { data: [] }; } },
 });
 
 const flowModule = import("./find-location.ts");
@@ -130,8 +141,30 @@ test("collectGroundingRecordIds preserves entity domains for operations traces",
 });
 
 test("unknown room codes are never converted into inferred building assumptions", () => {
-  const source = readFileSync(new URL("./find-location.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /likely located|I will assume/i);
+  const prompt = readFileSync(new URL("../prompts/campus-assistant.ts", import.meta.url), "utf8");
+  assert.match(prompt, /never infer.*containing building/i);
+  assert.match(prompt, /list each requested room code.*not present/i);
+  assert.doesNotMatch(prompt, /likely located|I will assume/i);
+});
+
+test("synthetic retrieval mode produces no campus record identifiers", async () => {
+  facilityReads = 0;
+  eventReads = 0;
+  knowledgeReads = 0;
+  boardingReads = 0;
+  generatedPrompts = [];
+  const { executeFindLocation } = await flowModule;
+  const result = await executeFindLocation(
+    { query: "Synthetic health check" },
+    { retrievalMode: "none" },
+  );
+
+  assert.deepEqual(
+    { facilityReads, eventReads, knowledgeReads, boardingReads },
+    { facilityReads: 0, eventReads: 0, knowledgeReads: 0, boardingReads: 0 },
+  );
+  assert.deepEqual(result.operations.retrievedRecordIds, []);
+  assert.match(generatedPrompts[0] ?? "", /retrieved-facilities[^>]*>\[\]/);
 });
 
 test("generation forwards abort signals so client and health timeouts cancel provider work", () => {

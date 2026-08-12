@@ -23,7 +23,7 @@ test("chat route traces every operational outcome and returns opaque feedback cr
   for (const outcome of [
     "rate_limited",
     "cached",
-    "generated_fallback",
+    "live",
     "static_fallback",
     "error",
   ]) {
@@ -35,34 +35,30 @@ test("chat route traces every operational outcome and returns opaque feedback cr
   assert.doesNotMatch(routeSource, /console\.error\([^)]*,\s*error\)/);
 });
 
-test("chat route gates caching and validates the completed stream before cards or persistence", () => {
+test("chat route gates caching and validates the completed generation before cards or persistence", () => {
   assert.match(routeSource, /CHAT_LLM_ENABLED/);
   assert.match(routeSource, /"disabled_fallback"/);
   assert.match(routeSource, /isChatAnswerCacheEligible\(message\)/);
-  assert.match(routeSource, /sanitizeGeneratedLocationResponse\s*\(/);
-  assert.match(routeSource, /grounding\.outcome\s*===\s*"fail"/);
+  assert.match(routeSource, /generatedPayload\.operations\?\.grounding\.outcome\s*===\s*"fail"/);
   assert.match(routeSource, /notifyChatOpsAlert\s*\(/);
 });
 
-test("chat route withholds provider chunks and replaces hard validation failures", () => {
-  const providerLoop = routeSource.match(
-    /for await \(const chunk of stream\.stream\)([\s\S]+?)const response = await stream\.response/,
-  )?.[1] ?? "";
-  assert.ok(providerLoop.length > 0);
-  assert.doesNotMatch(providerLoop, /send\s*\(/);
-  const validationIndex = routeSource.indexOf("sanitizeGeneratedLocationResponse(");
-  const validatedChunkIndex = routeSource.indexOf('send({ type: "chunk", content: payload.content })');
-  assert.ok(validationIndex > 0 && validatedChunkIndex > validationIndex);
-  assert.match(routeSource, /grounding\.outcome === "fail"[\s\S]{0,600}buildStaticFallbackPayload/);
+test("SSE uses one completed generation and caches the same validated live payload", () => {
+  assert.doesNotMatch(routeSource, /streamFindLocation|stream\.stream|stream\.response/);
+  assert.doesNotMatch(routeSource, /generated_fallback/);
+  assert.match(routeSource, /if \(streaming\) \{[\s\S]{0,500}buildFinalChatPayload\(message, context, request\.signal\)/);
+  assert.match(routeSource, /enqueueSse\(controller, \{ type: "chunk", content: payload\.content \}\)/);
+  assert.match(routeSource, /finalizeTurn\(session, payload, "live", \{ cacheState: "miss" \}\)/);
+  assert.match(routeSource, /cacheSuccessfulFinalPayload\(questionHash, message, payload\)/);
   assert.match(routeSource, /class GroundingValidationError/);
-  assert.match(routeSource, /fallbackError instanceof GroundingValidationError/);
-  assert.match(routeSource, /enqueueGeneratedFinal\([\s\S]{0,220}request\.signal/);
+  assert.match(routeSource, /error instanceof GroundingValidationError/);
 });
 
-test("withheld partial streams retry validated generation before static fallback", () => {
-  assert.doesNotMatch(routeSource, /validationReasons:\s*\["partial_stream_discarded"\]/);
+test("SSE failure goes directly to a classified static fallback without retry generation", () => {
   assert.match(
     routeSource,
-    /catch \(error\) \{[\s\S]{0,500}!request\.signal\.aborted[\s\S]{0,500}enqueueGeneratedFinal\(/,
+    /catch \(error\) \{[\s\S]{0,260}request\.signal\.aborted[\s\S]{0,500}buildStaticFallbackPayload/,
   );
+  assert.match(routeSource, /classifyChatError\(error\)/);
+  assert.doesNotMatch(routeSource, /enqueueGeneratedFinal/);
 });

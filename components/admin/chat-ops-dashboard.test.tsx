@@ -8,6 +8,8 @@ test("ChatOpsDashboard renders operational summaries and sanitized recent activi
   const html = renderToStaticMarkup(<ChatOpsDashboard data={{
     summary: {
       totalTurns: 1,
+      userTurns: 1,
+      syntheticTurns: 0,
       outcomes: { live: 1 },
       latencyP50Ms: 240, latencyP95Ms: 240, ttftP50Ms: 80, ttftP95Ms: 80,
       fallbackRate: 0, errorRate: 0, negativeFeedbackRate: 1,
@@ -58,6 +60,8 @@ test("ChatOpsDashboard renders operational summaries and sanitized recent activi
   assert.match(html, /Grounding/);
   assert.match(html, /Prompt-injection signals/);
   assert.match(html, /Recent sanitized turns/);
+  assert.match(html, /1 user turn.*0 synthetic checks/i);
+  assert.match(html, /First delivery p50 \/ p95/);
   assert.match(html, /Feedback/);
   assert.doesNotMatch(html, /token hash|raw metadata/i);
 });
@@ -65,7 +69,7 @@ test("ChatOpsDashboard renders operational summaries and sanitized recent activi
 test("ChatOpsDashboard renders a useful empty state", () => {
   const html = renderToStaticMarkup(<ChatOpsDashboard data={{
     summary: {
-      totalTurns: 0, outcomes: {}, latencyP50Ms: null, latencyP95Ms: null,
+      totalTurns: 0, userTurns: 0, syntheticTurns: 0, outcomes: {}, latencyP50Ms: null, latencyP95Ms: null,
       ttftP50Ms: null, ttftP95Ms: null, fallbackRate: 0, errorRate: 0,
       negativeFeedbackRate: 0, cacheHits: 0, groundedTurns: 0,
       validationWarnings: 0, injectionSignals: {}, models: {},

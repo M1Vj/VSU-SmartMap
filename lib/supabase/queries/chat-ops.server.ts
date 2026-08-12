@@ -97,6 +97,8 @@ export type ChatOpsFeedback = {
 export type ChatOpsDashboardData = {
   summary: {
     totalTurns: number;
+    userTurns: number;
+    syntheticTurns: number;
     outcomes: Record<string, number>;
     latencyP50Ms: number | null;
     latencyP95Ms: number | null;
@@ -162,9 +164,12 @@ export function serializeChatOpsCsv(turns: ChatOpsTurn[]): string {
   const columns: Array<[string, (turn: ChatOpsTurn) => unknown]> = [
     ["created_at", (turn) => turn.createdAt], ["request_id", (turn) => turn.requestId],
     ["release_id", (turn) => turn.releaseId], ["outcome", (turn) => turn.outcome],
+    ["traffic_type", (turn) => turn.outcome === "synthetic" ? "synthetic" : "user"],
     ["selected_model", (turn) => turn.selectedModel], ["latency_ms", (turn) => turn.latencyMs],
     ["ttft_ms", (turn) => turn.timeToFirstTokenMs], ["cache_state", (turn) => turn.cacheState],
-    ["retrieved_ids", (turn) => turn.retrievedRecordIds], ["validation", (turn) => turn.validationStatus],
+    ["retrieved_ids", (turn) => turn.retrievedRecordIds],
+    ["retrieved_count", (turn) => turn.retrievedRecordIds.length],
+    ["validation", (turn) => turn.validationStatus],
     ["validation_reasons", (turn) => turn.validationReasons], ["injection_signals", (turn) => turn.injectionSignals],
     ["error_class", (turn) => turn.errorClass], ["review_status", (turn) => turn.reviewStatus],
     ["user_excerpt", (turn) => turn.userMessage], ["assistant_excerpt", (turn) => turn.assistantMessage],
@@ -215,6 +220,10 @@ export async function getChatOpsDashboard(
   const models: Record<string, number> = {};
   turns.forEach((turn) => {
     increment(outcomes, turn.outcome);
+  });
+  const userTurns = turns.filter((turn) => turn.outcome !== "synthetic");
+  const syntheticTurns = turns.length - userTurns.length;
+  userTurns.forEach((turn) => {
     increment(models, turn.selectedModel ?? turn.requestedModel);
     turn.injectionSignals.forEach((signal) => increment(injectionSignals, signal));
   });
@@ -224,17 +233,17 @@ export async function getChatOpsDashboard(
 
   return {
     summary: {
-      totalTurns: turns.length, outcomes,
-      latencyP50Ms: percentile(turns.map((turn) => turn.latencyMs), 0.5),
-      latencyP95Ms: percentile(turns.map((turn) => turn.latencyMs), 0.95),
-      ttftP50Ms: percentile(turns.map((turn) => turn.timeToFirstTokenMs), 0.5),
-      ttftP95Ms: percentile(turns.map((turn) => turn.timeToFirstTokenMs), 0.95),
-      fallbackRate: ratio(turns.filter((turn) => fallbackOutcomes.has(turn.outcome)).length, turns.length),
-      errorRate: ratio(turns.filter((turn) => errorOutcomes.has(turn.outcome)).length, turns.length),
+      totalTurns: turns.length, userTurns: userTurns.length, syntheticTurns, outcomes,
+      latencyP50Ms: percentile(userTurns.map((turn) => turn.latencyMs), 0.5),
+      latencyP95Ms: percentile(userTurns.map((turn) => turn.latencyMs), 0.95),
+      ttftP50Ms: percentile(userTurns.map((turn) => turn.timeToFirstTokenMs), 0.5),
+      ttftP95Ms: percentile(userTurns.map((turn) => turn.timeToFirstTokenMs), 0.95),
+      fallbackRate: ratio(userTurns.filter((turn) => fallbackOutcomes.has(turn.outcome)).length, userTurns.length),
+      errorRate: ratio(userTurns.filter((turn) => errorOutcomes.has(turn.outcome)).length, userTurns.length),
       negativeFeedbackRate: ratio(feedback.filter((item) => item.rating === "negative").length, feedback.length),
-      cacheHits: turns.filter((turn) => turn.outcome === "cached" || turn.cacheState === "hit").length,
-      groundedTurns: turns.filter((turn) => turn.grounded).length,
-      validationWarnings: turns.filter((turn) => turn.validationStatus !== "pass").length,
+      cacheHits: userTurns.filter((turn) => turn.outcome === "cached" || turn.cacheState === "hit").length,
+      groundedTurns: userTurns.filter((turn) => turn.grounded).length,
+      validationWarnings: userTurns.filter((turn) => turn.validationStatus !== "pass").length,
       injectionSignals, models,
       positiveFeedback: feedback.filter((item) => item.rating === "positive").length,
       negativeFeedback: feedback.filter((item) => item.rating === "negative").length,
