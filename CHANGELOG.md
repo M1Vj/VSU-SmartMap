@@ -9,6 +9,13 @@
 - Make service-worker installation bounded and resilient, precache `/schedule`, and keep personal schedule data out of Cache Storage
 - Add disabled-first, private account schedule sync setup and disclose explicit consent, sensitive exports, deletion tombstones, and rollback requirements
 - Keep auth, API, Supabase REST/RPC, and non-GET requests network-only in the service worker
+- Restore complete optimal long-route navigation and make route camera changes explicit through My Location
+- Normalize every uploaded and previewed image through decoded WebP re-encoding, including HEIC/HEIF sources
+- Add an auditable chat-operations console, bounded feedback, release-bound traces, health checks, retention, alerting, and deterministic evaluations
+- Harden public event reads against transient provider failures without caching failure states
+- Remove duplicate Gemini registry initialization errors while preserving bounded key and model fallback
+- Establish protected-main governance, least-privilege SHA-pinned CI, CodeQL, secret scanning, dependency review, private vulnerability reporting, and a documented production security baseline
+- Add full local Supabase reset, navigation integration, and adversarial RLS matrices to required CI
 
 ## v1.5.0
 - Add boarding-house discovery with map/list views, listing details, reviews, and room options

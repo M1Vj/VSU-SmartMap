@@ -23,7 +23,7 @@ claim that the system can never be compromised.
 
 - Quality gates cover types, lint, the full test suite, chat evaluations,
   production build, dependency audit, local database reset, integration tests,
-  and adversarial RLS matrices.
+  adversarial RLS matrices, and release-version consistency.
 - Security gates reject high-severity dependency advisories, sensitive tracked
   file paths, high-confidence credential formats, and unsafe GitHub Actions
   patterns.
@@ -91,14 +91,25 @@ Feature: Protected production delivery
 - The CSP permits inline scripts and styles required by the current Next.js,
   theme-bootstrap, and styling stack. Moving to per-request nonces or hashes
   would strengthen XSS containment but changes caching and rendering behavior;
-  treat that as a dedicated, browser-verified migration.
+  treat that as a dedicated, browser-verified migration. This is tracked in
+  [issue #58](https://github.com/M1Vj/VSU-SmartMap/issues/58).
 - Supabase leaked-password protection is a hosted Auth plan/account control. It
   should be enabled when available. Google OAuth remains the preferred student
   sign-in path, and existing password users remain subject to the configured
-  Supabase Auth policy.
+  Supabase Auth policy. This is tracked in
+  [issue #60](https://github.com/M1Vj/VSU-SmartMap/issues/60).
+- Administrative password accounts do not yet require an enrolled second
+  factor. Enforcing AAL2 before enrollment and recovery are operationally ready
+  could lock out the only maintainer, so this is a staged identity-control
+  change rather than an untested toggle.
 - A single maintainer cannot provide an independent human approval. Required
   automated gates, no bypass actors, CODEOWNERS, signed-off web commits, and
   resolved review threads provide compensating controls; add one required
-  approval when a second trusted maintainer joins.
+  approval when a second trusted maintainer joins. This is tracked in
+  [issue #59](https://github.com/M1Vj/VSU-SmartMap/issues/59).
+- Routine Dependabot pull requests intentionally exclude semver-major updates
+  because framework and database majors require migration verification. Review
+  available major updates at least quarterly, record the disposition, and open
+  a dedicated migration pull request for each accepted major.
 - Review this baseline after framework, GitHub, Vercel, Supabase, authentication,
   upload, LLM, or public-write changes, and at least quarterly.
