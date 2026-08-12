@@ -4,7 +4,7 @@ import test, { mock } from "node:test";
 
 type QueryResult = {
   data: unknown;
-  error: null;
+  error: { message: string; code?: string } | null;
 };
 
 const eventRow = {
@@ -96,6 +96,9 @@ let adminAssertionCalls = 0;
 let protectedServiceQueries = 0;
 let legacyServerClientCalls = 0;
 let legacyServiceClientCalls = 0;
+let publicClientCalls = 0;
+let publicReadAttempts = 0;
+let publicReadOutcomes: Array<QueryResult | Error> = [];
 let submissionRpcCalls: Array<{ name: string; params: Record<string, unknown> }> = [];
 let submissionRpcError: { message: string } | null = null;
 let submissionQuotaAllowed = true;
@@ -183,6 +186,28 @@ mock.module("@/lib/supabase/server-client", {
         },
       };
     },
+    getSupabasePublicClient() {
+      publicClientCalls += 1;
+      return {
+        from() {
+          const query = {
+            select() { return query; },
+            gte() { return query; },
+            lt() { return query; },
+            in() { return query; },
+            eq() { return query; },
+            or() { return query; },
+            lte() { return query; },
+            order() {
+              publicReadAttempts += 1;
+              const outcome = publicReadOutcomes.shift() ?? { data: [eventRow], error: null };
+              return outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome);
+            },
+          };
+          return query;
+        },
+      };
+    },
   },
 });
 
@@ -227,6 +252,9 @@ function resetCounters() {
   protectedServiceQueries = 0;
   legacyServerClientCalls = 0;
   legacyServiceClientCalls = 0;
+  publicClientCalls = 0;
+  publicReadAttempts = 0;
+  publicReadOutcomes = [];
   submissionRpcCalls = [];
   submissionRpcError = null;
   submissionQuotaAllowed = true;
@@ -235,6 +263,36 @@ function resetCounters() {
   adminRpcCalls = [];
   adminRpcError = null;
 }
+
+test("public event reads use the anonymous client and retry one transient network failure", async () => {
+  resetCounters();
+  publicReadOutcomes = [new TypeError("fetch failed"), { data: [eventRow], error: null }];
+  const { getEvents } = await eventsModule;
+
+  const result = await getEvents({ timeframe: "upcoming" });
+
+  assert.equal(result.error, null);
+  assert.equal(result.data?.[0]?.id, eventRow.id);
+  assert.equal(publicClientCalls, 2);
+  assert.equal(publicReadAttempts, 2);
+  assert.equal(legacyServiceClientCalls, 0);
+});
+
+test("public event reads do not retry database errors", async () => {
+  resetCounters();
+  publicReadOutcomes = [{
+    data: null,
+    error: { message: "permission denied", code: "42501" },
+  }];
+  const { getEvents } = await eventsModule;
+
+  const result = await getEvents();
+
+  assert.equal(result.data?.length, 0);
+  assert.equal(result.error?.message, "permission denied");
+  assert.equal(publicReadAttempts, 1);
+  assert.equal(legacyServiceClientCalls, 0);
+});
 
 test("anonymous callers cannot run protected event actions before validation or service access", async () => {
   resetCounters();

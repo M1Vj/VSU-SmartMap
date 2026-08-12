@@ -5,7 +5,10 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { assertAdminAction } from "@/lib/auth/server";
 import { consumeRateLimit, hashRateLimitSubject } from "@/lib/security/rate-limit";
-import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
+import {
+  getSupabasePublicClient,
+  getSupabaseServiceRoleClient,
+} from "@/lib/supabase/server-client";
 import type { PostgrestError } from "@supabase/supabase-js";
 import type {
   Event,
@@ -52,6 +55,13 @@ const normalizeError = (error: PostgrestError | Error | null): SerializablePostg
   };
 };
 
+const normalizeUnknownError = (error: unknown) => {
+  if (error && typeof error === "object" && "message" in error) {
+    return normalizeError(error as PostgrestError | Error);
+  }
+  return normalizeError(new Error("Failed to fetch events"));
+};
+
 const toEvent = (row: EventRow): Event => ({
   id: row.id,
   title: row.title,
@@ -91,11 +101,14 @@ const suggestionSelectBase =
 const EVENTS_CACHE_TAG = "events";
 const EVENTS_CACHE_SECONDS = 5 * 60;
 
-export async function getEvents(
-  filters?: EventFilters
-): Promise<BaseResult<Event[]>> {
-  try {
-    const supabase = getSupabaseServiceRoleClient();
+const isTransientNetworkError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /fetch failed|network|econnreset|etimedout|socket hang up/i.test(message);
+};
+
+async function loadEvents(filters?: EventFilters): Promise<Event[]> {
+  const execute = async () => {
+    const supabase = getSupabasePublicClient();
     let query = supabase.from("events").select(eventSelectBase);
 
     const nowIso = new Date().toISOString();
@@ -106,11 +119,9 @@ export async function getEvents(
     }
 
     if (filters?.category) {
-      if (Array.isArray(filters.category)) {
-        query = query.in("category", filters.category);
-      } else {
-        query = query.eq("category", filters.category);
-      }
+      query = Array.isArray(filters.category)
+        ? query.in("category", filters.category)
+        : query.eq("category", filters.category);
     }
 
     if (filters?.query) {
@@ -127,28 +138,53 @@ export async function getEvents(
 
     const sortAscending = filters?.timeframe !== "past";
     const { data, error } = await query.order("start_time", { ascending: sortAscending });
-    
-    const rows = data as EventRow[] | null;
+    if (error) throw error;
+    return (data as EventRow[] | null)?.map(toEvent) ?? [];
+  };
+
+  try {
+    return await execute();
+  } catch (error) {
+    if (!isTransientNetworkError(error)) throw error;
+    return execute();
+  }
+}
+
+export async function getEvents(
+  filters?: EventFilters
+): Promise<BaseResult<Event[]>> {
+  try {
     return {
-      data: rows ? rows.map(toEvent) : [],
-      error: normalizeError(error),
+      data: await loadEvents(filters),
+      error: null,
     };
   } catch (err) {
     return {
       data: [],
-      error: normalizeError(err instanceof Error ? err : new Error("Failed to fetch events")),
+      error: normalizeUnknownError(err),
     };
   }
 }
 
-export const getEventsCached = unstable_cache(
-  async (filters?: EventFilters) => getEvents(filters),
+const getEventsDataCached = unstable_cache(
+  loadEvents,
   ["events"],
   {
     revalidate: EVENTS_CACHE_SECONDS,
     tags: [EVENTS_CACHE_TAG],
   }
 );
+
+export async function getEventsCached(filters?: EventFilters): Promise<BaseResult<Event[]>> {
+  try {
+    return { data: await getEventsDataCached(filters), error: null };
+  } catch (err) {
+    return {
+      data: [],
+      error: normalizeUnknownError(err),
+    };
+  }
+}
 
 const eventInsertSchema = z.object({
   title: z.string().min(1, "Title is required"),
