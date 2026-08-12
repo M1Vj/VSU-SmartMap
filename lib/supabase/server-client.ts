@@ -7,6 +7,7 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let serviceClient: SupabaseClient | null = null;
+let publicClient: SupabaseClient | null = null;
 
 export const getSupabaseServerClient = async () => {
   const cookieStoreMaybePromise = cookies();
@@ -49,6 +50,19 @@ export const getSupabaseServiceRoleClient = () => {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
   return serviceClient;
+};
+
+export const getSupabasePublicClient = () => {
+  if (publicClient) return publicClient;
+
+  if (!url || !anonKey) {
+    throw new Error("Supabase public client configuration is unavailable");
+  }
+
+  publicClient = createSupabaseClient(url, anonKey, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+  return publicClient;
 };
 
 export const getSupabaseAdminClient = async (options?: { requireServiceRole?: boolean }) => {
