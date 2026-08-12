@@ -27,9 +27,16 @@ npm run build
 npm run db:reset
 node tools/dev/bootstrap-local.mjs --skip-env-file
 npm run qa:rls
+npm run qa:rls:schedules
+node tools/qa/rls-authenticated-student-hardening.mjs
 ```
 
 Use Conventional Commits and explain user-visible behavior, data provenance,
 security impact, and verification evidence in the pull request. New campus data
 or media must follow `docs/DATA_AND_ASSETS.md`. Report vulnerabilities through
 `SECURITY.md`, not a public issue.
+
+Pull requests must come from a branch, stay current with `main`, pass every
+required Quality, Security, and CodeQL check, and resolve all review threads.
+Repository owners may close changes that bypass data provenance, privacy,
+dependency review, or least-privilege requirements.

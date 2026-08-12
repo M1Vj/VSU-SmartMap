@@ -43,3 +43,18 @@ test("proxy replaces client request IDs and propagates a fresh server ID", async
   assert.equal(firstResponse.headers.get("x-request-id"), firstRequestId);
   assert.equal(secondResponse.headers.get("x-request-id"), secondRequestId);
 });
+
+test("proxy applies browser security headers to dynamic responses", async () => {
+  const { proxy } = await proxyModule;
+  const response = await proxy(new NextRequest("https://example.test/map"));
+  const policy = response.headers.get("content-security-policy") ?? "";
+
+  assert.match(policy, /default-src 'self'/);
+  assert.match(policy, /frame-ancestors 'none'/);
+  assert.match(policy, /object-src 'none'/);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
+  assert.match(response.headers.get("permissions-policy") ?? "", /geolocation=\(self\)/);
+});
