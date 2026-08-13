@@ -35,4 +35,3 @@ Correctness requires:
 - focused commands recorded verbatim in the PR.
 
 Attach or summarize JSON/CSV benchmark output, browser viewport matrix results, console/network health, commit/deployment SHA, browser version, cache/service-worker state, and any environmental limitation. Remote preview latency is reported, not forced through the local 50 ms budget. Provider/network failures are classified separately and excluded from app-latency aggregates.
-
