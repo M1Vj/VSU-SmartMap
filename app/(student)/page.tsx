@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapContainerClient } from "@/components/map/map-container";
 import { MapBottomCard } from "@/components/map/map-bottom-card";
@@ -42,6 +42,10 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { VSU_MAIN_GATE } from "@/lib/constants/map";
+import {
+  createMapRuntimeController,
+} from "@/lib/map/map-runtime";
+import { markMapPerformance } from "@/lib/map/performance-marks";
 
 const MapSelectionLayer = dynamic(
   () => import("@/components/map/map-selection-layer").then((m) => m.MapSelectionLayer),
@@ -418,8 +422,6 @@ import {
   shouldClearRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
 
-type NavigationOrigin = "live" | "manual" | null;
-
 function MapView({
   filtered,
   isLoading,
@@ -459,31 +461,49 @@ function MapView({
   const geo = useGeolocation();
   const { position, error: locationError, startTracking } = geo;
   
-  const [targetFacilityId, setTargetFacilityId] = useState<string | undefined>(undefined);
+  const runtime = useMemo(() => createMapRuntimeController(), []);
+  const runtimeState = useSyncExternalStore(
+    runtime.subscribe,
+    runtime.getState,
+    runtime.getState,
+  );
   
   // Use persistent navigation state
   const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
-  const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
-  const [isManualStartPending, setIsManualStartPending] = useState(false);
-  const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
   const [routeReportOpen, setRouteReportOpen] = useState(false);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
-  const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
-  const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
+  const targetFacilityId = runtimeState.navigation.destinationId ?? undefined;
+  const navigationOrigin = runtimeState.navigation.origin;
+  const isManualStartPending = runtimeState.navigation.phase === "acquiring";
+  const committedRoute = runtimeState.navigation.committedRoute;
+  const hasCommittedOverlay = Boolean(committedRoute);
+  const hasActiveRoute = runtimeState.navigation.phase === "active" && Boolean(committedRoute && navStart && navEnd);
+  const hasNavigationState = Boolean(
+    navStart || navEnd || isManualStartPending || runtimeState.navigation.destinationId,
+  );
   const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
-  const navigationControls = getNavigationControlsState({
-    hasActiveRoute,
-    isManualStartPending,
-    isWaitingForLocation,
-  });
+  const navigationControls = {
+    primaryActionLabel:
+      runtimeState.presentation.controls.primaryAction === "clear" ? "Clear Route" : "Cancel Route",
+    canReportRoute: runtimeState.presentation.controls.canReportRoute,
+    statusText: runtimeState.presentation.controls.statusText,
+  };
   const selectedMapItem: MapItem | null =
-    selectedBoardingHouse ?? (selectedFacility?.id === selectedId ? selectedFacility : null);
+    selectedBoardingHouse ?? (selectedFacility?.id === runtimeState.selectedItemId ? selectedFacility : null);
+
+  useEffect(() => {
+    if (selectedId && selectedId !== runtimeState.selectedItemId) {
+      runtime.dispatch({ type: "selection/set", itemId: selectedId });
+    } else if (!selectedId && runtimeState.selectedItemId) {
+      runtime.dispatch({ type: "selection/cleared" });
+    }
+  }, [runtime, runtimeState.selectedItemId, selectedId]);
 
   useEffect(() => {
     setHasHydrated(true);
@@ -506,17 +526,10 @@ function MapView({
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
     clearNavigation();
-    setNavigationOrigin(null);
-    setIsManualStartPending(false);
     setManualLocationRequestPending(false);
-    setTargetFacilityId(undefined);
-    setAvailableRoutes([]);
+    runtime.dispatch({ type: "navigation/cleared" });
     setRouteReportOpen(false);
-  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
-
-  useEffect(() => {
-    setAvailableRoutes([]);
-  }, [navEnd?.lat, navEnd?.lng, navMode]);
+  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId, runtime]);
 
   useEffect(() => {
     setNavMode(defaultTransportMode);
@@ -537,11 +550,10 @@ function MapView({
     const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
     const routeStart = clampPointToVsuCampus(liveStart);
 
-    setNavigationOrigin("live");
-    setIsManualStartPending(false);
+    runtime.dispatch({ type: "navigation/resolving", requestId: runtime.getState().navigation.pendingRequestId ?? navigationSessionId });
     setManualLocationRequestPending(false);
     setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
-  }, [isManualStartPending, manualLocationRequestPending, navEnd, position, setNavStart]);
+  }, [isManualStartPending, manualLocationRequestPending, navEnd, navigationSessionId, position, runtime, setNavStart]);
 
   useEffect(() => {
     if (!manualLocationRequestPending || !locationError) return;
@@ -553,7 +565,7 @@ function MapView({
   useEffect(() => {
     if (
       shouldClearRouteForSelectedItem({
-        selectedItemId: selectedId,
+        selectedItemId: runtimeState.selectedItemId,
         routeDestinationId: targetFacilityId ?? null,
         hasNavigationState,
       })
@@ -563,7 +575,7 @@ function MapView({
   }, [
     clearRouteState,
     hasNavigationState,
-    selectedId,
+    runtimeState.selectedItemId,
     targetFacilityId,
   ]);
 
@@ -579,9 +591,19 @@ function MapView({
     }
   }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
 
-  const handleRoutesFound = useCallback((routes: PathResult[]) => {
-    setAvailableRoutes(routes);
-  }, []);
+  const handleRouteCommitted = useCallback((route: PathResult, requestId: number) => {
+    runtime.dispatch({ type: "navigation/committed", requestId, route });
+    markMapPerformance("route-commit", typeof performance === "undefined" ? 0 : performance.now());
+  }, [runtime]);
+
+  const handleRouteFailed = useCallback((message: string, requestId: number) => {
+    runtime.dispatch({ type: "navigation/failed", requestId, message });
+  }, [runtime]);
+
+  const handleRouteRequestStarted = useCallback((requestId: number) => {
+    if (runtime.getState().navigation.phase === "acquiring") return;
+    runtime.dispatch({ type: "navigation/resolving", requestId });
+  }, [runtime]);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
     return routeAnnouncementTracker.claim(sessionId);
@@ -596,25 +618,30 @@ function MapView({
   }, [routeAnnouncementTracker]);
 
   const beginNavigationToItem = useCallback((item: MapItem) => {
+    const requestStartedAt = typeof performance === "undefined" ? 0 : performance.now();
     const decision = resolveNavigationStart(position);
 
     dismissRouteFoundAnnouncement(navigationSessionId);
-    setNavigationSessionId((sessionId) => sessionId + 1);
-    setTargetFacilityId(item.id);
+    const requestId = navigationSessionId + 1;
+    setNavigationSessionId(requestId);
+    runtime.dispatch({
+      type: "navigation/requested",
+      requestId,
+      destinationId: item.id,
+      origin: decision.mode,
+      mode: navMode,
+      awaitingStart: decision.mode === "manual",
+    });
+    markMapPerformance("route-request", requestStartedAt);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
-    setAvailableRoutes([]);
 
     if (decision.mode === "live") {
-      setNavigationOrigin("live");
-      setIsManualStartPending(false);
       setNavStart({ lat: decision.start.lat, lng: decision.start.lng } as LatLng);
       return;
     }
 
-    setNavigationOrigin("manual");
-    setIsManualStartPending(true);
     setNavStart(null);
-  }, [dismissRouteFoundAnnouncement, navigationSessionId, position, setNavEnd, setNavStart]);
+  }, [dismissRouteFoundAnnouncement, navigationSessionId, navMode, position, runtime, setNavEnd, setNavStart]);
 
   useEffect(() => {
     if (!pendingNavigationFacility) {
@@ -640,10 +667,9 @@ function MapView({
     if (!isManualStartPending) return;
 
     const start = createManualStartPoint(point);
-    setNavigationOrigin("manual");
-    setIsManualStartPending(false);
     setNavStart({ lat: start.lat, lng: start.lng } as LatLng);
-  }, [isManualStartPending, setNavStart]);
+    runtime.dispatch({ type: "navigation/resolving", requestId: runtime.getState().navigation.pendingRequestId ?? navigationSessionId });
+  }, [isManualStartPending, navigationSessionId, runtime, setNavStart]);
 
   const handleManualStartMarkerTap = useCallback((item: MapItem) => {
     handleManualStartPlacement(item.coordinates);
@@ -656,8 +682,6 @@ function MapView({
       const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
       const routeStart = clampPointToVsuCampus(liveStart);
 
-      setNavigationOrigin("live");
-      setIsManualStartPending(false);
       setManualLocationRequestPending(false);
       setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
       return;
@@ -670,8 +694,6 @@ function MapView({
   const handleUseMainGateStart = useCallback(() => {
     if (!isManualStartPending) return;
 
-    setNavigationOrigin("manual");
-    setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setNavStart({ lat: VSU_MAIN_GATE.lat, lng: VSU_MAIN_GATE.lng } as LatLng);
   }, [isManualStartPending, setNavStart]);
@@ -682,19 +704,23 @@ function MapView({
         <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
             items={filtered}
-            selectedId={selectedId}
+            selectedId={runtimeState.selectedItemId}
             navigationOwnsViewport={doesNavigationOwnViewport({
               hasDestination: Boolean(navEnd),
               manualStartPending: isManualStartPending,
               pendingNavigation: Boolean(pendingNavigationFacility),
             })}
-            routeDestinationId={hasActiveRoute ? targetFacilityId ?? null : null}
-            minimizeNonDestinationMarkers={hasActiveRoute}
-            onSelect={(item) => onSelect(item.id)}
+            routeDestinationId={runtimeState.presentation.markerMode === "destination-focused" ? targetFacilityId ?? null : null}
+            minimizeNonDestinationMarkers={hasCommittedOverlay || runtimeState.presentation.markerMode === "destination-focused"}
+            onSelect={(item) => {
+              runtime.dispatch({ type: "selection/set", itemId: item.id });
+              onSelect(item.id);
+            }}
             onMarkerTapOverride={isManualStartPending ? handleManualStartMarkerTap : undefined}
             onDirections={(item) => beginNavigationToItem(item)}
             onMapClick={isManualStartPending ? handleManualStartPlacement : undefined}
             onClearSelection={() => {
+              runtime.dispatch({ type: "selection/cleared" });
               onClearSelection();
             }}
           />
@@ -716,8 +742,7 @@ function MapView({
           />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (
-            <NavigationLayer 
-              key={`nav-${graphData.nodes.length}-${navStart ? 's' : 'x'}-${navEnd ? 'e' : 'x'}`}
+          <NavigationLayer
               startPoint={navStart} 
               endPoint={navEnd} 
             destinationId={targetFacilityId}
@@ -725,12 +750,17 @@ function MapView({
               nodes={graphData.nodes}
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
+              acquiringStart={isManualStartPending}
+              enabled={Boolean(targetFacilityId) && runtimeState.navigation.phase !== "cleared" && runtimeState.navigation.phase !== "idle"}
               navigationSessionId={navigationSessionId}
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
               releaseRouteFoundAnnouncement={releaseRouteFoundAnnouncement}
-              onRoutesFound={handleRoutesFound}
+              onRouteCommitted={handleRouteCommitted}
+              onRouteFailed={handleRouteFailed}
+              onRouteRequestStarted={handleRouteRequestStarted}
+              committedRoute={committedRoute}
             />
           )}
         </MapContainerClient>
@@ -796,15 +826,15 @@ function MapView({
               </div>
             )}
 
-            {!isManualStartPending && availableRoutes[0] && (
+            {!isManualStartPending && committedRoute && (
                 <div className="flex animate-in gap-3 rounded-full border bg-background/90 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground shadow-lg ring-1 ring-black/5 backdrop-blur fade-in slide-in-from-top-1">
                     <span className="flex items-center gap-1">
                         <Route className="h-3 w-3" />
-                        {availableRoutes[0].totalDistance.toFixed(0)}m
+                        {committedRoute.totalDistance.toFixed(0)}m
                     </span>
                     <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {availableRoutes[0].estimatedTime} min
+                        {committedRoute.estimatedTime} min
                     </span>
                 </div>
             )}
@@ -822,8 +852,8 @@ function MapView({
             end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
             mode: navMode,
             routeIndex: 0,
-            routeCount: availableRoutes.length,
-            totalDistanceMeters: availableRoutes[0]?.totalDistance ?? null,
+            routeCount: committedRoute ? 1 : 0,
+            totalDistanceMeters: committedRoute?.totalDistance ?? null,
           }}
         />
 

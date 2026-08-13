@@ -31,6 +31,6 @@ test("mobile map actions preserve their navigation clearance across safe areas",
   );
   assert.match(
     bottomCardSource,
-    /bottom-\[calc\(6\.5rem\+env\(safe-area-inset-bottom,0px\)\)\]/,
+    /bottom-\[calc\(7\.25rem\+env\(safe-area-inset-bottom,0px\)\)\]/,
   );
 });

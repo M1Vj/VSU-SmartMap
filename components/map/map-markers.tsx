@@ -14,6 +14,7 @@ type MapMarkersProps = {
   zoom: number;
   onSelect?: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
+  onMarkerActivate?: (item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => void;
   onDeselect?: () => void;
   onDirections?: (item: MapItem) => void;
 };
@@ -26,6 +27,7 @@ export function MapMarkers({
   zoom,
   onSelect,
   onMarkerTapOverride,
+  onMarkerActivate,
   onDeselect,
   onDirections,
 }: MapMarkersProps) {
@@ -57,6 +59,7 @@ export function MapMarkers({
             displayCoordinates={entry.displayCoordinates}
             onSelect={onSelect}
             onMarkerTapOverride={onMarkerTapOverride}
+            onMarkerActivate={onMarkerActivate}
             onDeselect={onDeselect}
             onDirections={onDirections}
             isSelected={entry.item.id === selectedId}

@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
+import { createInteractionGateway } from "@/lib/map/interaction-gateway";
+import { markMapPerformance } from "@/lib/map/performance-marks";
 
 const TAP_MOVE_TOLERANCE_PX = 12;
 const TAP_MAX_DURATION_MS = 350;
@@ -50,6 +52,23 @@ export function MapSelectionLayer({
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const mouseStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const [zoom, setZoom] = useState(() => map.getZoom());
+  const interactionGateway = useMemo(
+    () => createInteractionGateway({
+      onMarkerActivate: (itemId) => {
+        const startedAt = typeof performance === "undefined" ? 0 : performance.now();
+        const item = items.find((candidate) => candidate.id === itemId);
+        if (!item) return;
+        if (onMarkerTapOverride) {
+          onMarkerTapOverride(item);
+          return;
+        }
+        onSelect(item);
+        markMapPerformance("marker-activation", startedAt);
+      },
+      onBackground: onClearSelection,
+    }),
+    [items, onClearSelection, onMarkerTapOverride, onSelect],
+  );
 
   const getCurrentView = useCallback(() => ({
     center: {
@@ -73,8 +92,8 @@ export function MapSelectionLayer({
       return;
     }
 
-    onClearSelection?.();
-  }, [onClearSelection, onMapClick]);
+    interactionGateway.dispatch({ type: "background", target: "background" });
+  }, [interactionGateway, onMapClick]);
 
   useEffect(() => {
     const container = map.getContainer();
@@ -271,6 +290,9 @@ export function MapSelectionLayer({
       minimizeNonDestinationMarkers={minimizeNonDestinationMarkers}
       zoom={zoom}
       onSelect={onSelect}
+      onMarkerActivate={(item, activationId, modality) => {
+        interactionGateway.dispatch({ type: "marker", itemId: item.id, activationId, modality });
+      }}
       onMarkerTapOverride={onMarkerTapOverride}
       onDeselect={onClearSelection}
       onDirections={onDirections}

@@ -1,11 +1,12 @@
 interface RouteRequestCallbacks<Result> {
   clear: () => void;
-  publish: (result: Result) => void;
+  publish: (result: Result, requestId?: number) => void;
   loading: (message: string, id: string) => void;
   success: (message: string, id: string) => void;
   error: (message: string, id: string) => void;
   dismiss: (id: string) => void;
-  reportError?: (error: unknown) => void;
+  reportError?: (error: unknown, requestId?: number) => void;
+  requestStarted?: (requestId: number) => void;
 }
 
 interface StartRouteRequest<Result> {
@@ -18,6 +19,7 @@ interface StartRouteRequest<Result> {
   onSuccess?: (id: string) => void;
   onError?: () => void;
   resolve?: (signal: AbortSignal) => Promise<Result>;
+  requestId?: number;
 }
 
 interface ActiveRequest {
@@ -28,9 +30,11 @@ interface ActiveRequest {
   toastType: "loading" | "success" | "error" | null;
   successToastTracked: boolean;
   isSuccessAnnounced?: () => boolean;
+  requestId: number;
 }
 
 let nextToastId = 0;
+let nextRequestId = 0;
 
 export function createRouteRequestCoordinator<Result>(
   callbacks: RouteRequestCallbacks<Result>,
@@ -66,8 +70,10 @@ export function createRouteRequestCoordinator<Result>(
         toastType: null,
         successToastTracked: false,
         isSuccessAnnounced: options.isSuccessAnnounced,
+        requestId: options.requestId ?? ++nextRequestId,
       };
       active = request;
+      if (options.resolve) callbacks.requestStarted?.(request.requestId);
       callbacks.clear();
 
       const isSuccessAnnounced = options.isSuccessAnnounced?.() === true;
@@ -83,7 +89,7 @@ export function createRouteRequestCoordinator<Result>(
           if (active !== request || request.controller.signal.aborted) return;
           const result = await options.resolve!(request.controller.signal);
           if (active !== request || request.controller.signal.aborted) return;
-          callbacks.publish(result);
+          callbacks.publish(result, request.requestId);
           if (options.shouldAnnounceSuccess && !options.shouldAnnounceSuccess()) {
             if (request.toastVisible) {
               callbacks.dismiss(request.id);
@@ -101,7 +107,7 @@ export function createRouteRequestCoordinator<Result>(
           .catch((error: unknown) => {
             if (active !== request || request.controller.signal.aborted) return;
             options.onError?.();
-            callbacks.reportError?.(error);
+            callbacks.reportError?.(error, request.requestId);
             callbacks.clear();
             callbacks.error(
               options.errorMessage ?? "No route found. External routing may be unavailable.",

@@ -24,6 +24,7 @@ type MapMarkerProps = {
   zoom: number;
   onSelect?: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
+  onMarkerActivate?: (item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => void;
   onDeselect?: () => void;
   onDirections?: (item: MapItem) => void;
 };
@@ -37,6 +38,7 @@ export function MapMarker({
   zoom,
   onSelect,
   onMarkerTapOverride,
+  onMarkerActivate,
   onDeselect,
   onDirections,
 }: MapMarkerProps) {
@@ -152,8 +154,11 @@ export function MapMarker({
       zIndexOffset={isSelected || isRouteDestination ? 1000 : 0}
       alt={accessibleName}
       eventHandlers={{
-        click: () => {
+        click: (event) => {
           markerRef.current?.closeTooltip();
+          const original = (event as { originalEvent?: MouseEvent }).originalEvent;
+          onMarkerActivate?.(item, `${item.id}:${Math.round((original?.timeStamp ?? Date.now()) / 500)}`, "mouse");
+          if (onMarkerActivate) return;
           if (onMarkerTapOverride) {
             onMarkerTapOverride(item);
             return;
@@ -166,6 +171,8 @@ export function MapMarker({
           if (key === "Enter" || key === " " || key === "Spacebar") {
             original?.preventDefault();
             markerRef.current?.closeTooltip();
+            onMarkerActivate?.(item, `${item.id}:${Math.round((original?.timeStamp ?? Date.now()) / 500)}`, "keyboard");
+            if (onMarkerActivate) return;
             if (onMarkerTapOverride) {
               onMarkerTapOverride(item);
               return;

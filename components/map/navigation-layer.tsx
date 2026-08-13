@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { CircleMarker, Polyline } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
 import type { LatLng } from "leaflet";
-import { findPath, findNearestEdge, getDistance, isNodeClosed, isNodeNavigable, calculateTime } from "@/lib/pathfinding/astar";
+import { findNearestEdge, getDistance, isNodeClosed, isNodeNavigable, calculateTime } from "@/lib/pathfinding/astar";
 import { getExternalPath } from "@/lib/pathfinding/external";
 import {
   findClosestTransitionGate,
@@ -14,6 +14,7 @@ import {
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
+import { createRouteEngine, getRouteGraphRevision } from "@/lib/pathfinding/route-engine";
 
 interface NavigationLayerProps {
   startPoint: LatLng | null;
@@ -23,12 +24,17 @@ interface NavigationLayerProps {
   nodes: MapNode[];
   edges: MapEdge[];
   waitingForUserLocation?: boolean;
+  acquiringStart?: boolean;
+  enabled?: boolean;
   navigationSessionId?: number;
   hasRouteFoundAnnouncement?: (sessionId: number) => boolean;
   claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
   registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
   releaseRouteFoundAnnouncement?: () => void;
-  onRoutesFound?: (routes: PathResult[]) => void;
+  onRouteCommitted?: (route: PathResult, requestId: number) => void;
+  onRouteFailed?: (message: string, requestId: number) => void;
+  onRouteRequestStarted?: (requestId: number) => void;
+  committedRoute?: PathResult | null;
 }
 
 export function NavigationLayer({
@@ -39,35 +45,51 @@ export function NavigationLayer({
   nodes,
   edges,
   waitingForUserLocation,
+  acquiringStart = false,
+  enabled = true,
   navigationSessionId,
   hasRouteFoundAnnouncement,
   claimRouteFoundAnnouncement,
   registerRouteFoundAnnouncement,
   releaseRouteFoundAnnouncement,
-  onRoutesFound,
+  onRouteCommitted,
+  onRouteFailed,
+  onRouteRequestStarted,
+  committedRoute = null,
 }: NavigationLayerProps) {
-  const [path, setPath] = useState<PathResult | null>(null);
+  const routeEngine = useMemo(() => createRouteEngine(), []);
   const coordinator = useMemo(
     () =>
       createRouteRequestCoordinator<PathResult>({
-        clear: () => {
-          setPath(null);
-          onRoutesFound?.([]);
-        },
-        publish: (result) => {
-          setPath(result);
-          onRoutesFound?.([result]);
+        clear: () => undefined,
+        publish: (result, requestId) => {
+          if (requestId !== undefined) onRouteCommitted?.(result, requestId);
         },
         loading: (message, id) => toast.loading(message, { id }),
         success: (message, id) => toast.success(message, { id }),
-        error: (message, id) => toast.error(message, { id }),
         dismiss: (id) => toast.dismiss(id),
-        reportError: (error) => console.error("NavigationLayer: Process error", error),
+        error: (message, id) => {
+          toast.error(message, { id });
+        },
+        reportError: (error, requestId) => {
+          const message = error instanceof Error ? error.message : "No route found. External routing may be unavailable.";
+          console.error("NavigationLayer: Process error", error);
+          if (requestId !== undefined) onRouteFailed?.(message, requestId);
+        },
+        requestStarted: (requestId) => onRouteRequestStarted?.(requestId),
       }),
-    [onRoutesFound],
+    [onRouteCommitted, onRouteFailed, onRouteRequestStarted],
   );
 
   useEffect(() => {
+    routeEngine.setGraph(nodes, edges, getRouteGraphRevision(nodes, edges));
+  }, [edges, nodes, routeEngine]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return coordinator.start({});
+    }
+
     const isSuccessAnnounced =
       navigationSessionId === undefined || !hasRouteFoundAnnouncement
         ? undefined
@@ -77,6 +99,14 @@ export function NavigationLayer({
       return coordinator.start({
         loadingMessage: "Waiting for user location...",
         sessionId: navigationSessionId,
+        isSuccessAnnounced,
+      });
+    }
+
+    if (acquiringStart) {
+      return coordinator.start({
+        sessionId: navigationSessionId,
+        requestId: navigationSessionId,
         isSuccessAnnounced,
       });
     }
@@ -187,16 +217,17 @@ export function NavigationLayer({
       return nearestId;
     };
 
-    const buildInternalRoute = (
+    let requestSignal: AbortSignal | undefined;
+    const buildInternalRoute = async (
       from: { lat: number; lng: number },
       to: { lat: number; lng: number },
       targetId?: string
-    ): PathResult | null => {
+    ): Promise<PathResult | null> => {
       const startNodeId = snapToGraph(from.lat, from.lng, false);
       const endNodeId = snapToGraph(to.lat, to.lng, true, targetId);
       if (!startNodeId || !endNodeId) return null;
 
-      const route = findPath(nodes, edges, startNodeId, endNodeId, mode);
+      const route = await routeEngine.route({ startNodeId, endNodeId, mode, signal: requestSignal });
       if (!route) return null;
 
       const startNode = makeNode("route-start", from);
@@ -219,6 +250,7 @@ export function NavigationLayer({
     };
 
     const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
+      requestSignal = signal;
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
       return resolveNavigationRoute({
@@ -252,24 +284,25 @@ export function NavigationLayer({
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
       onError: releaseRouteFoundAnnouncement,
       resolve: resolveRoute,
+      requestId: navigationSessionId,
     });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
 
-  if (!path) return null;
+  if (!committedRoute) return null;
 
   return (
     <>
       <Polyline
-        positions={path.path.map((node) => [node.lat, node.lng])}
+        positions={committedRoute.path.map((node) => [node.lat, node.lng])}
         pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9 }}
       />
       <CircleMarker
-        center={[path.path[0].lat, path.path[0].lng]}
+        center={[committedRoute.path[0].lat, committedRoute.path[0].lng]}
         radius={6}
         pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1 }}
       />
       <CircleMarker
-        center={[path.path[path.path.length - 1].lat, path.path[path.path.length - 1].lng]}
+        center={[committedRoute.path[committedRoute.path.length - 1].lat, committedRoute.path[committedRoute.path.length - 1].lng]}
         radius={6}
         pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1 }}
       />

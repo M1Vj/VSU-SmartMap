@@ -11,7 +11,7 @@ type ExternalPath = (
 interface NavigationRouteDependencies {
   isInside: (point: Point) => boolean;
   findGate: (outside: Point, inside: Point) => MapNode;
-  buildInternalRoute: (from: Point, to: Point, destinationId?: string) => PathResult | null;
+  buildInternalRoute: (from: Point, to: Point, destinationId?: string) => PathResult | null | Promise<PathResult | null>;
   externalPath: ExternalPath;
   mergeAtGate: (
     firstPath: MapNode[],
@@ -42,13 +42,13 @@ export async function resolveNavigationRoute({
   let result: PathResult | null = null;
 
   if (startInside && endInside) {
-    result = dependencies.buildInternalRoute(start, end, destinationId);
+    result = await dependencies.buildInternalRoute(start, end, destinationId);
     if (!result) {
       result = await dependencies.externalPath(start, end, mode, signal);
     }
   } else if (!startInside && endInside) {
     const gate = dependencies.findGate(start, end);
-    const internalRoute = dependencies.buildInternalRoute(gate, end, destinationId);
+    const internalRoute = await dependencies.buildInternalRoute(gate, end, destinationId);
     const externalRoute = await dependencies.externalPath(start, gate, mode, signal);
     if (!externalRoute || !internalRoute) {
       throw new Error("External routing provider could not resolve this route.");
@@ -56,7 +56,7 @@ export async function resolveNavigationRoute({
     result = dependencies.mergeAtGate(externalRoute.path, gate, internalRoute.path, mode);
   } else if (startInside && !endInside) {
     const gate = dependencies.findGate(end, start);
-    const internalRoute = dependencies.buildInternalRoute(start, gate);
+    const internalRoute = await dependencies.buildInternalRoute(start, gate);
     const externalRoute = await dependencies.externalPath(gate, end, mode, signal);
     if (!externalRoute || !internalRoute) {
       throw new Error("External routing provider could not resolve this route.");
