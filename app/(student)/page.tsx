@@ -32,20 +32,23 @@ import type { TransportMode } from "@/lib/types/graph";
 import { ReportRouteDialog } from "@/components/navigation/report-route-dialog";
 import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates";
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
-import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
 import { createRouteAnnouncementTracker } from "@/lib/navigation/route-announcement";
 import {
   areFacilityMarkerListsEquivalent,
   getVisibleFacilitiesForMapLoad,
 } from "@/lib/map/facility-marker-list";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { VSU_MAIN_GATE } from "@/lib/constants/map";
 import {
   createMapRuntimeController,
 } from "@/lib/map/map-runtime";
-import { markMapPerformance } from "@/lib/map/performance-marks";
+import {
+  beginMapPerformanceRequest,
+  commitMapPerformanceRequest,
+  clearMapPerformanceRequest,
+  failMapPerformanceRequest,
+} from "@/lib/map/performance-marks";
 
 const MapSelectionLayer = dynamic(
   () => import("@/components/map/map-selection-layer").then((m) => m.MapSelectionLayer),
@@ -487,7 +490,6 @@ function MapView({
   const hasNavigationState = Boolean(
     navStart || navEnd || isManualStartPending || runtimeState.navigation.destinationId,
   );
-  const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
   const navigationControls = {
     primaryActionLabel:
       runtimeState.presentation.controls.primaryAction === "clear" ? "Clear Route" : "Cancel Route",
@@ -496,6 +498,15 @@ function MapView({
   };
   const selectedMapItem: MapItem | null =
     selectedBoardingHouse ?? (selectedFacility?.id === runtimeState.selectedItemId ? selectedFacility : null);
+
+  const resolveManualStart = useCallback((point: NavigationPoint, origin: "manual" | "live") => {
+    if (!isManualStartPending) return false;
+    const pendingRequestId = runtime.getState().navigation.pendingRequestId;
+    if (pendingRequestId == null) return false;
+    setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
+    runtime.dispatch({ type: "navigation/resolving", requestId: pendingRequestId, origin });
+    return true;
+  }, [isManualStartPending, runtime, setNavStart]);
 
   useEffect(() => {
     if (selectedId && selectedId !== runtimeState.selectedItemId) {
@@ -525,6 +536,9 @@ function MapView({
 
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
+    const pendingRequestId = runtime.getState().navigation.pendingRequestId;
+    if (pendingRequestId != null) clearMapPerformanceRequest(pendingRequestId);
+    clearMapPerformanceRequest(navigationSessionId);
     clearNavigation();
     setManualLocationRequestPending(false);
     runtime.dispatch({ type: "navigation/cleared" });
@@ -550,10 +564,8 @@ function MapView({
     const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
     const routeStart = clampPointToVsuCampus(liveStart);
 
-    runtime.dispatch({ type: "navigation/resolving", requestId: runtime.getState().navigation.pendingRequestId ?? navigationSessionId });
-    setManualLocationRequestPending(false);
-    setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
-  }, [isManualStartPending, manualLocationRequestPending, navEnd, navigationSessionId, position, runtime, setNavStart]);
+    if (resolveManualStart(routeStart, "live")) setManualLocationRequestPending(false);
+  }, [isManualStartPending, manualLocationRequestPending, navEnd, position, resolveManualStart]);
 
   useEffect(() => {
     if (!manualLocationRequestPending || !locationError) return;
@@ -593,11 +605,12 @@ function MapView({
 
   const handleRouteCommitted = useCallback((route: PathResult, requestId: number) => {
     runtime.dispatch({ type: "navigation/committed", requestId, route });
-    markMapPerformance("route-commit", typeof performance === "undefined" ? 0 : performance.now());
+    commitMapPerformanceRequest(requestId);
   }, [runtime]);
 
   const handleRouteFailed = useCallback((message: string, requestId: number) => {
     runtime.dispatch({ type: "navigation/failed", requestId, message });
+    failMapPerformanceRequest(requestId);
   }, [runtime]);
 
   const handleRouteRequestStarted = useCallback((requestId: number) => {
@@ -618,7 +631,7 @@ function MapView({
   }, [routeAnnouncementTracker]);
 
   const beginNavigationToItem = useCallback((item: MapItem) => {
-    const requestStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+    const requestStartedAt = typeof performance === "undefined" ? Date.now() : performance.now();
     const decision = resolveNavigationStart(position);
 
     dismissRouteFoundAnnouncement(navigationSessionId);
@@ -632,7 +645,7 @@ function MapView({
       mode: navMode,
       awaitingStart: decision.mode === "manual",
     });
-    markMapPerformance("route-request", requestStartedAt);
+    beginMapPerformanceRequest(requestId, requestStartedAt);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
 
     if (decision.mode === "live") {
@@ -664,12 +677,9 @@ function MapView({
   }, [beginNavigationToItem, onPendingNavigationConsumed, pendingNavigationFacility]);
 
   const handleManualStartPlacement = useCallback((point: NavigationPoint) => {
-    if (!isManualStartPending) return;
-
     const start = createManualStartPoint(point);
-    setNavStart({ lat: start.lat, lng: start.lng } as LatLng);
-    runtime.dispatch({ type: "navigation/resolving", requestId: runtime.getState().navigation.pendingRequestId ?? navigationSessionId });
-  }, [isManualStartPending, navigationSessionId, runtime, setNavStart]);
+    resolveManualStart(start, "manual");
+  }, [resolveManualStart]);
 
   const handleManualStartMarkerTap = useCallback((item: MapItem) => {
     handleManualStartPlacement(item.coordinates);
@@ -682,21 +692,19 @@ function MapView({
       const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
       const routeStart = clampPointToVsuCampus(liveStart);
 
-      setManualLocationRequestPending(false);
-      setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
+      if (resolveManualStart(routeStart, "live")) setManualLocationRequestPending(false);
       return;
     }
 
     setManualLocationRequestPending(true);
     startTracking();
-  }, [isManualStartPending, position, setNavStart, startTracking]);
+  }, [isManualStartPending, position, resolveManualStart, startTracking]);
 
   const handleUseMainGateStart = useCallback(() => {
     if (!isManualStartPending) return;
 
-    setManualLocationRequestPending(false);
-    setNavStart({ lat: VSU_MAIN_GATE.lat, lng: VSU_MAIN_GATE.lng } as LatLng);
-  }, [isManualStartPending, setNavStart]);
+    if (resolveManualStart(VSU_MAIN_GATE, "manual")) setManualLocationRequestPending(false);
+  }, [isManualStartPending, resolveManualStart]);
 
   return (
     <div className="relative h-full w-full">
@@ -766,7 +774,7 @@ function MapView({
         </MapContainerClient>
 
         {hasHydrated && navEnd && (
-          <div className="absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
+          <div data-map-status-hud className="pointer-events-none absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
             {navigationControls.statusText && (
               <div
                 className="rounded-full border bg-background/95 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg ring-1 ring-black/5 backdrop-blur"
@@ -776,39 +784,12 @@ function MapView({
               </div>
             )}
 
-            <div className="flex gap-2">
-                <Button 
-                  variant={hasActiveRoute ? "destructive" : "outline"}
-                  size="sm" 
-                  className={cn(
-                    "rounded-full px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5",
-                    isManualStartPending ? "h-11" : "h-8",
-                    !hasActiveRoute && "bg-background/90 backdrop-blur hover:bg-background",
-                  )}
-                  onClick={clearRouteState}
-                  aria-label={`${navigationControls.primaryActionLabel} navigation`}
-                >
-                  {navigationControls.primaryActionLabel}
-                </Button>
-
-                {navigationControls.canReportRoute && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-full bg-background/90 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
-                    onClick={() => setRouteReportOpen(true)}
-                  >
-                    Report Route
-                  </Button>
-                )}
-            </div>
-
             {isManualStartPending && (
-              <div className="flex flex-wrap justify-center gap-2">
+              <div className="pointer-events-auto flex flex-wrap justify-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                   onClick={handleUseMyLocationStart}
                   aria-label="Use my location as route start"
                 >
@@ -817,7 +798,7 @@ function MapView({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                   onClick={handleUseMainGateStart}
                   aria-label="Start route from main gate"
                 >
@@ -837,6 +818,33 @@ function MapView({
                         {committedRoute.estimatedTime} min
                     </span>
                 </div>
+            )}
+          </div>
+        )}
+
+        {hasHydrated && navEnd && (
+          <div data-map-action-dock className="fixed inset-x-0 bottom-[calc(7.25rem+min(42vh,22rem)+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8">
+            {runtimeState.presentation.controls.primaryAction !== "none" && (
+              <Button
+                variant={hasActiveRoute ? "destructive" : "outline"}
+                size="sm"
+                className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                onClick={clearRouteState}
+                aria-label={`${navigationControls.primaryActionLabel} navigation`}
+              >
+                {navigationControls.primaryActionLabel}
+              </Button>
+            )}
+            {navigationControls.canReportRoute && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                onClick={() => setRouteReportOpen(true)}
+                aria-label="Report route"
+              >
+                Report Route
+              </Button>
             )}
           </div>
         )}

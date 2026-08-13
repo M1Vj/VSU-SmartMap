@@ -116,3 +116,41 @@ test("adapter resolving event cannot hide a committed route during refresh", () 
   assert.equal(state.navigation.phase, "refreshing");
   assert.equal(state.navigation.committedRoute, route);
 });
+
+test("manual start resolution keeps the exact request and updates origin", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 42,
+    destinationId: "facility-1",
+    origin: "manual",
+    awaitingStart: true,
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/resolving", requestId: 42, origin: "live" });
+  assert.equal(state.navigation.pendingRequestId, 42);
+  assert.equal(state.navigation.phase, "resolving");
+  assert.equal(state.navigation.origin, "live");
+  assert.equal(state.presentation.controls.primaryAction, "cancel");
+});
+
+test("runtime controls distinguish replacement cancellation from committed-route clearing", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-1",
+    origin: "live",
+  });
+  assert.equal(state.presentation.controls.primaryAction, "cancel");
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+  assert.equal(state.presentation.controls.primaryAction, "clear");
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-1",
+    origin: "live",
+  });
+  assert.equal(state.presentation.controls.primaryAction, "cancel");
+  state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
+  assert.equal(state.presentation.controls.primaryAction, "clear");
+});

@@ -83,6 +83,11 @@ export function MapMarker({
 
   const position: [number, number] = [displayCoordinates.lat, displayCoordinates.lng];
   const markerRef = useRef<LeafletMarker>(null);
+  const compatibilityActivationRef = useRef<{
+    activationId: string;
+    modality: "mouse" | "touch" | "pen" | "keyboard";
+    at: number;
+  } | null>(null);
 
   useEffect(() => {
     const marker = markerRef.current;
@@ -129,6 +134,31 @@ export function MapMarker({
     }
   }, [hideTooltip, icon]);
 
+  useEffect(() => {
+    const marker = markerRef.current;
+    const element = marker?.getElement();
+    if (!marker || !element || !onMarkerActivate) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      element.setPointerCapture?.(event.pointerId);
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
+      const activationId = compatibilityActivationRef.current?.activationId ?? `${item.id}:pointer:${event.pointerId}:${event.timeStamp}`;
+      compatibilityActivationRef.current = { activationId, modality, at: Date.now() };
+      markerRef.current?.closeTooltip();
+      onMarkerActivate(item, activationId, modality);
+      element.releasePointerCapture?.(event.pointerId);
+    };
+
+    element.addEventListener("pointerdown", handlePointerDown);
+    element.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      element.removeEventListener("pointerdown", handlePointerDown);
+      element.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [item, onMarkerActivate]);
+
   const handleViewDetails = () => {
     setFacilitySheetOpen(true);
   };
@@ -156,8 +186,14 @@ export function MapMarker({
       eventHandlers={{
         click: (event) => {
           markerRef.current?.closeTooltip();
-          const original = (event as { originalEvent?: MouseEvent }).originalEvent;
-          onMarkerActivate?.(item, `${item.id}:${Math.round((original?.timeStamp ?? Date.now()) / 500)}`, "mouse");
+          const original = (event as { originalEvent?: MouseEvent & { pointerId?: number; pointerType?: string } }).originalEvent;
+          const compatibility = compatibilityActivationRef.current && Date.now() - compatibilityActivationRef.current.at < 1500
+            ? compatibilityActivationRef.current
+            : null;
+          compatibilityActivationRef.current = null;
+          const activationId = compatibility?.activationId ?? `${item.id}:mouse:${original?.pointerId ?? "mouse"}:${original?.timeStamp ?? Date.now()}`;
+          const modality = compatibility?.modality ?? (original?.pointerType === "touch" || original?.pointerType === "pen" ? original.pointerType : "mouse");
+          onMarkerActivate?.(item, activationId, modality);
           if (onMarkerActivate) return;
           if (onMarkerTapOverride) {
             onMarkerTapOverride(item);
@@ -171,7 +207,9 @@ export function MapMarker({
           if (key === "Enter" || key === " " || key === "Spacebar") {
             original?.preventDefault();
             markerRef.current?.closeTooltip();
-            onMarkerActivate?.(item, `${item.id}:${Math.round((original?.timeStamp ?? Date.now()) / 500)}`, "keyboard");
+            const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
+            compatibilityActivationRef.current = { activationId, modality: "keyboard", at: Date.now() };
+            onMarkerActivate?.(item, activationId, "keyboard");
             if (onMarkerActivate) return;
             if (onMarkerTapOverride) {
               onMarkerTapOverride(item);

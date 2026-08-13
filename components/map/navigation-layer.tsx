@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { CircleMarker, Polyline } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
 import type { LatLng } from "leaflet";
-import { findNearestEdge, getDistance, isNodeClosed, isNodeNavigable, calculateTime } from "@/lib/pathfinding/astar";
+import { getDistance, isNodeClosed, calculateTime } from "@/lib/pathfinding/astar";
 import { getExternalPath } from "@/lib/pathfinding/external";
 import {
   findClosestTransitionGate,
@@ -14,7 +14,12 @@ import {
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
-import { createRouteEngine, getRouteGraphRevision } from "@/lib/pathfinding/route-engine";
+import {
+  createRouteEngine,
+  findPreparedNearestEdge,
+  getRouteGraphRevision,
+  isPreparedNodeNavigable,
+} from "@/lib/pathfinding/route-engine";
 
 interface NavigationLayerProps {
   startPoint: LatLng | null;
@@ -115,6 +120,9 @@ export function NavigationLayer({
       return coordinator.start({ sessionId: navigationSessionId, isSuccessAnnounced });
     }
 
+    const preparedGraph = routeEngine.getGraph();
+    if (!preparedGraph) return coordinator.start({ sessionId: navigationSessionId, isSuccessAnnounced });
+
     const makeNode = (id: string, point: { lat: number; lng: number }): MapNode => ({
       id,
       lat: point.lat,
@@ -123,30 +131,30 @@ export function NavigationLayer({
     });
 
     const snapToGraph = (lat: number, lng: number, isDestination = false, targetId?: string): string | null => {
-      if (!nodes || nodes.length === 0 || !edges || edges.length === 0) return null;
+      if (!preparedGraph.nodes.length || !preparedGraph.edges.length) return null;
 
-      const isNavigable = (id: string) => isNodeNavigable(id, mode, nodes, edges, !isDestination);
+      const isNavigable = (id: string) => isPreparedNodeNavigable(preparedGraph, id, mode, !isDestination);
 
       if (targetId) {
         const refLat = isDestination ? (startPoint?.lat ?? lat) : (endPoint?.lat ?? lat);
         const refLng = isDestination ? (startPoint?.lng ?? lng) : (endPoint?.lng ?? lng);
 
-        const associatedEntries = nodes
-          .filter((node) => node.type === "building_entry" && node.building_ids?.includes(targetId) && isNavigable(node.id))
+        const associatedEntries = (preparedGraph.buildingEntriesById.get(targetId) ?? [])
+          .filter((node) => isNavigable(node.id))
           .map((node) => ({ id: node.id, dist: getDistance(refLat, refLng, node.lat, node.lng) }))
           .sort((a, b) => a.dist - b.dist);
 
         if (associatedEntries.length > 0) return associatedEntries[0].id;
 
-        const anyAssociatedEntry = nodes
-          .filter((node) => node.type === "building_entry" && node.building_ids?.includes(targetId))
+        const anyAssociatedEntry = (preparedGraph.buildingEntriesById.get(targetId) ?? [])
+          .slice()
           .sort((a, b) => getDistance(lat, lng, a.lat, a.lng) - getDistance(lat, lng, b.lat, b.lng))[0];
 
         if (anyAssociatedEntry) {
-          const { nearestEdge } = findNearestEdge(anyAssociatedEntry.lat, anyAssociatedEntry.lng, nodes, edges, mode);
+          const { nearestEdge } = findPreparedNearestEdge(preparedGraph, anyAssociatedEntry.lat, anyAssociatedEntry.lng, mode);
           if (nearestEdge) {
-            const source = nodes.find((node) => node.id === nearestEdge.source_id);
-            const target = nodes.find((node) => node.id === nearestEdge.target_id);
+            const source = preparedGraph.nodeById.get(nearestEdge.source_id);
+            const target = preparedGraph.nodeById.get(nearestEdge.target_id);
             if (source && target) {
               return getDistance(anyAssociatedEntry.lat, anyAssociatedEntry.lng, source.lat, source.lng) <
                 getDistance(anyAssociatedEntry.lat, anyAssociatedEntry.lng, target.lat, target.lng)
@@ -157,19 +165,19 @@ export function NavigationLayer({
         }
       }
 
-      const nearbyFacilityEntries = nodes
-        .filter((node) => node.type === "building_entry" && isNavigable(node.id))
+      const nearbyFacilityEntries = preparedGraph.buildingEntries
+        .filter((node) => isNavigable(node.id))
         .map((node) => ({ id: node.id, dist: getDistance(lat, lng, node.lat, node.lng) }))
         .filter((node) => node.dist <= 50)
         .sort((a, b) => a.dist - b.dist);
 
       if (nearbyFacilityEntries.length > 0) return nearbyFacilityEntries[0].id;
 
-      const { nearestEdge } = findNearestEdge(lat, lng, nodes, edges, mode);
+      const { nearestEdge } = findPreparedNearestEdge(preparedGraph, lat, lng, mode);
 
       if (nearestEdge) {
-        const source = nodes.find((node) => node.id === nearestEdge.source_id);
-        const target = nodes.find((node) => node.id === nearestEdge.target_id);
+        const source = preparedGraph.nodeById.get(nearestEdge.source_id);
+        const target = preparedGraph.nodeById.get(nearestEdge.target_id);
 
         if (source && target) {
           const sourceDistance = getDistance(lat, lng, source.lat, source.lng);
@@ -180,22 +188,8 @@ export function NavigationLayer({
 
       let nearestId: string | null = null;
       let minDist = Infinity;
-      const navigableNodeIds = new Set<string>();
-
-      for (const edge of edges) {
-        const hasAccess =
-          edge.access && edge.access.length > 0
-            ? edge.access.includes(mode)
-            : mode === "walking" || edge.type === "road";
-
-        if (hasAccess) {
-          navigableNodeIds.add(edge.source_id);
-          navigableNodeIds.add(edge.target_id);
-        }
-      }
-
-      for (const node of nodes) {
-        if (!navigableNodeIds.has(node.id) || isNodeClosed(node)) continue;
+      for (const node of preparedGraph.nodes) {
+        if (!isPreparedNodeNavigable(preparedGraph, node.id, mode)) continue;
         const distance = getDistance(node.lat, node.lng, lat, lng);
         if (distance < minDist) {
           minDist = distance;
@@ -204,7 +198,7 @@ export function NavigationLayer({
       }
 
       if (!nearestId) {
-        for (const node of nodes) {
+        for (const node of preparedGraph.nodes) {
           if (isNodeClosed(node)) continue;
           const distance = getDistance(node.lat, node.lng, lat, lng);
           if (distance < minDist) {
@@ -232,7 +226,7 @@ export function NavigationLayer({
 
       const startNode = makeNode("route-start", from);
       const endNode = makeNode("route-end", to);
-      const endSnappedToEntry = nodes.find((node) => node.id === endNodeId)?.type === "building_entry";
+      const endSnappedToEntry = preparedGraph.nodeById.get(endNodeId)?.type === "building_entry";
       const finalPath = [startNode, ...route.path];
 
       if (!endSnappedToEntry) finalPath.push(endNode);

@@ -7,7 +7,6 @@ import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
-import { markMapPerformance } from "@/lib/map/performance-marks";
 
 const TAP_MOVE_TOLERANCE_PX = 12;
 const TAP_MAX_DURATION_MS = 350;
@@ -55,7 +54,6 @@ export function MapSelectionLayer({
   const interactionGateway = useMemo(
     () => createInteractionGateway({
       onMarkerActivate: (itemId) => {
-        const startedAt = typeof performance === "undefined" ? 0 : performance.now();
         const item = items.find((candidate) => candidate.id === itemId);
         if (!item) return;
         if (onMarkerTapOverride) {
@@ -63,7 +61,6 @@ export function MapSelectionLayer({
           return;
         }
         onSelect(item);
-        markMapPerformance("marker-activation", startedAt);
       },
       onBackground: onClearSelection,
     }),

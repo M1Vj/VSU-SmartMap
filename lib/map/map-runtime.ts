@@ -46,7 +46,7 @@ export type MapRuntimeEvent =
       awaitingStart?: boolean;
     }
   | { type: "navigation/acquiring"; requestId: number }
-  | { type: "navigation/resolving"; requestId: number }
+  | { type: "navigation/resolving"; requestId: number; origin?: NavigationOrigin }
   | { type: "navigation/committed"; requestId: number; route: PathResult }
   | { type: "navigation/failed"; requestId: number; message: string }
   | { type: "navigation/cleared" };
@@ -90,7 +90,12 @@ function derivePresentation(input: Pick<MapRuntimeState["navigation"], "phase" |
   return {
     markerMode: routeMode,
     controls: {
-      primaryAction: hasDestination ? "clear" : "none",
+      primaryAction:
+        !hasDestination
+          ? "none"
+          : input.phase === "active" || (input.phase === "failed" && hasRoute)
+            ? "clear"
+            : "cancel",
       canReportRoute: hasRoute && input.phase !== "cleared" && input.phase !== "idle",
       statusText:
         input.phase === "acquiring"
@@ -149,7 +154,11 @@ export function mapRuntimeReducer(
     const phase = event.type === "navigation/acquiring"
       ? (state.navigation.committedRoute ? "refreshing" : "acquiring")
       : (state.navigation.committedRoute ? "refreshing" : "resolving");
-    const navigation = { ...state.navigation, phase: phase as NavigationPhase };
+    const navigation = {
+      ...state.navigation,
+      phase: phase as NavigationPhase,
+      origin: event.type === "navigation/resolving" && event.origin ? event.origin : state.navigation.origin,
+    };
     return { ...state, navigation, presentation: derivePresentation(navigation) };
   }
   if (event.type === "navigation/committed") {

@@ -18,7 +18,6 @@ export function createInteractionGateway(options: {
   onBackground?: () => void;
 }) {
   const seenActivationIds = new Set<string>();
-  const recentMarkerActivations = new Map<string, number>();
   const activePointerIds = new Set<number>();
   const remember = (id: string) => {
     seenActivationIds.add(id);
@@ -30,11 +29,8 @@ export function createInteractionGateway(options: {
 
   const dispatch = (event: InteractionEvent) => {
     if (event.type === "marker") {
-      const now = Date.now();
-      const recentAt = recentMarkerActivations.get(event.itemId);
-      if (seenActivationIds.has(event.activationId) || (recentAt !== undefined && now - recentAt < 500)) return;
+      if (seenActivationIds.has(event.activationId)) return;
       remember(event.activationId);
-      recentMarkerActivations.set(event.itemId, now);
       options.onMarkerActivate(event.itemId);
       return;
     }
