@@ -52,6 +52,29 @@ Feature: Explicit map runtime ownership
 - Prevent full marker-layer recomputation for unrelated status/HUD updates; benchmark zoom/pan and interaction at current production marker count and synthetic 100/500 marker sets.
 - Add privacy-safe performance marks for map ready, marker activation, route request/commit, and route-refresh continuity. Telemetry uses bounded event names and numeric durations only.
 - Use the exact same measurement matrix as the targeted branch and publish a side-by-side results table.
+- The canonical matrix is `2026-08-14-map-experiment-comparison-protocol.md`; synthetic stress cells are reported separately.
+
+## Runtime transition invariants
+
+| Phase/event | Committed overlay | Marker mode | Pending request |
+|---|---|---|---|
+| idle/cleared | absent | normal | none |
+| acquiring/resolving without prior route | absent | destination protected | current request |
+| refreshing with prior route | retained | route dots + destination protected | current request |
+| active/commit | replacement committed atomically | route dots + destination protected | none |
+| failed with prior route | retained | route dots + destination protected | none |
+| failed without prior route | absent | destination protected until clear/new request | none |
+| stale commit/failure | unchanged | unchanged | unchanged |
+| explicit clear | removed | normal | cancelled |
+
+Announcements and controls derive from this same phase table. Commit and failure events carry their originating request identity.
+
+## Graph revision invariant
+
+- A prepared graph is reused only for the exact authoritative revision/content fingerprint.
+- Any node/edge coordinate, endpoint, access, closure, weight, or identifier change invalidates it.
+- Tests prove same-revision reuse, all-content invalidation, cancellation, and path equivalence.
+- The route-engine benchmark reports base vs rewrite median/p95 under the canonical protocol; no improvement is claimed without the protocol's significance thresholds.
 
 ## Non-goals
 
@@ -63,4 +86,4 @@ Feature: Explicit map runtime ownership
 - Tests are written before behavior changes.
 - Run pure reducer/engine tests, adapter tests, complete repository tests, typecheck, lint, build, page benchmark, repeated mobile/desktop browser flows, performance traces, and an independent adversarial architecture review.
 - Open an unmerged PR to `main` describing migration risk, rollback (close the PR), measurements, and comparison with the targeted PR.
-
+- Integration tests cover the complete phase table, real adapter request IDs, overlay identity through refresh/failure, pointer/touch/pen/keyboard compatibility events, graph revision invalidation, and Option A facility/boarding-card clearance.
