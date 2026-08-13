@@ -17,7 +17,7 @@ function deferred<T>() {
 function harness() {
   const events: string[] = [];
   const coordinator = createRouteRequestCoordinator<string>({
-    clear: () => events.push("clear"),
+    clear: (options) => events.push(options?.preservePublishedResult ? "clear:preserve" : "clear"),
     publish: (route) => events.push(`publish:${route}`),
     loading: (_message, id) => events.push(`loading:${id}`),
     success: (_message, id) => events.push(`success:${id}`),
@@ -28,7 +28,7 @@ function harness() {
   return { coordinator, events };
 }
 
-test("replacement clears immediately, forwards a signal, and silences delayed old success", async () => {
+test("a replacement with no published route clears before resolving and silences delayed old success", async () => {
   const { coordinator, events } = harness();
   const first = deferred<string>();
   const second = deferred<string>();
@@ -62,6 +62,50 @@ test("replacement clears immediately, forwards a signal, and silences delayed ol
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(events.filter((event) => event.startsWith("publish:")), ["publish:new"]);
+});
+
+test("replacement preserves the last successful route until the new result publishes", async () => {
+  const { coordinator, events } = harness();
+  const replacement = deferred<string>();
+
+  coordinator.start({ resolve: async () => "first route" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({ loadingMessage: "Loading", resolve: () => replacement.promise });
+  await Promise.resolve();
+
+  assert.deepEqual(events.filter((event) => event.startsWith("clear")), ["clear", "clear:preserve"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), ["publish:first route"]);
+
+  replacement.resolve("replacement route");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:replacement route",
+  ]);
+});
+
+test("a failed replacement preserves the last successful route", async () => {
+  const { coordinator, events } = harness();
+  const replacement = deferred<string>();
+
+  coordinator.start({ resolve: async () => "first route" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({ resolve: () => replacement.promise });
+  await Promise.resolve();
+  replacement.reject(new Error("replacement failed"));
+  await assert.rejects(replacement.promise);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("clear")), [
+    "clear",
+    "clear:preserve",
+    "clear:preserve",
+  ]);
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), ["publish:first route"]);
+  assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
 });
 
 test("delayed old failure cannot clear or show an error after replacement", async () => {
@@ -313,7 +357,7 @@ test("a failed silent recalculation dismisses the tracked success before its err
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(events.filter((event) => event === `dismiss:${firstSuccessId}`).length, 1);
-  assert.equal(events.indexOf(`dismiss:${firstSuccessId}`) < events.lastIndexOf("clear"), true);
+  assert.equal(events.indexOf(`dismiss:${firstSuccessId}`) < events.lastIndexOf("clear:preserve"), true);
   assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
   assert.equal(tracker.has(firstSession), true);
 
@@ -435,6 +479,17 @@ test("an empty transition clears and dismisses the previous owned loading toast"
 
   assert.equal(events.filter((event) => event === "clear").length, 2);
   assert.equal(events.filter((event) => event === `dismiss:${loadingId}`).length, 1);
+});
+
+test("an explicit clear removes a previously published route", async () => {
+  const { coordinator, events } = harness();
+
+  coordinator.start({ resolve: async () => "route" });
+  await new Promise((resolve) => setImmediate(resolve));
+  coordinator.start({});
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), ["publish:route"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("clear")), ["clear", "clear"]);
 });
 
 test("immediate cleanup prevents the canceled resolver from being called", async () => {

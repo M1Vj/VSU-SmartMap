@@ -8,12 +8,15 @@ import type { MapItem } from "@/lib/types/map";
 import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { MapPopupCard } from "./map-popup-card";
 import { useIsMobile } from "./use-is-mobile";
+import { cancelMapPerformance, completeMapPerformance } from "@/lib/map/performance";
+import { useEffect, useRef } from "react";
 
 type MapBottomCardProps = {
   item: MapItem | null;
   onClose: () => void;
   onViewDetails: () => void;
   onDirections: (item: MapItem) => void;
+  onHeightChange?: (height: number) => void;
 };
 
 export function MapBottomCard({
@@ -21,8 +24,41 @@ export function MapBottomCard({
   onClose,
   onViewDetails,
   onDirections,
+  onHeightChange,
 }: MapBottomCardProps) {
   const isMobile = useIsMobile();
+  const cardRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!isMobile || !item || !onHeightChange) {
+      onHeightChange?.(0);
+      cancelMapPerformance("marker_first_interaction");
+      return;
+    }
+
+    const card = cardRef.current;
+    if (!card) {
+      onHeightChange(0);
+      cancelMapPerformance("marker_first_interaction");
+      return;
+    }
+
+    const reportHeight = () => {
+      const height = card.getBoundingClientRect().height;
+      onHeightChange(height);
+      if (height > 0) completeMapPerformance("marker_first_interaction");
+    };
+    reportHeight();
+    if (typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(reportHeight);
+    observer.observe(card);
+    return () => {
+      observer.disconnect();
+      onHeightChange(0);
+      cancelMapPerformance("marker_first_interaction");
+    };
+  }, [isMobile, item, onHeightChange]);
 
   if (!isMobile || !item) {
     return null;
@@ -31,6 +67,7 @@ export function MapBottomCard({
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-[calc(6.5rem+env(safe-area-inset-bottom,0px))] z-50 px-3 md:hidden">
       <section
+        ref={cardRef}
         role="dialog"
         aria-label={`${item.name} details`}
         className="pointer-events-auto mx-auto max-h-[min(42vh,22rem)] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border/80 bg-background/95 shadow-2xl ring-1 ring-black/5 backdrop-blur"

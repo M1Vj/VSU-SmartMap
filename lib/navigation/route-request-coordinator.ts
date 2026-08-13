@@ -1,5 +1,5 @@
 interface RouteRequestCallbacks<Result> {
-  clear: () => void;
+  clear: (options?: { preservePublishedResult?: boolean }) => void;
   publish: (result: Result) => void;
   loading: (message: string, id: string) => void;
   success: (message: string, id: string) => void;
@@ -17,6 +17,7 @@ interface StartRouteRequest<Result> {
   shouldAnnounceSuccess?: () => boolean;
   onSuccess?: (id: string) => void;
   onError?: () => void;
+  preservePublishedResult?: boolean;
   resolve?: (signal: AbortSignal) => Promise<Result>;
 }
 
@@ -36,6 +37,7 @@ export function createRouteRequestCoordinator<Result>(
   callbacks: RouteRequestCallbacks<Result>,
 ) {
   let active: ActiveRequest | null = null;
+  let hasPublishedResult = false;
 
   const cancel = (request: ActiveRequest) => {
     request.controller.abort();
@@ -68,7 +70,12 @@ export function createRouteRequestCoordinator<Result>(
         isSuccessAnnounced: options.isSuccessAnnounced,
       };
       active = request;
-      callbacks.clear();
+      const preservePublishedResult =
+        hasPublishedResult && (options.resolve !== undefined || options.preservePublishedResult === true);
+      callbacks.clear({ preservePublishedResult });
+      if (!preservePublishedResult && options.resolve === undefined) {
+        hasPublishedResult = false;
+      }
 
       const isSuccessAnnounced = options.isSuccessAnnounced?.() === true;
       if (options.loadingMessage && !isSuccessAnnounced) {
@@ -84,6 +91,7 @@ export function createRouteRequestCoordinator<Result>(
           const result = await options.resolve!(request.controller.signal);
           if (active !== request || request.controller.signal.aborted) return;
           callbacks.publish(result);
+          hasPublishedResult = true;
           if (options.shouldAnnounceSuccess && !options.shouldAnnounceSuccess()) {
             if (request.toastVisible) {
               callbacks.dismiss(request.id);
@@ -102,7 +110,10 @@ export function createRouteRequestCoordinator<Result>(
             if (active !== request || request.controller.signal.aborted) return;
             options.onError?.();
             callbacks.reportError?.(error);
-            callbacks.clear();
+            callbacks.clear({ preservePublishedResult: hasPublishedResult });
+            if (!hasPublishedResult) {
+              hasPublishedResult = false;
+            }
             callbacks.error(
               options.errorMessage ?? "No route found. External routing may be unavailable.",
               request.id,

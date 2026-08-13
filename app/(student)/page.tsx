@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapContainerClient } from "@/components/map/map-container";
 import { MapBottomCard } from "@/components/map/map-bottom-card";
@@ -468,6 +468,7 @@ function MapView({
   const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
   const [isManualStartPending, setIsManualStartPending] = useState(false);
   const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
+  const [miniCardHeight, setMiniCardHeight] = useState(0);
   const [routeReportOpen, setRouteReportOpen] = useState(false);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -513,10 +514,6 @@ function MapView({
     setAvailableRoutes([]);
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
-
-  useEffect(() => {
-    setAvailableRoutes([]);
-  }, [navEnd?.lat, navEnd?.lng, navMode]);
 
   useEffect(() => {
     setNavMode(defaultTransportMode);
@@ -602,7 +599,6 @@ function MapView({
     setNavigationSessionId((sessionId) => sessionId + 1);
     setTargetFacilityId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
-    setAvailableRoutes([]);
 
     if (decision.mode === "live") {
       setNavigationOrigin("live");
@@ -677,7 +673,10 @@ function MapView({
   }, [isManualStartPending, setNavStart]);
 
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      style={{ "--map-mini-card-height": `${miniCardHeight}px` } as CSSProperties}
+    >
       <div className="relative h-full w-full overflow-hidden">
         <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
@@ -716,8 +715,7 @@ function MapView({
           />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (
-            <NavigationLayer 
-              key={`nav-${graphData.nodes.length}-${navStart ? 's' : 'x'}-${navEnd ? 'e' : 'x'}`}
+            <NavigationLayer
               startPoint={navStart} 
               endPoint={navEnd} 
             destinationId={targetFacilityId}
@@ -736,63 +734,17 @@ function MapView({
         </MapContainerClient>
 
         {hasHydrated && navEnd && (
-          <div className="absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
+          <>
+          <div
+            data-route-status="true"
+            className="absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2"
+          >
             {navigationControls.statusText && (
               <div
                 className="rounded-full border bg-background/95 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg ring-1 ring-black/5 backdrop-blur"
                 role="status"
               >
                 {navigationControls.statusText}
-              </div>
-            )}
-
-            <div className="flex gap-2">
-                <Button 
-                  variant={hasActiveRoute ? "destructive" : "outline"}
-                  size="sm" 
-                  className={cn(
-                    "rounded-full px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5",
-                    isManualStartPending ? "h-11" : "h-8",
-                    !hasActiveRoute && "bg-background/90 backdrop-blur hover:bg-background",
-                  )}
-                  onClick={clearRouteState}
-                  aria-label={`${navigationControls.primaryActionLabel} navigation`}
-                >
-                  {navigationControls.primaryActionLabel}
-                </Button>
-
-                {navigationControls.canReportRoute && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-full bg-background/90 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
-                    onClick={() => setRouteReportOpen(true)}
-                  >
-                    Report Route
-                  </Button>
-                )}
-            </div>
-
-            {isManualStartPending && (
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
-                  onClick={handleUseMyLocationStart}
-                  aria-label="Use my location as route start"
-                >
-                  Use my location
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
-                  onClick={handleUseMainGateStart}
-                  aria-label="Start route from main gate"
-                >
-                  Start from main gate
-                </Button>
               </div>
             )}
 
@@ -808,7 +760,59 @@ function MapView({
                     </span>
                 </div>
             )}
+            {isManualStartPending && (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-11 min-w-[44px] rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  onClick={handleUseMyLocationStart}
+                  aria-label="Use my location as route start"
+                >
+                  Use my location
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-11 min-w-[44px] rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  onClick={handleUseMainGateStart}
+                  aria-label="Start route from main gate"
+                >
+                  Start from main gate
+                </Button>
+              </div>
+            )}
           </div>
+          <div
+            data-route-action-dock="true"
+            className="pointer-events-none absolute inset-x-0 bottom-[calc(6.5rem+var(--map-mini-card-height)+0.5rem+env(safe-area-inset-bottom,0px))] z-[1000] flex justify-center px-3 md:bottom-8"
+          >
+            <div className="pointer-events-auto flex max-w-full flex-wrap justify-center gap-2">
+              <Button
+                variant={hasActiveRoute ? "destructive" : "outline"}
+                size="sm"
+                className={cn(
+                  "h-11 min-w-[44px] rounded-full bg-background/90 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background",
+                  hasActiveRoute && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+                )}
+                onClick={clearRouteState}
+                aria-label={`${navigationControls.primaryActionLabel} navigation`}
+              >
+                {navigationControls.primaryActionLabel}
+              </Button>
+              {navigationControls.canReportRoute && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-11 min-w-[44px] rounded-full bg-background/90 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  onClick={() => setRouteReportOpen(true)}
+                >
+                  Report Route
+                </Button>
+              )}
+            </div>
+          </div>
+          </>
         )}
 
         <ReportRouteDialog
@@ -832,6 +836,7 @@ function MapView({
           onClose={onClearSelection}
           onViewDetails={() => setFacilitySheetOpen(true)}
           onDirections={beginNavigationToItem}
+          onHeightChange={setMiniCardHeight}
         />
 
         {!hasResults && !error && !isLoading && hasActiveFilters && (

@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
+import type { LeafletMouseEvent } from "leaflet";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
+import { recordMapPerformance } from "@/lib/map/performance";
 
-const TAP_MOVE_TOLERANCE_PX = 12;
-const TAP_MAX_DURATION_MS = 350;
 const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-control",
   ".leaflet-marker-icon",
@@ -47,8 +47,7 @@ export function MapSelectionLayer({
   const map = useMap();
   const prevSelectedId = useRef<string | null>(null);
   const previousViewRef = useRef<MapViewState | null>(null);
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const mouseStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const zoomStartedAtRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(() => map.getZoom());
 
   const getCurrentView = useCallback(() => ({
@@ -77,12 +76,6 @@ export function MapSelectionLayer({
   }, [onClearSelection, onMapClick]);
 
   useEffect(() => {
-    const container = map.getContainer();
-
-    const handleZoomEnd = () => {
-      setZoom(map.getZoom());
-    };
-
     const closeOpenTooltip = () => {
       map.eachLayer((layer) => {
         const tooltipLayer = layer as {
@@ -96,123 +89,42 @@ export function MapSelectionLayer({
       });
     };
 
-    const handleMouseDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target || !container.contains(target)) {
-        mouseStartRef.current = null;
-        return;
+    const handleZoomEnd = () => {
+      setZoom(map.getZoom());
+      const startedAt = zoomStartedAtRef.current;
+      zoomStartedAtRef.current = null;
+      if (startedAt !== null && minimizeNonDestinationMarkers && typeof performance !== "undefined") {
+        recordMapPerformance("route_zoom_continuity", Math.max(0, performance.now() - startedAt));
       }
-
-      mouseStartRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-        time: Date.now(),
-      };
     };
 
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && !container.contains(target)) {
-        return;
-      }
+    const handleZoomStart = () => {
+      zoomStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : null;
+      closeOpenTooltip();
+    };
 
-      const start = mouseStartRef.current;
-      mouseStartRef.current = null;
-      if (start) {
-        const movedX = Math.abs(event.clientX - start.x);
-        const movedY = Math.abs(event.clientY - start.y);
-        const duration = Date.now() - start.time;
-
-        if (
-          movedX > TAP_MOVE_TOLERANCE_PX ||
-          movedY > TAP_MOVE_TOLERANCE_PX ||
-          duration > TAP_MAX_DURATION_MS
-        ) {
-          return;
-        }
-      }
-
-      const latlng = onMapClick ? map.mouseEventToLatLng(event) : null;
-
+    const handleMapClick = (event: LeafletMouseEvent) => {
+      const target = event.originalEvent?.target as HTMLElement | null;
       handlePlainMapInteraction(
         target,
-        latlng ? { lat: latlng.lat, lng: latlng.lng } : undefined,
+        onMapClick ? { lat: event.latlng.lat, lng: event.latlng.lng } : undefined,
       );
     };
 
-    const handleTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touch) {
-        touchStartRef.current = null;
-        return;
-      }
-
-      touchStartRef.current = {
-        x: touch.clientX,
-        y: touch.clientY,
-        time: Date.now(),
-      };
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      const start = touchStartRef.current;
-      touchStartRef.current = null;
-
-      if (!start) {
-        return;
-      }
-
-      const touch = event.changedTouches[0];
-      if (!touch) {
-        return;
-      }
-
-      const movedX = Math.abs(touch.clientX - start.x);
-      const movedY = Math.abs(touch.clientY - start.y);
-      const duration = Date.now() - start.time;
-
-      if (
-        movedX > TAP_MOVE_TOLERANCE_PX ||
-        movedY > TAP_MOVE_TOLERANCE_PX ||
-        duration > TAP_MAX_DURATION_MS
-      ) {
-        return;
-      }
-
-      const target = event.target as HTMLElement | null;
-      if (!target) {
-        return;
-      }
-
-      if (onMapClick) {
-        const latlng = map.mouseEventToLatLng(touch as unknown as MouseEvent);
-        handlePlainMapInteraction(target, { lat: latlng.lat, lng: latlng.lng });
-        return;
-      }
-
-      handlePlainMapInteraction(target);
-    };
-
+    map.on("click", handleMapClick);
     map.on("zoomend", handleZoomEnd);
-    map.on("zoomstart", closeOpenTooltip);
+    map.on("zoomstart", handleZoomStart);
     map.on("movestart", closeOpenTooltip);
     map.on("dragstart", closeOpenTooltip);
-    container.addEventListener("mousedown", handleMouseDown, true);
-    document.addEventListener("click", handleClick, true);
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchend", handleTouchEnd, { passive: true });
 
     return () => {
+      map.off("click", handleMapClick);
       map.off("zoomend", handleZoomEnd);
-      map.off("zoomstart", closeOpenTooltip);
+      map.off("zoomstart", handleZoomStart);
       map.off("movestart", closeOpenTooltip);
       map.off("dragstart", closeOpenTooltip);
-      container.removeEventListener("mousedown", handleMouseDown, true);
-      document.removeEventListener("click", handleClick, true);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [handlePlainMapInteraction, map, onMapClick]);
+  }, [handlePlainMapInteraction, map, minimizeNonDestinationMarkers, onMapClick]);
 
   useEffect(() => {
     if (!selectedId) return;

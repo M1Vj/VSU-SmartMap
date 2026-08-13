@@ -13,6 +13,7 @@ import {
 } from "@/lib/pathfinding/transition-gates";
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
+import { recordMapPerformance } from "@/lib/map/performance";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
 
 interface NavigationLayerProps {
@@ -50,7 +51,8 @@ export function NavigationLayer({
   const coordinator = useMemo(
     () =>
       createRouteRequestCoordinator<PathResult>({
-        clear: () => {
+        clear: ({ preservePublishedResult = false } = {}) => {
+          if (preservePublishedResult) return;
           setPath(null);
           onRoutesFound?.([]);
         },
@@ -219,9 +221,10 @@ export function NavigationLayer({
     };
 
     const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
+      const startedAt = typeof performance !== "undefined" ? performance.now() : null;
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
-      return resolveNavigationRoute({
+      const result = await resolveNavigationRoute({
         start,
         end,
         destinationId,
@@ -236,6 +239,10 @@ export function NavigationLayer({
           calculateTime,
         },
       });
+      if (startedAt !== null) {
+        recordMapPerformance("route_calculation", Math.max(0, performance.now() - startedAt));
+      }
+      return result;
     };
 
     return coordinator.start({
@@ -251,6 +258,7 @@ export function NavigationLayer({
           ? undefined
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
       onError: releaseRouteFoundAnnouncement,
+      preservePublishedResult: true,
       resolve: resolveRoute,
     });
   }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator]);
