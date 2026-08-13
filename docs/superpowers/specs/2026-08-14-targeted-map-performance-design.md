@@ -66,10 +66,13 @@ Feature: Route action placement
 - Use the same production SHA base, seeded destination, viewport/device presets, sample counts, and network/CPU conditions for both experiment branches.
 - Add only bounded, privacy-safe telemetry. No labels, search text, coordinates, facility names, or user data may be logged.
 - Report limitations honestly when the browser surface cannot emulate a real low-end CPU or real touch hardware.
+- The canonical inputs, statistics, gates, commands, and result artifacts are defined in `2026-08-14-map-experiment-comparison-protocol.md` and apply unchanged to both PRs.
 
 ## Verification
 
 - New tests must fail before fixes and map directly to the scenarios above.
 - Run focused map/navigation tests, all repository tests, typecheck, lint, build, page benchmark, and mobile/desktop runtime scenarios.
 - Open an unmerged PR to `main` with a results table and explicit comparison link to the broad rewrite PR.
-
+- Coordinator/page integration tests must cover replacement success, replacement failure with the committed route retained, stale completion rejection, and explicit clear.
+- Interaction integration must emit pointer/touch compatibility clicks and prove exactly one selection/card with no full dialog.
+- Layout runtime checks must cover facility and boarding-house cards, safe-area insets, 44x44 targets, and non-overlap at every mobile viewport.
