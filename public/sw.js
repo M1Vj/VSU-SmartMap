@@ -105,6 +105,14 @@ async function migratePreviousTileCache(cacheNames) {
   const requests = await previousCache.keys();
 
   await Promise.all(requests.map(async (request) => {
+    let requestUrl;
+    try {
+      requestUrl = new URL(request.url);
+    } catch {
+      return;
+    }
+    if (!isMapTileRequest(requestUrl)) return;
+
     const response = await previousCache.match(request);
     if (!isUsableTileResponse(response)) return;
 
@@ -113,6 +121,7 @@ async function migratePreviousTileCache(cacheNames) {
 
     await tileCache.put(request, response.clone());
   }));
+  await trimTileCache(tileCache);
 }
 
 function isNetworkOnlyRequest(url, request) {

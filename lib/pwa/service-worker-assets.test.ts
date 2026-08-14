@@ -423,13 +423,21 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
   const workerUrl = new URL("https://smartmap.test/sw.js");
   const validTileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
   const poisonedTileUrl = "https://tile.openstreetmap.org/17/67890/12346.png";
+  const nonTileUrl = "https://tiles.openfreemap.org/styles/liberty";
   const migratedUrls: string[] = [];
   const deletedCaches: Array<{ name: string; migratedUrls: string[] }> = [];
   const v1Entries = new Map<string, Response>([
     [validTileUrl, new Response("valid-v1-tile", { status: 200 })],
     [poisonedTileUrl, new Response(null, { status: 204 })],
+    [nonTileUrl, new Response("style-json", { status: 200 })],
   ]);
   const v2Entries = new Map<string, Response>();
+  for (let index = 0; index < 400; index += 1) {
+    v2Entries.set(
+      `https://tile.openstreetmap.org/16/0/${index}.png`,
+      new Response(`existing-v2-${index}`, { status: 200 }),
+    );
+  }
   const v1Cache = {
     keys: async () => [...v1Entries.keys()].map((url) => new Request(url)),
     match: async (request: Request) => v1Entries.get(request.url)?.clone(),
@@ -437,6 +445,7 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
   const v2Cache = {
     keys: async () => [...v2Entries.keys()].map((url) => new Request(url)),
     match: async (request: Request) => v2Entries.get(request.url)?.clone(),
+    delete: async (request: Request) => v2Entries.delete(request.url),
     put: async (request: Request, response: Response) => {
       migratedUrls.push(request.url);
       v2Entries.set(request.url, response.clone());
@@ -493,6 +502,8 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
   assert.deepEqual(migratedUrls, [validTileUrl]);
   assert.ok(v2Entries.has(validTileUrl));
   assert.ok(!v2Entries.has(poisonedTileUrl));
+  assert.ok(!v2Entries.has(nonTileUrl));
+  assert.ok(v2Entries.size <= 400);
   assert.deepEqual(deletedCaches, [
     { name: "vsu-smartmap-v16", migratedUrls: [validTileUrl] },
     { name: "map-tiles-v1", migratedUrls: [validTileUrl] },
