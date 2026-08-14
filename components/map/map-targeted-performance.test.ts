@@ -95,6 +95,34 @@ test("route reports and destination markers stay coupled to the committed route 
   assert.match(navigation, /preservePublishedResult: Boolean\(startPoint \|\| endPoint \|\| destinationId\)/);
 });
 
+test("selection transitions retain route owners and atomically cancel a replacement", async () => {
+  const [page, transition, routeState, navigation] = await Promise.all([
+    readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../lib/navigation/selection-route-transition.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../lib/navigation/route-commit-state.ts", import.meta.url), "utf8"),
+    readFile(new URL("./navigation-layer.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(transition, /resolveRouteSelectionTransition/);
+  assert.match(transition, /routeState\.committed/);
+  assert.match(transition, /routeState\.pending/);
+  assert.match(page, /flowDestinationId: targetFacilityId \?\? null/);
+  assert.match(page, /if \(transition\.kind === "cancel-replacement"\)/);
+  assert.match(page, /cancelRouteReplacementAndRestore\(transition\.restoreContext\)/);
+  assert.match(page, /const handleMapItemSelect = useCallback/);
+  assert.match(page, /onSelect=\{handleMapItemSelect\}/);
+  assert.match(page, /setNavigationSessionId\(\(sessionId\) => sessionId \+ 1\)/);
+  assert.match(page, /setTargetFacilityId\(context\.destinationId \?\? undefined\)/);
+  assert.match(page, /setNavStart\(context\.start/);
+  assert.match(page, /setNavEnd\(context\.end/);
+  assert.match(page, /setNavigationOrigin\(context\.origin\)/);
+  assert.match(page, /setNavMode\(context\.mode\)/);
+  assert.match(page, /cancelMapPerformance\("route_calculation"\)/);
+  assert.match(routeState, /cancelPendingRouteReplacement/);
+  assert.match(navigation, /sessionId: navigationSessionId/);
+  assert.match(navigation, /if \(startedAt !== null && !signal\.aborted\)/);
+});
+
 test("facility mini-card heading is inert and Details remains the only expansion control", async () => {
   const source = await readFile(new URL("./map-popup-card.tsx", import.meta.url), "utf8");
 

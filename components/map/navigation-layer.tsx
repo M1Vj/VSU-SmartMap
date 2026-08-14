@@ -282,7 +282,7 @@ export function NavigationLayer({
           calculateTime,
         },
       });
-      if (startedAt !== null) {
+      if (startedAt !== null && !signal.aborted) {
         recordMapPerformance("route_calculation", Math.max(0, performance.now() - startedAt));
       }
       return result;

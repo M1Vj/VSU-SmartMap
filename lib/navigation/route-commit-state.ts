@@ -43,6 +43,12 @@ export function commitRoute(
 }
 
 export function failRouteRequest(state: RouteCommitState): RouteCommitState {
+  return cancelPendingRouteReplacement(state);
+}
+
+export function cancelPendingRouteReplacement(
+  state: RouteCommitState,
+): RouteCommitState {
   return { committed: state.committed, pending: null };
 }
 

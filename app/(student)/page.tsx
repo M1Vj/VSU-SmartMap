@@ -33,6 +33,7 @@ import { ReportRouteDialog } from "@/components/navigation/report-route-dialog";
 import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates";
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
 import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
+import { cancelMapPerformance } from "@/lib/map/performance";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
 import { createRouteAnnouncementTracker } from "@/lib/navigation/route-announcement";
 import {
@@ -415,6 +416,7 @@ import {
 import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
 import {
   beginRouteRequest,
+  cancelPendingRouteReplacement,
   clearRouteCommit,
   commitRoute,
   failRouteRequest,
@@ -424,8 +426,8 @@ import {
 import { getRouteFacingDestination } from "@/lib/navigation/route-facing-destination";
 import {
   shouldClearRouteForMapSearch,
-  shouldClearRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
+import { resolveRouteSelectionTransition } from "@/lib/navigation/selection-route-transition";
 
 type NavigationOrigin = "live" | "manual" | null;
 
@@ -532,6 +534,24 @@ function MapView({
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
 
+  const cancelRouteReplacementAndRestore = useCallback((context: RouteRequestContext) => {
+    dismissRouteFoundAnnouncement(navigationSessionId);
+    cancelMapPerformance("route_calculation");
+    setNavigationSessionId((sessionId) => sessionId + 1);
+    setRouteCommitState((state) => {
+      if (!state.committed || !state.pending) return state;
+      if (state.committed.destinationId !== context.destinationId) return state;
+      return cancelPendingRouteReplacement(state);
+    });
+    setTargetFacilityId(context.destinationId ?? undefined);
+    setNavStart(context.start ? { lat: context.start.lat, lng: context.start.lng } as LatLng : null);
+    setNavEnd(context.end ? { lat: context.end.lat, lng: context.end.lng } as LatLng : null);
+    setNavigationOrigin(context.origin);
+    setNavMode(context.mode);
+    setIsManualStartPending(false);
+    setManualLocationRequestPending(false);
+  }, [dismissRouteFoundAnnouncement, navigationSessionId, setNavEnd, setNavStart]);
+
   useEffect(() => {
     setNavMode(defaultTransportMode);
   }, [defaultTransportMode]);
@@ -565,19 +585,48 @@ function MapView({
   }, [locationError, manualLocationRequestPending]);
 
   useEffect(() => {
-    if (
-      shouldClearRouteForSelectedItem({
-        selectedItemId: selectedId,
-        routeDestinationId: targetFacilityId ?? null,
-        hasNavigationState,
-      })
-    ) {
+    const transition = resolveRouteSelectionTransition({
+      selectedItemId: selectedId,
+      flowDestinationId: targetFacilityId ?? null,
+      routeState: routeCommitState,
+      hasNavigationState,
+    });
+
+    if (transition.kind === "clear") {
       clearRouteState();
+      return;
+    }
+
+    if (transition.kind === "cancel-replacement") {
+      cancelRouteReplacementAndRestore(transition.restoreContext);
     }
   }, [
+    cancelRouteReplacementAndRestore,
     clearRouteState,
     hasNavigationState,
+    routeCommitState,
     selectedId,
+    targetFacilityId,
+  ]);
+
+  const handleMapItemSelect = useCallback((item: MapItem) => {
+    const transition = resolveRouteSelectionTransition({
+      selectedItemId: item.id,
+      flowDestinationId: targetFacilityId ?? null,
+      routeState: routeCommitState,
+      hasNavigationState,
+    });
+
+    if (transition.kind === "cancel-replacement") {
+      cancelRouteReplacementAndRestore(transition.restoreContext);
+    }
+
+    onSelect(item.id);
+  }, [
+    cancelRouteReplacementAndRestore,
+    hasNavigationState,
+    onSelect,
+    routeCommitState,
     targetFacilityId,
   ]);
 
@@ -715,7 +764,7 @@ function MapView({
             })}
             routeDestinationId={committedRoute?.destinationId ?? null}
             minimizeNonDestinationMarkers={hasActiveRoute}
-            onSelect={(item) => onSelect(item.id)}
+            onSelect={handleMapItemSelect}
             onMarkerTapOverride={isManualStartPending ? handleManualStartMarkerTap : undefined}
             onDirections={(item) => beginNavigationToItem(item)}
             onMapClick={isManualStartPending ? handleManualStartPlacement : undefined}
