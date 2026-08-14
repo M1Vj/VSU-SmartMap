@@ -51,20 +51,28 @@ export function MapSelectionLayer({
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const mouseStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const [zoom, setZoom] = useState(() => map.getZoom());
+  const itemsRef = useRef(items);
+  const onSelectRef = useRef(onSelect);
+  const onMarkerTapOverrideRef = useRef(onMarkerTapOverride);
+  const onClearSelectionRef = useRef(onClearSelection);
+  itemsRef.current = items;
+  onSelectRef.current = onSelect;
+  onMarkerTapOverrideRef.current = onMarkerTapOverride;
+  onClearSelectionRef.current = onClearSelection;
   const interactionGateway = useMemo(
     () => createInteractionGateway({
       onMarkerActivate: (itemId) => {
-        const item = items.find((candidate) => candidate.id === itemId);
+        const item = itemsRef.current.find((candidate) => candidate.id === itemId);
         if (!item) return;
-        if (onMarkerTapOverride) {
-          onMarkerTapOverride(item);
+        if (onMarkerTapOverrideRef.current) {
+          onMarkerTapOverrideRef.current(item);
           return;
         }
-        onSelect(item);
+        onSelectRef.current(item);
       },
-      onBackground: onClearSelection,
+      onBackground: () => onClearSelectionRef.current?.(),
     }),
-    [items, onClearSelection, onMarkerTapOverride, onSelect],
+    [],
   );
 
   const getCurrentView = useCallback(() => ({

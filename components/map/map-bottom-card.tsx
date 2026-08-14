@@ -8,8 +8,10 @@ import type { MapItem } from "@/lib/types/map";
 import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { MapPopupCard } from "./map-popup-card";
 import { useIsMobile } from "./use-is-mobile";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { observeMapCardHeight } from "@/lib/map/map-card-height";
+
+const useCardMeasurementEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type MapBottomCardProps = {
   item: MapItem | null;
@@ -29,7 +31,7 @@ export function MapBottomCard({
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
+  useCardMeasurementEffect(() => {
     if (!isMobile || !item) {
       onHeightChange?.(0);
       return;

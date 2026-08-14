@@ -34,3 +34,17 @@ test("pending replacement selection does not clear a committed route", () => {
     true,
   );
 });
+
+test("route adapter allocates fresh IDs for calculations and forwards metadata", async () => {
+  const source = await readFile(new URL("../../components/map/navigation-layer.tsx", import.meta.url), "utf8");
+  assert.match(source, /requestStarted: \(requestId\) => onRouteRequestStarted/);
+  assert.match(source, /onRouteRequestStarted\?\.\(requestId, requestMetadata\)/);
+  assert.doesNotMatch(source, /resolve: resolveRoute,[\s\S]{0,120}requestId: navigationSessionId/);
+});
+
+test("selection gateway keeps its seen activation set across parent rerenders", async () => {
+  const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
+  assert.match(source, /const interactionGateway = useMemo\(/);
+  assert.match(source, /const itemsRef = useRef/);
+  assert.match(source, /\n    \[\],\n  \);/);
+});

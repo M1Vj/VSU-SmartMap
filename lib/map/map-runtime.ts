@@ -268,6 +268,7 @@ export function mapRuntimeReducer(
       ...state.navigation,
       phase: "failed" as const,
       pendingRequestId: null,
+      request: state.navigation.committed ? null : state.navigation.request,
       error: event.message,
     };
     return { ...state, navigation, presentation: derivePresentation(navigation) };

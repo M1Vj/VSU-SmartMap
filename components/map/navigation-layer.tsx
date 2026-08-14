@@ -47,7 +47,7 @@ interface NavigationLayerProps {
   releaseRouteFoundAnnouncement?: () => void;
   onRouteCommitted?: (route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => void;
   onRouteFailed?: (message: string, requestId: number) => void;
-  onRouteRequestStarted?: (requestId: number) => void;
+  onRouteRequestStarted?: (requestId: number, metadata: NavigationRequestMetadata) => void;
   committedRoute?: PathResult | null;
   navigationOrigin?: NavigationOrigin | null;
 }
@@ -74,19 +74,20 @@ export function NavigationLayer({
   navigationOrigin = null,
 }: NavigationLayerProps) {
   const routeEngine = useMemo(() => createRouteEngine(), []);
+  const requestMetadata: NavigationRequestMetadata = {
+    destinationId,
+    origin: navigationOrigin ?? (waitingForUserLocation ? "live" : "manual"),
+    mode,
+    start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
+    end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
+  };
   const coordinator = useMemo(
     () =>
       createRouteRequestCoordinator<PathResult>({
         clear: () => undefined,
         publish: (result, requestId) => {
           if (requestId !== undefined) {
-            onRouteCommitted?.(result, requestId, {
-              destinationId,
-              origin: navigationOrigin ?? (waitingForUserLocation ? "live" : "manual"),
-              mode,
-              start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
-              end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
-            });
+            onRouteCommitted?.(result, requestId, requestMetadata);
           }
         },
         loading: (message, id) => toast.loading(message, { id }),
@@ -100,7 +101,7 @@ export function NavigationLayer({
           console.error("NavigationLayer: Process error", error);
           if (requestId !== undefined) onRouteFailed?.(message, requestId);
         },
-        requestStarted: (requestId) => onRouteRequestStarted?.(requestId),
+        requestStarted: (requestId) => onRouteRequestStarted?.(requestId, requestMetadata),
       }),
     [
       destinationId,
@@ -307,7 +308,6 @@ export function NavigationLayer({
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
       onError: releaseRouteFoundAnnouncement,
       resolve: resolveRoute,
-      requestId: navigationSessionId,
     });
   }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
 

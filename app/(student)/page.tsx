@@ -638,8 +638,9 @@ function MapView({
   }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
 
   const handleRouteCommitted = useCallback((route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => {
-    if (!metadata.destinationId) return;
-    runtime.dispatch({
+    const before = runtime.getState();
+    if (before.navigation.pendingRequestId !== requestId || !metadata.destinationId) return;
+    const next = runtime.dispatch({
       type: "navigation/committed",
       requestId,
       route,
@@ -651,17 +652,48 @@ function MapView({
         end: metadata.end,
       },
     });
-    commitMapPerformanceRequest(requestId);
+    if (next.navigation.pendingRequestId === null && next.navigation.committed?.route === route) {
+      commitMapPerformanceRequest(requestId);
+    }
   }, [runtime]);
 
   const handleRouteFailed = useCallback((message: string, requestId: number) => {
-    runtime.dispatch({ type: "navigation/failed", requestId, message });
-    failMapPerformanceRequest(requestId);
+    const before = runtime.getState();
+    if (before.navigation.pendingRequestId !== requestId) return;
+    const next = runtime.dispatch({ type: "navigation/failed", requestId, message });
+    if (next.navigation.pendingRequestId === null && next.navigation.phase === "failed") {
+      failMapPerformanceRequest(requestId);
+    }
   }, [runtime]);
 
-  const handleRouteRequestStarted = useCallback((requestId: number) => {
-    if (runtime.getState().navigation.phase === "acquiring") return;
-    runtime.dispatch({ type: "navigation/resolving", requestId });
+  const handleRouteRequestStarted = useCallback((requestId: number, metadata: NavigationRequestMetadata) => {
+    const current = runtime.getState();
+    if (current.navigation.phase === "acquiring" && current.navigation.pendingRequestId === requestId) return;
+
+    if (current.navigation.pendingRequestId !== requestId) {
+      const destinationId = metadata.destinationId ?? current.navigation.request?.destinationId ?? current.navigation.destinationId;
+      if (!destinationId) return;
+      const previousRequestId = current.navigation.pendingRequestId;
+      if (previousRequestId !== null) clearMapPerformanceRequest(previousRequestId);
+      runtime.dispatch({
+        type: "navigation/requested",
+        requestId,
+        destinationId,
+        origin: metadata.origin,
+        mode: metadata.mode,
+        start: metadata.start,
+        end: metadata.end,
+      });
+      beginMapPerformanceRequest(requestId, typeof performance === "undefined" ? Date.now() : performance.now());
+    }
+
+    runtime.dispatch({
+      type: "navigation/resolving",
+      requestId,
+      origin: metadata.origin,
+      start: metadata.start,
+      end: metadata.end,
+    });
   }, [runtime]);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
@@ -808,7 +840,7 @@ function MapView({
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
               acquiringStart={isManualStartPending}
-              enabled={Boolean(routeRequestDestinationId) && runtimeState.navigation.phase !== "cleared" && runtimeState.navigation.phase !== "idle"}
+              enabled={Boolean(routeRequestDestinationId) && runtimeState.navigation.phase !== "cleared" && runtimeState.navigation.phase !== "idle" && runtimeState.navigation.phase !== "failed"}
               navigationSessionId={navigationSessionId}
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}

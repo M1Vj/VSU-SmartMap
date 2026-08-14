@@ -188,7 +188,7 @@ test("replacement keeps the committed route snapshot authoritative until atomic 
 
   state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
   assert.equal(state.navigation.committed?.destinationId, "facility-old");
-  assert.equal(state.navigation.request?.destinationId, "facility-new");
+  assert.equal(state.navigation.request, null);
 
   state = mapRuntimeReducer(state, {
     type: "navigation/requested",
@@ -220,4 +220,54 @@ test("replacement keeps the committed route snapshot authoritative until atomic 
   state = mapRuntimeReducer(state, { type: "navigation/cleared" });
   assert.equal(state.navigation.committed, null);
   assert.equal(state.navigation.request, null);
+});
+
+test("a fresh recalculation request replaces atomically while stale results remain ignored", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 10,
+    destinationId: "facility-a",
+    origin: "live",
+    mode: "walking",
+    start: { lat: 10, lng: 10 },
+    end: { lat: 10.1, lng: 10.1 },
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 10,
+    route,
+  });
+
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 11,
+    destinationId: "facility-a",
+    origin: "manual",
+    mode: "driving",
+    start: { lat: 11, lng: 11 },
+    end: { lat: 10.1, lng: 10.1 },
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/resolving", requestId: 11 });
+  assert.equal(state.navigation.phase, "refreshing");
+  assert.equal(state.navigation.pendingRequestId, 11);
+  assert.equal(state.navigation.committed?.mode, "walking");
+  assert.deepEqual(state.navigation.committed?.start, { lat: 10, lng: 10 });
+
+  const stale = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 10,
+    route: { ...route, totalDistance: 999 },
+  });
+  assert.equal(stale.navigation.committed?.route.totalDistance, route.totalDistance);
+  assert.equal(stale.navigation.pendingRequestId, 11);
+
+  const committed = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 11,
+    route: { ...route, totalDistance: 220 },
+  });
+  assert.equal(committed.navigation.committed?.mode, "driving");
+  assert.deepEqual(committed.navigation.committed?.start, { lat: 11, lng: 11 });
+  assert.equal(committed.navigation.committed?.route.totalDistance, 220);
 });
