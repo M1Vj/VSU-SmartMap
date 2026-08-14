@@ -56,6 +56,13 @@ export function clearRouteCommit(): RouteCommitState {
   return EMPTY_ROUTE_COMMIT_STATE;
 }
 
+export function canReuseCommittedRoute(
+  committed: CommittedRoute | null,
+  current: RouteRequestContext | null,
+): boolean {
+  return committed !== null && current !== null && routeContextsEqual(committed, current);
+}
+
 function routeContextsEqual(
   committed: RouteRequestContext,
   pending: RouteRequestContext,

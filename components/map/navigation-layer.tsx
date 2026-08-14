@@ -31,6 +31,7 @@ interface NavigationLayerProps {
   registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
   releaseRouteFoundAnnouncement?: () => void;
   navigationOrigin?: RouteRequestContext["origin"];
+  reuseCommittedRoute?: boolean;
   onRouteRequest?: (context: RouteRequestContext | null) => void;
   onRouteRequestFailed?: () => void;
   onRoutesFound?: (routes: PathResult[], context?: RouteRequestContext) => void;
@@ -50,6 +51,7 @@ export function NavigationLayer({
   registerRouteFoundAnnouncement,
   releaseRouteFoundAnnouncement,
   navigationOrigin = null,
+  reuseCommittedRoute = false,
   onRouteRequest,
   onRouteRequestFailed,
   onRoutesFound,
@@ -84,6 +86,13 @@ export function NavigationLayer({
       navigationSessionId === undefined || !hasRouteFoundAnnouncement
         ? undefined
         : () => hasRouteFoundAnnouncement(navigationSessionId);
+
+    if (reuseCommittedRoute) {
+      return coordinator.start({
+        sessionId: navigationSessionId,
+        preservePublishedResult: true,
+      });
+    }
 
     if (waitingForUserLocation) {
       // eslint-disable-next-line react-hooks/immutability
@@ -307,7 +316,7 @@ export function NavigationLayer({
         preservePublishedResult: true,
         resolve: resolveRoute,
       });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationOrigin, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, onRouteRequest, onRouteRequestFailed, coordinator, requestContextStore]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationOrigin, navigationSessionId, reuseCommittedRoute, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, onRouteRequest, onRouteRequestFailed, coordinator, requestContextStore]);
 
   if (!path) return null;
 

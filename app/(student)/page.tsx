@@ -416,6 +416,7 @@ import {
 import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
 import {
   beginRouteRequest,
+  canReuseCommittedRoute,
   cancelPendingRouteReplacement,
   clearRouteCommit,
   commitRoute,
@@ -477,6 +478,7 @@ function MapView({
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
   const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
+  const [reuseCommittedRoute, setReuseCommittedRoute] = useState(false);
   const [isManualStartPending, setIsManualStartPending] = useState(false);
   const [routeCommitState, setRouteCommitState] = useState<RouteCommitState>(clearRouteCommit);
   const [miniCardHeight, setMiniCardHeight] = useState(0);
@@ -489,6 +491,15 @@ function MapView({
   const committedRoute = routeCommitState.committed;
   const hasActiveRoute = Boolean(committedRoute);
   const displayedRoutes = committedRoute ? [committedRoute.route] : [];
+  const currentRouteRequestContext = useMemo<RouteRequestContext>(() => ({
+    destinationId: targetFacilityId ?? null,
+    start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
+    end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
+    mode: navMode,
+    origin: navigationOrigin,
+  }), [navEnd, navMode, navStart, navigationOrigin, targetFacilityId]);
+  const shouldReuseCommittedRoute =
+    reuseCommittedRoute && canReuseCommittedRoute(committedRoute, currentRouteRequestContext);
   const routeFacingDestination = getRouteFacingDestination(
     routeCommitState,
     navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
@@ -530,6 +541,7 @@ function MapView({
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setTargetFacilityId(undefined);
+    setReuseCommittedRoute(false);
     setRouteCommitState(clearRouteCommit());
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
@@ -548,12 +560,14 @@ function MapView({
     setNavEnd(context.end ? { lat: context.end.lat, lng: context.end.lng } as LatLng : null);
     setNavigationOrigin(context.origin);
     setNavMode(context.mode);
+    setReuseCommittedRoute(true);
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
   }, [dismissRouteFoundAnnouncement, navigationSessionId, setNavEnd, setNavStart]);
 
   useEffect(() => {
     setNavMode(defaultTransportMode);
+    setReuseCommittedRoute(false);
   }, [defaultTransportMode]);
 
   useEffect(() => {
@@ -561,6 +575,7 @@ function MapView({
       const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
       const routeStart = clampPointToVsuCampus(liveStart);
 
+      setReuseCommittedRoute(false);
       setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
     }
   }, [position, navigationOrigin, navEnd, setNavStart]);
@@ -572,6 +587,7 @@ function MapView({
     const routeStart = clampPointToVsuCampus(liveStart);
 
     setNavigationOrigin("live");
+    setReuseCommittedRoute(false);
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
@@ -672,6 +688,7 @@ function MapView({
 
     dismissRouteFoundAnnouncement(navigationSessionId);
     setNavigationSessionId((sessionId) => sessionId + 1);
+    setReuseCommittedRoute(false);
     setTargetFacilityId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
 
@@ -712,6 +729,7 @@ function MapView({
 
     const start = createManualStartPoint(point);
     setNavigationOrigin("manual");
+    setReuseCommittedRoute(false);
     setIsManualStartPending(false);
     setNavStart({ lat: start.lat, lng: start.lng } as LatLng);
   }, [isManualStartPending, setNavStart]);
@@ -728,6 +746,7 @@ function MapView({
       const routeStart = clampPointToVsuCampus(liveStart);
 
       setNavigationOrigin("live");
+      setReuseCommittedRoute(false);
       setIsManualStartPending(false);
       setManualLocationRequestPending(false);
       setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
@@ -742,6 +761,7 @@ function MapView({
     if (!isManualStartPending) return;
 
     setNavigationOrigin("manual");
+    setReuseCommittedRoute(false);
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setNavStart({ lat: VSU_MAIN_GATE.lat, lng: VSU_MAIN_GATE.lng } as LatLng);
@@ -775,7 +795,10 @@ function MapView({
           {hasHydrated && navigationOrigin === "manual" && navStart && (
             <ManualStartPin
               point={{ lat: navStart.lat, lng: navStart.lng }}
-              onChange={(point) => setNavStart({ lat: point.lat, lng: point.lng } as LatLng)}
+              onChange={(point) => {
+                setReuseCommittedRoute(false);
+                setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
+              }}
             />
           )}
           {/* ... */}
@@ -800,6 +823,7 @@ function MapView({
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
               navigationSessionId={navigationSessionId}
               navigationOrigin={navigationOrigin}
+              reuseCommittedRoute={shouldReuseCommittedRoute}
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}

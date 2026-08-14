@@ -123,6 +123,28 @@ test("selection transitions retain route owners and atomically cancel a replacem
   assert.match(navigation, /if \(startedAt !== null && !signal\.aborted\)/);
 });
 
+test("restoring a committed route retires the replacement without starting another request", async () => {
+  const [page, navigation, coordinator] = await Promise.all([
+    readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./navigation-layer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../lib/navigation/route-request-coordinator.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /canReuseCommittedRoute/);
+  assert.match(page, /reuseCommittedRoute=\{shouldReuseCommittedRoute\}/);
+  assert.match(navigation, /reuseCommittedRoute\?: boolean/);
+  assert.match(
+    navigation,
+    /if \(reuseCommittedRoute\) \{[\s\S]*?preservePublishedResult: true,[\s\S]*?return coordinator\.start/,
+  );
+  assert.doesNotMatch(
+    navigation.match(/if \(reuseCommittedRoute\) \{([\s\S]*?)\n\s*\}/)?.[1] ?? "",
+    /resolve:/,
+  );
+  assert.match(coordinator, /if \(active\) cancel\(active\)/);
+  assert.match(coordinator, /options\.resolve === undefined/);
+});
+
 test("facility mini-card heading is inert and Details remains the only expansion control", async () => {
   const source = await readFile(new URL("./map-popup-card.tsx", import.meta.url), "utf8");
 

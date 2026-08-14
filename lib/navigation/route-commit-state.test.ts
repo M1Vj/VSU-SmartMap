@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   beginRouteRequest,
+  canReuseCommittedRoute,
   clearRouteCommit,
   commitRoute,
   failRouteRequest,
@@ -49,6 +50,31 @@ test("a pending replacement keeps the old route identity and metrics", () => {
   assert.equal(state.committed?.destinationId, "facility-a");
   assert.equal(state.committed?.route.totalDistance, 100);
   assert.equal(state.pending?.destinationId, "facility-b");
+});
+
+test("a committed route is reusable only when its request context is unchanged", () => {
+  const committed = committedState().committed;
+
+  assert.equal(canReuseCommittedRoute(committed, firstContext), true);
+  assert.equal(
+    canReuseCommittedRoute(committed, { ...firstContext, destinationId: "facility-b" }),
+    false,
+  );
+  assert.equal(
+    canReuseCommittedRoute(committed, {
+      ...firstContext,
+      start: { lat: firstContext.start.lat + 0.001, lng: firstContext.start.lng },
+    }),
+    false,
+  );
+  assert.equal(
+    canReuseCommittedRoute(committed, { ...firstContext, end: { lat: 12, lng: 22 } }),
+    false,
+  );
+  assert.equal(
+    canReuseCommittedRoute(committed, { ...firstContext, mode: "driving" }),
+    false,
+  );
 });
 
 test("replacement failure retains the old committed route and clears pending state", () => {

@@ -86,6 +86,77 @@ test("replacement preserves the last successful route until the new result publi
   ]);
 });
 
+test("retiring a replacement without a resolver preserves the route and suppresses new provider and toast work", async () => {
+  const { coordinator, events } = harness();
+  const replacement = deferred<string>();
+  let providerCalls = 0;
+  let replacementSignal: AbortSignal | undefined;
+
+  coordinator.start({
+    resolve: async () => {
+      providerCalls += 1;
+      return "committed route";
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({
+    loadingMessage: "Loading",
+    resolve: (signal) => {
+      providerCalls += 1;
+      replacementSignal = signal;
+      return replacement.promise;
+    },
+  });
+  await Promise.resolve();
+
+  const successCountBeforeRetire = events.filter((event) => event.startsWith("success:")).length;
+  coordinator.start({ preservePublishedResult: true });
+  await Promise.resolve();
+
+  assert.equal(providerCalls, 2);
+  assert.equal(replacementSignal?.aborted, true);
+  assert.equal(events.filter((event) => event.startsWith("loading:")).length, 1);
+  assert.equal(
+    events.filter((event) => event.startsWith("success:")).length,
+    successCountBeforeRetire,
+  );
+
+  replacement.resolve("stale replacement");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:committed route",
+  ]);
+});
+
+test("a changed route request still invokes the provider", async () => {
+  const { coordinator, events } = harness();
+  let providerCalls = 0;
+
+  coordinator.start({
+    resolve: async () => {
+      providerCalls += 1;
+      return "first route";
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({
+    resolve: async () => {
+      providerCalls += 1;
+      return "changed route";
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(events.filter((event) => event.startsWith("publish:")), [
+    "publish:first route",
+    "publish:changed route",
+  ]);
+});
+
 test("a failed replacement preserves the last successful route", async () => {
   const { coordinator, events } = harness();
   const replacement = deferred<string>();
