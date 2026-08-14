@@ -1,17 +1,22 @@
 export function shouldClearRouteForSelectedItem({
   selectedItemId,
   routeDestinationId,
+  committedRouteDestinationId = null,
   hasNavigationState,
 }: {
   selectedItemId: string | null;
   routeDestinationId: string | null;
+  committedRouteDestinationId?: string | null;
   hasNavigationState: boolean;
 }) {
   if (!hasNavigationState || !selectedItemId) {
     return false;
   }
 
-  return selectedItemId !== routeDestinationId;
+  return (
+    selectedItemId !== routeDestinationId &&
+    selectedItemId !== committedRouteDestinationId
+  );
 }
 
 export function shouldClearRouteForMapSearch({

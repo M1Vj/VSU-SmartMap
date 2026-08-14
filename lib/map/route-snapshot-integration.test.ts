@@ -13,6 +13,7 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /routeDestinationId/);
   assert.match(source, /selectionDestinationId/);
   assert.match(source, /routeSelectionDestinationId = runtimeState\.navigation\.selectionDestinationId/);
+  assert.match(source, /committedRouteDestinationId: committedNavigation\?\.destinationId \?\? null/);
   assert.match(source, /destination=\{routeFacingEnd\}/);
   assert.match(source, /hasDestination: Boolean\(routeFacingEnd\)/);
   assert.match(source, /navigationOrigin=\{navigationOrigin\}/);
@@ -23,6 +24,16 @@ test("pending replacement selection does not clear a committed route", () => {
     shouldClearRouteForSelectedItem({
       selectedItemId: "facility-new",
       routeDestinationId: "facility-new",
+      committedRouteDestinationId: "facility-old",
+      hasNavigationState: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "facility-old",
+      routeDestinationId: "facility-new",
+      committedRouteDestinationId: "facility-old",
       hasNavigationState: true,
     }),
     false,
@@ -31,6 +42,7 @@ test("pending replacement selection does not clear a committed route", () => {
     shouldClearRouteForSelectedItem({
       selectedItemId: "unrelated",
       routeDestinationId: "facility-new",
+      committedRouteDestinationId: "facility-old",
       hasNavigationState: true,
     }),
     true,
@@ -49,6 +61,7 @@ test("route adapter allocates fresh IDs for calculations and forwards metadata",
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {
   const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
   assert.match(source, /class InteractionCallbackRegistry/);
+  assert.match(source, /useIsomorphicLayoutEffect/);
   assert.match(source, /const \[interactionGateway\] = useState\(/);
   assert.match(source, /createInteractionGateway/);
 });

@@ -306,6 +306,16 @@ test("selection ownership survives a failed replacement without relabeling the c
     shouldClearRouteForSelectedItem({
       selectedItemId: "facility-b",
       routeDestinationId: state.navigation.selectionDestinationId,
+      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
+      hasNavigationState: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: state.navigation.selectionDestinationId,
+      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
       hasNavigationState: true,
     }),
     false,
@@ -314,6 +324,7 @@ test("selection ownership survives a failed replacement without relabeling the c
     shouldClearRouteForSelectedItem({
       selectedItemId: "unrelated",
       routeDestinationId: state.navigation.selectionDestinationId,
+      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
       hasNavigationState: true,
     }),
     true,

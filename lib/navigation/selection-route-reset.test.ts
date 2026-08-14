@@ -55,6 +55,28 @@ test("keeps navigation when selecting the current route destination or when no r
   );
 });
 
+test("keeps the committed route when selecting its destination after a failed replacement", () => {
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      hasNavigationState: true,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "facility-c",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      hasNavigationState: true,
+    }),
+    true,
+  );
+});
+
 test("clears an existing route when search text no longer matches the selected item", () => {
   assert.equal(
     shouldClearRouteForMapSearch({

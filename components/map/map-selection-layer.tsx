@@ -18,6 +18,9 @@ import {
   type PointerActivationEvent,
 } from "@/lib/map/pointer-activation";
 
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-control",
   ".leaflet-marker-icon",
@@ -130,7 +133,7 @@ export function MapSelectionLayer({
   const [interactionRegistry] = useState(
     () => new InteractionCallbackRegistry({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections }),
   );
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     interactionRegistry.update({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections });
   }, [interactionRegistry, items, onClearSelection, onDirections, onMapClick, onMarkerTapOverride, onSelect]);
   const [interactionGateway] = useState(

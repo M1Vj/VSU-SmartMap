@@ -497,7 +497,6 @@ function MapView({
   const isManualStartPending = runtimeState.navigation.phase === "acquiring";
   const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
   const hasCommittedOverlay = Boolean(committedRoute);
-  const hasActiveRoute = runtimeState.navigation.phase === "active" && Boolean(committedNavigation?.route);
   const hasNavigationState = Boolean(
     navStart || navEnd || isManualStartPending || pendingNavigation || committedNavigation,
   );
@@ -612,9 +611,10 @@ function MapView({
 
   useEffect(() => {
     if (
-    shouldClearRouteForSelectedItem({
-      selectedItemId: runtimeState.selectedItemId,
-      routeDestinationId: routeSelectionDestinationId,
+      shouldClearRouteForSelectedItem({
+        selectedItemId: runtimeState.selectedItemId,
+        routeDestinationId: routeSelectionDestinationId,
+        committedRouteDestinationId: committedNavigation?.destinationId ?? null,
         hasNavigationState,
       })
     ) {
@@ -625,6 +625,7 @@ function MapView({
     hasNavigationState,
     runtimeState.selectedItemId,
     routeSelectionDestinationId,
+    committedNavigation?.destinationId,
   ]);
 
   useEffect(() => {

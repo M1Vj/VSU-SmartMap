@@ -262,7 +262,19 @@ export const MapMarker = memo(function MapMarker({
       eventHandlers={{
         click: (event) => {
           markerRef.current?.closeTooltip();
-          const original = (event as { originalEvent?: MouseEvent & { pointerId?: number; pointerType?: string } }).originalEvent;
+          const original = (event as {
+            originalEvent?: MouseEvent & {
+              pointerId?: number;
+              pointerType?: string;
+              isPrimary?: boolean;
+            };
+          }).originalEvent;
+          if (
+            original?.isPrimary === false ||
+            (original?.button !== undefined && original.button !== 0)
+          ) {
+            return;
+          }
           const cancelledAt = cancelledPointerAtRef.current;
           if (cancelledAt !== null && Date.now() - cancelledAt < 700) {
             cancelledPointerAtRef.current = null;
