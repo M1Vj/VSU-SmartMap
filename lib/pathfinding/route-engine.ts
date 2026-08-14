@@ -7,13 +7,15 @@ import {
   isNodeClosed,
 } from "./astar";
 
-function stableSchedule(schedule: MapNode["closure_daily_schedule"] | MapEdge["closure_daily_schedule"]): string | null {
-  if (!schedule) return null;
-  return JSON.stringify(
-    Object.keys(schedule)
-      .sort((left, right) => Number(left) - Number(right))
-      .map((day) => [day, schedule[Number(day)] ?? null]),
-  );
+function canonicalize(value: unknown): string {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalize(entry)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalize(record[key])}`)
+    .join(",")}}`;
 }
 
 export interface PreparedRouteGraph {
@@ -32,10 +34,11 @@ export function getRouteGraphRevision(
   edges: readonly MapEdge[],
 ): string {
   const nodePart = nodes
-    .map((node) => JSON.stringify({
+    .map((node) => canonicalize({
       id: node.id,
       lat: node.lat,
       lng: node.lng,
+      label: node.label ?? null,
       type: node.type,
       building_ids: [...(node.building_ids ?? [])].sort(),
       floor_level: node.floor_level ?? null,
@@ -47,13 +50,12 @@ export function getRouteGraphRevision(
       closure_recurring_start: node.closure_recurring_start ?? null,
       closure_recurring_end: node.closure_recurring_end ?? null,
       closure_recurring_days: [...(node.closure_recurring_days ?? [])].sort(),
-      closure_daily_schedule: stableSchedule(node.closure_daily_schedule),
+      closure_daily_schedule: node.closure_daily_schedule ?? null,
       group_id: node.group_id ?? null,
     }))
-    .sort()
-    .join("|");
+    .sort();
   const edgePart = edges
-    .map((edge) => JSON.stringify({
+    .map((edge) => canonicalize({
       id: edge.id,
       source_id: edge.source_id,
       target_id: edge.target_id,
@@ -69,20 +71,10 @@ export function getRouteGraphRevision(
       closure_recurring_start: edge.closure_recurring_start ?? null,
       closure_recurring_end: edge.closure_recurring_end ?? null,
       closure_recurring_days: [...(edge.closure_recurring_days ?? [])].sort(),
-      closure_daily_schedule: stableSchedule(edge.closure_daily_schedule),
+      closure_daily_schedule: edge.closure_daily_schedule ?? null,
     }))
-    .sort()
-    .join("|");
-  const canonical = `${nodePart}#${edgePart}`;
-  // Keep the revision bounded even when the graph contains thousands of
-  // records. The canonical payload above ensures every routing-relevant field
-  // participates before the deterministic FNV-1a fold.
-  let hash = 2166136261;
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= canonical.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `graph-v1-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+    .sort();
+  return `graph-v2-${canonicalize({ nodes: nodePart, edges: edgePart })}`;
 }
 
 export function prepareRouteGraph(
@@ -179,6 +171,9 @@ export function findPreparedPath(
   mode: TransportMode,
   signal?: AbortSignal,
 ): PathResult | null {
+  // This prepared search is intentionally synchronous for the current bounded
+  // campus graph (54 edges). Abort checks and request identity guards discard
+  // stale results at the route boundary instead of adding worker overhead.
   throwIfAborted(signal);
   if (startNodeId === endNodeId) {
     const node = graph.nodeById.get(startNodeId);
@@ -235,7 +230,9 @@ export function findPreparedPath(
 export function createRouteEngine() {
   let prepared: PreparedRouteGraph | null = null;
   return {
-    setGraph(nodes: readonly MapNode[], edges: readonly MapEdge[], revision: string): boolean {
+    setGraph(nodes: readonly MapNode[], edges: readonly MapEdge[], _callerRevision?: string): boolean {
+      void _callerRevision;
+      const revision = getRouteGraphRevision(nodes, edges);
       if (prepared?.revision === revision) return false;
       prepared = prepareRouteGraph(nodes, edges, revision);
       return true;

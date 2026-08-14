@@ -478,7 +478,17 @@ function MapView({
   );
   
   // Use persistent navigation state
-  const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
+  const {
+    navStart,
+    setNavStart,
+    navEnd,
+    setNavEnd,
+    destinationId: persistedDestinationId,
+    mode: persistedNavigationMode,
+    origin: persistedNavigationOrigin,
+    setNavigationRoute,
+    clearNavigation,
+  } = useNavigationPersistence();
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
   const [routeReportOpen, setRouteReportOpen] = useState(false);
@@ -486,6 +496,7 @@ function MapView({
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [reuseCommittedRouteAfterRestore, setReuseCommittedRouteAfterRestore] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const hydratedNavigationRequestRef = useRef(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
@@ -543,17 +554,29 @@ function MapView({
 
   const resolveManualStart = useCallback((point: NavigationPoint, origin: "manual" | "live") => {
     if (!isManualStartPending) return false;
-    const pendingRequestId = runtime.getState().navigation.pendingRequestId;
+    const current = runtime.getState();
+    const pendingRequestId = current.navigation.pendingRequestId;
+    const request = current.navigation.request;
     if (pendingRequestId == null) return false;
+    if (!request || !request.end) return false;
     setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
-    runtime.dispatch({
+    const next = runtime.dispatch({
       type: "navigation/resolving",
       requestId: pendingRequestId,
       origin,
       start: { lat: point.lat, lng: point.lng },
     });
+    if (next !== current && next.navigation.pendingRequestId === pendingRequestId) {
+      setNavigationRoute({
+        navStart: { lat: point.lat, lng: point.lng } as LatLng,
+        navEnd: { lat: request.end.lat, lng: request.end.lng } as LatLng,
+        destinationId: request.destinationId,
+        mode: request.mode,
+        origin,
+      });
+    }
     return true;
-  }, [isManualStartPending, runtime, setNavStart]);
+  }, [isManualStartPending, runtime, setNavStart, setNavigationRoute]);
 
   useEffect(() => {
     if (selectedId && selectedId !== runtimeState.selectedItemId) {
@@ -566,6 +589,52 @@ function MapView({
   useEffect(() => {
     setHasHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hasHydrated || hydratedNavigationRequestRef.current) return;
+    hydratedNavigationRequestRef.current = true;
+
+    if (
+      !navStart ||
+      !navEnd ||
+      !persistedDestinationId ||
+      !persistedNavigationMode ||
+      !persistedNavigationOrigin
+    ) {
+      return;
+    }
+
+    const current = runtime.getState();
+    if (current.navigation.phase !== "idle" && current.navigation.phase !== "cleared") return;
+
+    const requestId = navigationSessionId + 1;
+    setNavigationSessionId(requestId);
+    setNavMode(persistedNavigationMode);
+    setReuseCommittedRouteAfterRestore(false);
+    runtime.dispatch({
+      type: "navigation/requested",
+      requestId,
+      destinationId: persistedDestinationId,
+      origin: persistedNavigationOrigin,
+      mode: persistedNavigationMode,
+      start: { lat: navStart.lat, lng: navStart.lng },
+      end: { lat: navEnd.lat, lng: navEnd.lng },
+    });
+    beginMapPerformanceRequest(
+      requestId,
+      typeof performance === "undefined" ? Date.now() : performance.now(),
+      false,
+    );
+  }, [
+    hasHydrated,
+    navEnd,
+    navStart,
+    navigationSessionId,
+    persistedDestinationId,
+    persistedNavigationMode,
+    persistedNavigationOrigin,
+    runtime,
+  ]);
 
   const dismissRouteFoundAnnouncement = useCallback((retiredSessionId?: number) => {
     const toastId = routeAnnouncementTracker.reset(retiredSessionId);
@@ -614,16 +683,26 @@ function MapView({
 
     clearMapPerformanceRequest(pendingRequestId);
     dismissRouteFoundAnnouncement(navigationSessionId);
-    setNavStart(
-      committed.start
-        ? ({ lat: committed.start.lat, lng: committed.start.lng } as LatLng)
-        : null,
-    );
-    setNavEnd(
-      committed.end
-        ? ({ lat: committed.end.lat, lng: committed.end.lng } as LatLng)
-        : null,
-    );
+    if (committed.start && committed.end) {
+      setNavigationRoute({
+        navStart: { lat: committed.start.lat, lng: committed.start.lng } as LatLng,
+        navEnd: { lat: committed.end.lat, lng: committed.end.lng } as LatLng,
+        destinationId: committed.destinationId,
+        mode: committed.mode,
+        origin: committed.origin,
+      });
+    } else {
+      setNavStart(
+        committed.start
+          ? ({ lat: committed.start.lat, lng: committed.start.lng } as LatLng)
+          : null,
+      );
+      setNavEnd(
+        committed.end
+          ? ({ lat: committed.end.lat, lng: committed.end.lng } as LatLng)
+          : null,
+      );
+    }
     setNavMode(committed.mode);
     setReuseCommittedRouteAfterRestore(true);
     setManualLocationRequestPending(false);
@@ -635,6 +714,7 @@ function MapView({
     runtime,
     setNavEnd,
     setNavStart,
+    setNavigationRoute,
   ]);
 
   useEffect(() => {
@@ -737,8 +817,23 @@ function MapView({
     const next = runtime.dispatch({ type: "navigation/failed", requestId, message });
     if (next.navigation.pendingRequestId === null && next.navigation.phase === "failed") {
       failMapPerformanceRequest(requestId);
+      const committed = next.navigation.committed;
+      if (committed?.start && committed.end) {
+        setNavigationRoute({
+          navStart: { lat: committed.start.lat, lng: committed.start.lng } as LatLng,
+          navEnd: { lat: committed.end.lat, lng: committed.end.lng } as LatLng,
+          destinationId: committed.destinationId,
+          mode: committed.mode,
+          origin: committed.origin,
+        });
+        setNavMode(committed.mode);
+      } else {
+        clearNavigation();
+      }
+      setReuseCommittedRouteAfterRestore(false);
+      setManualLocationRequestPending(false);
     }
-  }, [runtime]);
+  }, [clearNavigation, runtime, setNavigationRoute]);
 
   const handleRouteRequestStarted = useCallback((requestId: number, metadata: NavigationRequestMetadata) => {
     const current = runtime.getState();
@@ -810,15 +905,30 @@ function MapView({
       requestStartedAt,
       runtime.getState().navigation.committed !== null,
     );
-    setNavEnd(end as LatLng);
 
     if (decision.mode === "live") {
-      setNavStart({ lat: decision.start.lat, lng: decision.start.lng } as LatLng);
+      setNavigationRoute({
+        navStart: { lat: decision.start.lat, lng: decision.start.lng } as LatLng,
+        navEnd: end as LatLng,
+        destinationId: item.id,
+        mode: navMode,
+        origin: "live",
+      });
       return;
     }
 
+    setNavEnd(end as LatLng);
     setNavStart(null);
-  }, [dismissRouteFoundAnnouncement, navigationSessionId, navMode, position, runtime, setNavEnd, setNavStart]);
+  }, [
+    dismissRouteFoundAnnouncement,
+    navigationSessionId,
+    navMode,
+    position,
+    runtime,
+    setNavEnd,
+    setNavStart,
+    setNavigationRoute,
+  ]);
 
   useEffect(() => {
     if (!pendingNavigationFacility) {
@@ -958,6 +1068,15 @@ function MapView({
                 role="status"
               >
                 {navigationControls.statusText}
+              </div>
+            )}
+
+            {runtimeState.navigation.phase === "failed" && runtimeState.navigation.error && (
+              <div
+                className="pointer-events-auto max-w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-destructive/30 bg-background/95 px-4 py-2 text-center text-xs font-medium text-destructive shadow-lg ring-1 ring-black/5 backdrop-blur"
+                role="alert"
+              >
+                {runtimeState.navigation.error}
               </div>
             )}
 

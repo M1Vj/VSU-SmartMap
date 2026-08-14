@@ -105,6 +105,8 @@ test("refresh and failure preserve the committed overlay and destination-focused
   });
   assert.equal(state.navigation.phase, "failed");
   assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.selectionDestinationId, "facility-1");
+  assert.equal(state.navigation.error, "provider unavailable");
   assert.equal(state.presentation.markerMode, "destination-focused");
   assert.equal(state.presentation.controls.canReportRoute, true);
 });
@@ -155,6 +157,7 @@ test("runtime controls clear the committed route during replacement and failure"
   assert.equal(state.presentation.controls.primaryAction, "clear");
   state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
   assert.equal(state.presentation.controls.primaryAction, "clear");
+  assert.equal(state.navigation.error, "provider unavailable");
 });
 
 test("replacement keeps the committed route snapshot authoritative until atomic success", () => {

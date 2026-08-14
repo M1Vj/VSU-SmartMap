@@ -31,6 +31,19 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /navigationOrigin=\{navigationOrigin\}/);
 });
 
+test("map page hydrates valid persisted navigation and restores committed metadata after replacement failure", async () => {
+  const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /persistedDestinationId/);
+  assert.match(source, /persistedNavigationMode/);
+  assert.match(source, /persistedNavigationOrigin/);
+  assert.match(source, /hydratedNavigationRequestRef/);
+  assert.match(source, /type: "navigation\/requested"/);
+  assert.match(source, /setNavigationRoute\(/);
+  assert.match(source, /next\.navigation\.phase === "failed"/);
+  assert.match(source, /const committed = next\.navigation\.committed[\s\S]{0,700}setNavigationRoute\([\s\S]{0,500}committed\.destinationId[\s\S]{0,300}committed\.origin/);
+  assert.match(source, /runtimeState\.navigation\.phase === "failed"[\s\S]{0,260}runtimeState\.navigation\.error[\s\S]{0,320}role="alert"/);
+});
+
 test("pending replacement selection does not clear a committed route", () => {
   assert.equal(
     shouldClearRouteForSelectedItem({
