@@ -581,19 +581,27 @@ function MapView({
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId, runtime]);
 
-  const restoreCommittedRoute = useCallback(() => {
+  const restoreCommittedRoute = useCallback((expectedDestinationId?: string) => {
     const current = runtime.getState();
     const pendingRequestId = current.navigation.pendingRequestId;
     const committed = current.navigation.committed;
-    if (pendingRequestId === null || committed === null) return false;
+    if (
+      pendingRequestId === null ||
+      committed === null ||
+      (expectedDestinationId !== undefined && committed.destinationId !== expectedDestinationId)
+    ) {
+      return false;
+    }
 
-    clearMapPerformanceRequest(pendingRequestId);
-    dismissRouteFoundAnnouncement(navigationSessionId);
-    runtime.dispatch({
+    const restored = runtime.dispatch({
       type: "navigation/restored",
       requestId: pendingRequestId,
       destinationId: committed.destinationId,
     });
+    if (restored === current) return false;
+
+    clearMapPerformanceRequest(pendingRequestId);
+    dismissRouteFoundAnnouncement(navigationSessionId);
     setNavStart(
       committed.start
         ? ({ lat: committed.start.lat, lng: committed.start.lng } as LatLng)
@@ -863,6 +871,17 @@ function MapView({
             routeDestinationId={runtimeState.presentation.markerMode === "destination-focused" ? routeDestinationId : null}
             minimizeNonDestinationMarkers={hasCommittedOverlay || runtimeState.presentation.markerMode === "destination-focused"}
             onSelect={(item) => {
+              const current = runtime.getState();
+              if (
+                shouldRestoreCommittedRouteForSelectedItem({
+                  selectedItemId: item.id,
+                  routeDestinationId: current.navigation.selectionDestinationId,
+                  committedRouteDestinationId: current.navigation.committed?.destinationId ?? null,
+                  pendingRequestId: current.navigation.pendingRequestId,
+                })
+              ) {
+                restoreCommittedRoute(item.id);
+              }
               runtime.dispatch({ type: "selection/set", itemId: item.id });
               onSelect(item.id);
             }}

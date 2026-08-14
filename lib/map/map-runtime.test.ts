@@ -356,12 +356,16 @@ test("selecting the committed destination retires a pending replacement and igno
     end: { lat: 11.1, lng: 11.1 },
   });
 
+  // Model the marker callback's synchronous ordering: selection is recorded,
+  // then B is retired before its queued completion can commit.
+  state = mapRuntimeReducer(state, { type: "selection/set", itemId: "facility-a" });
   const restored = mapRuntimeReducer(state, {
     type: "navigation/restored",
     requestId: 2,
     destinationId: "facility-a",
   });
   assert.equal(restored.navigation.phase, "active");
+  assert.equal(restored.selectedItemId, "facility-a");
   assert.equal(restored.navigation.pendingRequestId, null);
   assert.equal(restored.navigation.request, null);
   assert.equal(restored.navigation.destinationId, "facility-a");

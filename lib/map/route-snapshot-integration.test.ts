@@ -16,8 +16,10 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /committedRouteDestinationId: committedNavigation\?\.destinationId \?\? null/);
   assert.match(source, /shouldRestoreCommittedRouteForSelectedItem/);
   assert.match(source, /shouldRestoreCommittedRouteForSelectedItem\([\s\S]{0,500}restoreCommittedRoute\(\)/);
+  assert.match(source, /onSelect=\{\(item\) => \{[\s\S]{0,700}restoreCommittedRoute\(item\.id\)/);
   assert.match(source, /type: "navigation\/restored"/);
   assert.match(source, /clearMapPerformanceRequest\(pendingRequestId\)/);
+  assert.match(source, /const restored = runtime\.dispatch\([\s\S]{0,260}if \(restored === current\) return false;/);
   assert.match(source, /setNavStart\(\s*committed\.start/);
   assert.match(source, /setNavEnd\(\s*committed\.end/);
   assert.match(source, /setNavMode\(committed\.mode\)/);
@@ -96,6 +98,7 @@ test("marker rendering keeps activation and direction adapters stable across sta
   const markersSource = await readFile(new URL("../../components/map/map-markers.tsx", import.meta.url), "utf8");
   const markerSource = await readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
   assert.match(selectionSource, /const handleMarkerActivate = useCallback/);
+  assert.match(selectionSource, /const handleMarkerSelect = useCallback/);
   assert.match(selectionSource, /const handleMarkerDirections = useCallback/);
   assert.match(markersSource, /export const MapMarkers = memo\(/);
   assert.match(markerSource, /export const MapMarker = memo\(/);
