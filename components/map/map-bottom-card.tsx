@@ -44,7 +44,7 @@ export function MapBottomCard({
         : (onResize: () => void) => {
             const observer = new ResizeObserver(onResize);
             return {
-              observe: (target: HTMLElement) => observer.observe(target),
+              observe: (target: { getBoundingClientRect: () => { height: number } }) => observer.observe(target as Element),
               disconnect: () => observer.disconnect(),
             };
           };

@@ -17,7 +17,7 @@ test("map card height fallback resets the dock measurement on cleanup", () => {
 });
 
 test("map card height observer disconnects and resets after resize tracking", () => {
-  let callback: (() => void) | null = null;
+  let callback: () => void = () => undefined;
   let disconnected = false;
   const reported: number[] = [];
   let height = 144;
@@ -36,7 +36,7 @@ test("map card height observer disconnects and resets after resize tracking", ()
   );
 
   height = 220;
-  callback?.();
+  callback();
   assert.deepEqual(reported, [144, 220]);
   cleanup();
   assert.equal(disconnected, true);
