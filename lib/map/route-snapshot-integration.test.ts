@@ -14,6 +14,14 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /selectionDestinationId/);
   assert.match(source, /routeSelectionDestinationId = runtimeState\.navigation\.selectionDestinationId/);
   assert.match(source, /committedRouteDestinationId: committedNavigation\?\.destinationId \?\? null/);
+  assert.match(source, /shouldRestoreCommittedRouteForSelectedItem/);
+  assert.match(source, /shouldRestoreCommittedRouteForSelectedItem\([\s\S]{0,500}restoreCommittedRoute\(\)/);
+  assert.match(source, /type: "navigation\/restored"/);
+  assert.match(source, /clearMapPerformanceRequest\(pendingRequestId\)/);
+  assert.match(source, /setNavStart\(\s*committed\.start/);
+  assert.match(source, /setNavEnd\(\s*committed\.end/);
+  assert.match(source, /setNavMode\(committed\.mode\)/);
+  assert.match(source, /setNavigationSessionId\(\(sessionId\) => sessionId \+ 1\)/);
   assert.match(source, /destination=\{routeFacingEnd\}/);
   assert.match(source, /hasDestination: Boolean\(routeFacingEnd\)/);
   assert.match(source, /navigationOrigin=\{navigationOrigin\}/);
@@ -64,6 +72,13 @@ test("selection gateway keeps its seen activation set across parent rerenders", 
   assert.match(source, /useIsomorphicLayoutEffect/);
   assert.match(source, /const \[interactionGateway\] = useState\(/);
   assert.match(source, /createInteractionGateway/);
+});
+
+test("map-ready timing starts at Leaflet readiness and ends after a rendered frame", async () => {
+  const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
+  assert.match(source, /map\.whenReady\(/);
+  assert.match(source, /requestAnimationFrame\(/);
+  assert.match(source, /cancelAnimationFrame\(/);
 });
 
 test("background map interaction has one pointer/compatibility gateway", async () => {

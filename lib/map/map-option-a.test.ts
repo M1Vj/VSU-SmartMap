@@ -36,6 +36,8 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   const selectionSource = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
   assert.match(selectionSource, /markMapPerformance\(/);
   assert.match(selectionSource, /"map-ready"/);
+  assert.match(selectionSource, /map\.whenReady\(/);
+  assert.match(selectionSource, /requestAnimationFrame\(/);
   assert.match(facilityPopupSource, /h-11 min-h-11 w-full text-sm/);
   assert.match(boardingPopupSource, /h-11 min-h-11 w-full text-sm/);
 });

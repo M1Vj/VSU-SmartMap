@@ -427,6 +427,7 @@ import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facilit
 import {
   shouldClearRouteForMapSearch,
   shouldClearRouteForSelectedItem,
+  shouldRestoreCommittedRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
 
 function MapView({
@@ -580,6 +581,41 @@ function MapView({
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId, runtime]);
 
+  const restoreCommittedRoute = useCallback(() => {
+    const current = runtime.getState();
+    const pendingRequestId = current.navigation.pendingRequestId;
+    const committed = current.navigation.committed;
+    if (pendingRequestId === null || committed === null) return false;
+
+    clearMapPerformanceRequest(pendingRequestId);
+    dismissRouteFoundAnnouncement(navigationSessionId);
+    runtime.dispatch({
+      type: "navigation/restored",
+      requestId: pendingRequestId,
+      destinationId: committed.destinationId,
+    });
+    setNavStart(
+      committed.start
+        ? ({ lat: committed.start.lat, lng: committed.start.lng } as LatLng)
+        : null,
+    );
+    setNavEnd(
+      committed.end
+        ? ({ lat: committed.end.lat, lng: committed.end.lng } as LatLng)
+        : null,
+    );
+    setNavMode(committed.mode);
+    setManualLocationRequestPending(false);
+    setNavigationSessionId((sessionId) => sessionId + 1);
+    return true;
+  }, [
+    dismissRouteFoundAnnouncement,
+    navigationSessionId,
+    runtime,
+    setNavEnd,
+    setNavStart,
+  ]);
+
   useEffect(() => {
     setNavMode(defaultTransportMode);
   }, [defaultTransportMode]);
@@ -611,6 +647,18 @@ function MapView({
 
   useEffect(() => {
     if (
+      shouldRestoreCommittedRouteForSelectedItem({
+        selectedItemId: runtimeState.selectedItemId,
+        routeDestinationId: routeSelectionDestinationId,
+        committedRouteDestinationId: committedNavigation?.destinationId ?? null,
+        pendingRequestId: runtimeState.navigation.pendingRequestId,
+      })
+    ) {
+      restoreCommittedRoute();
+      return;
+    }
+
+    if (
       shouldClearRouteForSelectedItem({
         selectedItemId: runtimeState.selectedItemId,
         routeDestinationId: routeSelectionDestinationId,
@@ -623,7 +671,9 @@ function MapView({
   }, [
     clearRouteState,
     hasNavigationState,
+    restoreCommittedRoute,
     runtimeState.selectedItemId,
+    runtimeState.navigation.pendingRequestId,
     routeSelectionDestinationId,
     committedNavigation?.destinationId,
   ]);

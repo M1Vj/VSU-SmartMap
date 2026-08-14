@@ -1,4 +1,4 @@
-export type MapPerformanceEvent = "map-ready" | "marker-activation" | "route-request" | "route-commit" | "route-refresh" | "route-failure";
+export type MapPerformanceEvent = "map-ready" | "marker-activation" | "route-commit" | "route-refresh" | "route-failure";
 
 const EVENT_LIMIT = 64;
 type PerformanceEvent = { name: MapPerformanceEvent; durationMs: number; requestId?: number };

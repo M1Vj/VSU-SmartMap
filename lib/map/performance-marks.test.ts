@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   beginMapPerformanceRequest,
@@ -12,10 +13,10 @@ import {
 
 test("performance marks retain only bounded numeric privacy-safe events", () => {
   clearMapPerformanceEvents();
-  for (let index = 0; index < 80; index += 1) markMapPerformance("route-request", index, index + 4.25);
+  for (let index = 0; index < 80; index += 1) markMapPerformance("marker-activation", index, index + 4.25);
   const events = getMapPerformanceEvents();
   assert.equal(events.length, 64);
-  assert.deepEqual(events[0], { name: "route-request", durationMs: 4.25 });
+  assert.deepEqual(events[0], { name: "marker-activation", durationMs: 4.25 });
   assert.equal(Object.keys(events[0]).sort().join(","), "durationMs,name");
 });
 
@@ -71,4 +72,9 @@ test("route marks correlate request start to commit/failure and retire stale or 
   clearMapPerformanceRequest(15);
   commitMapPerformanceRequest(15, 560);
   assert.equal(getMapPerformanceEvents().length, beforeRetiredRefresh);
+});
+
+test("unsupported route-request timing is not exposed", async () => {
+  const source = await readFile(new URL("./performance-marks.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /route-request/);
 });

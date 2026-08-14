@@ -145,13 +145,38 @@ export function MapSelectionLayer({
 
   useEffect(() => {
     if (mapReadyMarkedRef.current) return;
-    mapReadyMarkedRef.current = true;
-    markMapPerformance(
-      "map-ready",
-      mapReadyStartedAtRef.current,
-      typeof performance === "undefined" ? Date.now() : performance.now(),
-    );
-  }, []);
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const markReadyAfterFrame = () => {
+      if (cancelled || mapReadyMarkedRef.current) return;
+      mapReadyMarkedRef.current = true;
+      markMapPerformance(
+        "map-ready",
+        mapReadyStartedAtRef.current,
+        typeof performance === "undefined" ? Date.now() : performance.now(),
+      );
+    };
+
+    const handleReady = () => {
+      if (typeof requestAnimationFrame === "function") {
+        frameId = requestAnimationFrame(markReadyAfterFrame);
+      } else {
+        timeoutId = setTimeout(markReadyAfterFrame, 0);
+      }
+    };
+
+    map.whenReady(handleReady);
+    return () => {
+      cancelled = true;
+      map.off("load", handleReady);
+      if (frameId !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    };
+  }, [map]);
 
   const getCurrentView = useCallback(() => ({
     center: {

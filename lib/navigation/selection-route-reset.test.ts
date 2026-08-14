@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   shouldClearRouteForMapSearch,
   shouldClearRouteForSelectedItem,
+  shouldRestoreCommittedRouteForSelectedItem,
 } from "./selection-route-reset.ts";
 
 test("clears an existing route when a different map item is selected", () => {
@@ -74,6 +75,36 @@ test("keeps the committed route when selecting its destination after a failed re
       hasNavigationState: true,
     }),
     true,
+  );
+});
+
+test("restores the committed route only when its destination is selected during a pending replacement", () => {
+  assert.equal(
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: 2,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-b",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: 2,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: null,
+    }),
+    false,
   );
 });
 

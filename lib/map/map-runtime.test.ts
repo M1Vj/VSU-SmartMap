@@ -334,6 +334,56 @@ test("selection ownership survives a failed replacement without relabeling the c
   assert.equal(state.navigation.selectionDestinationId, null);
 });
 
+test("selecting the committed destination retires a pending replacement and ignores late results", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    mode: "walking",
+    start: { lat: 10, lng: 10 },
+    end: { lat: 10.1, lng: 10.1 },
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-b",
+    origin: "manual",
+    mode: "driving",
+    start: { lat: 11, lng: 11 },
+    end: { lat: 11.1, lng: 11.1 },
+  });
+
+  const restored = mapRuntimeReducer(state, {
+    type: "navigation/restored",
+    requestId: 2,
+    destinationId: "facility-a",
+  });
+  assert.equal(restored.navigation.phase, "active");
+  assert.equal(restored.navigation.pendingRequestId, null);
+  assert.equal(restored.navigation.request, null);
+  assert.equal(restored.navigation.destinationId, "facility-a");
+  assert.equal(restored.navigation.selectionDestinationId, "facility-a");
+  assert.equal(restored.navigation.origin, "live");
+  assert.equal(restored.navigation.mode, "walking");
+  assert.equal(restored.navigation.committed, state.navigation.committed);
+
+  const staleSuccess = mapRuntimeReducer(restored, {
+    type: "navigation/committed",
+    requestId: 2,
+    route: { ...route, totalDistance: 999 },
+  });
+  const staleFailure = mapRuntimeReducer(restored, {
+    type: "navigation/failed",
+    requestId: 2,
+    message: "late failure",
+  });
+  assert.equal(staleSuccess, restored);
+  assert.equal(staleFailure, restored);
+});
+
 test("route-facing endpoint stays committed during a pending or failed replacement", () => {
   let state = createInitialMapRuntimeState();
   state = mapRuntimeReducer(state, {

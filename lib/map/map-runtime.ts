@@ -88,6 +88,7 @@ export type MapRuntimeEvent =
       snapshot?: Omit<CommittedNavigationSnapshot, "route">;
     }
   | { type: "navigation/failed"; requestId: number; message: string }
+  | { type: "navigation/restored"; requestId: number; destinationId: string }
   | { type: "navigation/cleared" };
 
 export function createInitialMapRuntimeState(
@@ -170,6 +171,30 @@ export function mapRuntimeReducer(
       committedRoute: null,
       request: null,
       committed: null,
+      error: null,
+    };
+    return { ...state, navigation, presentation: derivePresentation(navigation) };
+  }
+  if (event.type === "navigation/restored") {
+    const committed = state.navigation.committed;
+    if (
+      !committed ||
+      state.navigation.pendingRequestId !== event.requestId ||
+      committed.destinationId !== event.destinationId
+    ) {
+      return state;
+    }
+
+    const navigation = {
+      ...state.navigation,
+      phase: "active" as const,
+      origin: committed.origin,
+      mode: committed.mode,
+      destinationId: committed.destinationId,
+      selectionDestinationId: committed.destinationId,
+      pendingRequestId: null,
+      request: null,
+      committedRoute: committed.route,
       error: null,
     };
     return { ...state, navigation, presentation: derivePresentation(navigation) };
