@@ -1,19 +1,11 @@
-const CACHE_NAME = 'vsu-smartmap-v16';
+const CACHE_NAME = 'vsu-smartmap-v17';
+const PREVIOUS_TILE_CACHE_NAME = 'map-tiles-v1';
 const TILE_CACHE_NAME = 'map-tiles-v2';
 const TILE_CACHE_MAX_ENTRIES = 400;
 const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
-const CARTO_LIGHT_TILE_HOST = 'https://a.basemaps.cartocdn.com';
-const TRANSPARENT_TILE = Uint8Array.from([
-  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
-  0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
-  0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
-  31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
-  78, 68, 174, 66, 96, 130,
-]);
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
 const IS_LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1', '0.0.0.0'].includes(self.location.hostname) &&
   !ENABLE_LOCAL_OFFLINE_PREVIEW;
-let satelliteFallbackBaseAvailable = false;
 
 const STATIC_ASSETS = [
   '/',
@@ -69,30 +61,19 @@ const DEV_HMR_OFFLINE_SHIM = `
 </script>`;
 
 function isMapTileRequest(url) {
-  return url.hostname === 'tile.openstreetmap.org' ||
-    url.hostname.endsWith('.openstreetmap.org') ||
-    url.hostname === 'basemaps.cartocdn.com' ||
-    url.hostname.endsWith('.cartocdn.com') ||
-    url.hostname === 'tiles.openfreemap.org' ||
-    url.hostname === 'server.arcgisonline.com';
-}
-
-function isArcGisTile(url) {
-  return url.hostname === 'server.arcgisonline.com' && /\/MapServer\/tile\//i.test(url.pathname);
-}
-
-function isArcGisReferenceTile(url) {
-  return isArcGisTile(url) && /\/Reference\//i.test(url.pathname);
-}
-
-function getCartoFallbackTileUrl(url) {
-  if (!isArcGisTile(url)) return null;
-
-  const match = url.pathname.match(/\/MapServer\/tile\/(\d+)\/(\d+)\/(\d+)(?:\.[a-z0-9]+)?$/i);
-  if (!match) return null;
-
-  const [, zoom, y, x] = match;
-  return `${CARTO_LIGHT_TILE_HOST}/light_all/${zoom}/${x}/${y}.png`;
+  if (url.hostname === 'server.arcgisonline.com') {
+    return /\/MapServer\/tile\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'tile.openstreetmap.org') {
+    return /^\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'tiles.openfreemap.org') {
+    return /(?:^|\/)\d+\/\d+\/\d+(?:\.(?:pbf|mvt|png|jpg|webp))?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'basemaps.cartocdn.com' || url.hostname.endsWith('.basemaps.cartocdn.com')) {
+    return /^\/(?:light_all|dark_all|voyager|rastertiles)\/\d+\/\d+\/\d+(?:@[a-z0-9]+)?(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  return false;
 }
 
 function isUsableTileResponse(response) {
@@ -101,37 +82,6 @@ function isUsableTileResponse(response) {
     response.status !== 204 &&
     (response.ok || response.type === 'opaque')
   );
-}
-
-function transparentTileResponse() {
-  return new Response(TRANSPARENT_TILE, {
-    status: 200,
-    headers: {
-      'Cache-Control': 'no-store',
-      'Content-Type': 'image/png',
-    },
-  });
-}
-
-async function fallbackArcGisTile(url) {
-  if (isArcGisReferenceTile(url)) {
-    return satelliteFallbackBaseAvailable ? transparentTileResponse() : Response.error();
-  }
-
-  const fallbackUrl = getCartoFallbackTileUrl(url);
-  if (!fallbackUrl) return Response.error();
-
-  try {
-    const fallbackResponse = await fetch(fallbackUrl, { mode: 'no-cors' });
-    if (isUsableTileResponse(fallbackResponse)) {
-      satelliteFallbackBaseAvailable = true;
-      return fallbackResponse;
-    }
-  } catch {
-    // Return a network error below so Leaflet can surface the tile failure.
-  }
-
-  return Response.error();
 }
 
 async function trimTileCache(cache) {
@@ -143,6 +93,26 @@ async function trimTileCache(cache) {
       .slice(0, keys.length - TILE_CACHE_MAX_ENTRIES)
       .map((request) => cache.delete(request))
   );
+}
+
+async function migratePreviousTileCache(cacheNames) {
+  if (!cacheNames.includes(PREVIOUS_TILE_CACHE_NAME)) return;
+
+  const [previousCache, tileCache] = await Promise.all([
+    caches.open(PREVIOUS_TILE_CACHE_NAME),
+    caches.open(TILE_CACHE_NAME),
+  ]);
+  const requests = await previousCache.keys();
+
+  await Promise.all(requests.map(async (request) => {
+    const response = await previousCache.match(request);
+    if (!isUsableTileResponse(response)) return;
+
+    const currentResponse = await tileCache.match(request);
+    if (isUsableTileResponse(currentResponse)) return;
+
+    await tileCache.put(request, response.clone());
+  }));
 }
 
 function isNetworkOnlyRequest(url, request) {
@@ -336,11 +306,14 @@ self.addEventListener('activate', (event) => {
   const keepCaches = [CACHE_NAME, TILE_CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
-      const deleteCaches = Promise.all(
+      const migration = IS_LOCAL_DEVELOPMENT
+        ? Promise.resolve()
+        : migratePreviousTileCache(cacheNames);
+      const deleteCaches = migration.then(() => Promise.all(
         cacheNames
           .filter((name) => !keepCaches.includes(name))
           .map((name) => caches.delete(name))
-      );
+      ));
       if (!IS_LOCAL_DEVELOPMENT) return deleteCaches;
 
       return Promise.all([
@@ -420,9 +393,8 @@ self.addEventListener('fetch', (event) => {
               return networkResponse;
             }
 
-            if (isArcGisTile(url)) return fallbackArcGisTile(url);
           } catch {
-            if (isArcGisTile(url)) return fallbackArcGisTile(url);
+            // Return a network error so MapWrapper can activate its explicit fallback.
           }
 
           return Response.error();

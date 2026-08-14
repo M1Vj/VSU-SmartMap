@@ -178,9 +178,9 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
           ) : (
             <>
               <TileLayer
-                key={mapStyleUrl}
+                key={MAP_TILES.satelliteUrl}
                 attribution={MAP_TILES.satelliteAttribution}
-                url={mapStyleUrl}
+                url={MAP_TILES.satelliteUrl}
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
                 eventHandlers={{ tileerror: handleSatelliteTileError }}

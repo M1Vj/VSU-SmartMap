@@ -6,7 +6,7 @@ import vm from "node:vm";
 test("service worker refreshes cached app icons with a new static cache", () => {
   const serviceWorker = readFileSync("public/sw.js", "utf8");
 
-  assert.match(serviceWorker, /const CACHE_NAME = 'vsu-smartmap-v16';/);
+  assert.match(serviceWorker, /const CACHE_NAME = 'vsu-smartmap-v17';/);
   assert.match(serviceWorker, /'\/icons\/icon-192x192\.png\?v=20260709'/);
   assert.match(serviceWorker, /'\/icons\/icon-512x512\.png\?v=20260709'/);
   assert.doesNotMatch(serviceWorker, /'\/icons\/icon-192x192\.png'/);
@@ -108,6 +108,7 @@ test("install settles with bounded deduplicated optional asset discovery", async
     '<script src="/_next/static/chunks/missing.js"></script>',
     '<script src="/_next/static/chunks/hung.js"></script>',
   ].join("");
+  const currentCsp = "default-src 'self'; connect-src 'self' https://server.arcgisonline.com https://tiles.openfreemap.org https://tile.openstreetmap.org https://a.basemaps.cartocdn.com; img-src 'self' blob: data: https:";
   const workerUrl = new URL("https://smartmap.test/sw.js?offline=1");
   class WorkerRequest extends Request {
     constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -119,6 +120,7 @@ test("install settles with bounded deduplicated optional asset discovery", async
   }
   const cache = {
     match: async () => undefined,
+    keys: async () => [],
     put: async (request: Request, response: Response) => {
       assert.ok(response.ok);
       cachedUrls.push(request.url);
@@ -157,7 +159,10 @@ test("install settles with bounded deduplicated optional asset discovery", async
         return new Response("asset");
       }
       return new Response(requiredHtml, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
+        headers: {
+          "Content-Security-Policy": currentCsp,
+          "Content-Type": "text/html; charset=utf-8",
+        },
       });
     },
     caches: {
@@ -166,6 +171,8 @@ test("install settles with bounded deduplicated optional asset discovery", async
       keys: async () => [
         "vsu-smartmap-v14",
         "vsu-smartmap-v15",
+        "vsu-smartmap-v16",
+        "vsu-smartmap-v17",
         "map-tiles-v1",
         "api-cache-v2",
       ],
@@ -226,10 +233,25 @@ test("install settles with bounded deduplicated optional asset discovery", async
   assert.deepEqual(deletedCaches, [
     "vsu-smartmap-v14",
     "vsu-smartmap-v15",
+    "vsu-smartmap-v16",
     "map-tiles-v1",
     "api-cache-v2",
   ]);
+  assert.ok(!deletedCaches.includes("vsu-smartmap-v17"));
   assert.equal(claimCalls, 1);
+
+  let documentResponsePromise: Promise<Response> | undefined;
+  listeners.get("fetch")?.({
+    request: new WorkerRequest("https://smartmap.test/"),
+    respondWith: (response: Promise<Response>) => {
+      documentResponsePromise = response;
+    },
+    waitUntil: () => undefined,
+  });
+  assert.ok(documentResponsePromise);
+  const reloadedDocument = await documentResponsePromise;
+  assert.equal(reloadedDocument.headers.get("Content-Security-Policy"), currentCsp);
+  assert.equal(fetchCounts.get("/"), 2);
 });
 
 test("install rejects a hung required shell in bounded time", async () => {
@@ -327,21 +349,13 @@ test("install rejects a hung required shell in bounded time", async () => {
   assert.equal(errors.length, 1);
 });
 
-test("map tile failures replace stale 204s with Carto imagery and transparent references", async () => {
+test("map tile failures stay network errors for the MapWrapper fallback", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const fetchedUrls: string[] = [];
-  const deletedUrls: string[] = [];
-  let cacheMatchCount = 0;
   const workerUrl = new URL("https://smartmap.test/sw.js");
   const cache = {
-    match: async () => {
-      cacheMatchCount += 1;
-      return cacheMatchCount === 1 ? new Response(null, { status: 204 }) : undefined;
-    },
-    delete: async (request: Request) => {
-      deletedUrls.push(request.url);
-      return true;
-    },
+    match: async () => undefined,
+    delete: async () => true,
     put: async () => undefined,
     keys: async () => [],
   };
@@ -358,10 +372,7 @@ test("map tile failures replace stale 204s with Carto imagery and transparent re
     fetch: async (request: Request | string) => {
       const url = new URL(typeof request === "string" ? request : request.url);
       fetchedUrls.push(url.toString());
-      if (url.hostname === "server.arcgisonline.com") {
-        throw new Error("ArcGIS unavailable");
-      }
-      return new Response("carto", { status: 200 });
+      throw new Error(`${url.hostname} unavailable`);
     },
     caches: {
       open: async () => cache,
@@ -397,16 +408,108 @@ test("map tile failures replace stale 204s with Carto imagery and transparent re
 
   const baseUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/17/12345/67890";
   const baseResponse = await dispatchFetch(baseUrl);
-  assert.equal(baseResponse?.status, 200);
-  assert.equal(await baseResponse?.text(), "carto");
-  assert.deepEqual(deletedUrls, [baseUrl]);
-  assert.ok(fetchedUrls.includes("https://a.basemaps.cartocdn.com/light_all/17/67890/12345.png"));
+  assert.equal(baseResponse?.status, 0);
+  assert.deepEqual(fetchedUrls, [baseUrl]);
 
-  const referenceResponse = await dispatchFetch(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/17/12345/67890",
-  );
-  assert.equal(referenceResponse?.status, 200);
-  assert.equal(referenceResponse?.headers.get("Content-Type"), "image/png");
+  const referenceUrl =
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/17/12345/67890";
+  const referenceResponse = await dispatchFetch(referenceUrl);
+  assert.equal(referenceResponse?.status, 0);
+  assert.deepEqual(fetchedUrls, [baseUrl, referenceUrl]);
+});
+
+test("tile cache upgrades migrate usable v1 entries before retiring v1", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const validTileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const poisonedTileUrl = "https://tile.openstreetmap.org/17/67890/12346.png";
+  const migratedUrls: string[] = [];
+  const deletedCaches: Array<{ name: string; migratedUrls: string[] }> = [];
+  const v1Entries = new Map<string, Response>([
+    [validTileUrl, new Response("valid-v1-tile", { status: 200 })],
+    [poisonedTileUrl, new Response(null, { status: 204 })],
+  ]);
+  const v2Entries = new Map<string, Response>();
+  const v1Cache = {
+    keys: async () => [...v1Entries.keys()].map((url) => new Request(url)),
+    match: async (request: Request) => v1Entries.get(request.url)?.clone(),
+  };
+  const v2Cache = {
+    keys: async () => [...v2Entries.keys()].map((url) => new Request(url)),
+    match: async (request: Request) => v2Entries.get(request.url)?.clone(),
+    put: async (request: Request, response: Response) => {
+      migratedUrls.push(request.url);
+      v2Entries.set(request.url, response.clone());
+    },
+  };
+  const cacheByName = new Map([
+    ["map-tiles-v1", v1Cache],
+    ["map-tiles-v2", v2Cache],
+  ]);
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => {
+      throw new Error("offline");
+    },
+    caches: {
+      open: async (name: string) => cacheByName.get(name) ?? v2Cache,
+      match: async () => undefined,
+      keys: async () => ["vsu-smartmap-v16", "vsu-smartmap-v17", "map-tiles-v1", "map-tiles-v2"],
+      delete: async (name: string) => {
+        deletedCaches.push({ name, migratedUrls: [...migratedUrls] });
+        return true;
+      },
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  let activatePromise: Promise<unknown> | undefined;
+  listeners.get("activate")?.({
+    waitUntil: (promise: Promise<unknown>) => {
+      activatePromise = promise;
+    },
+  });
+  assert.ok(activatePromise);
+  await activatePromise;
+
+  assert.deepEqual(migratedUrls, [validTileUrl]);
+  assert.ok(v2Entries.has(validTileUrl));
+  assert.ok(!v2Entries.has(poisonedTileUrl));
+  assert.deepEqual(deletedCaches, [
+    { name: "vsu-smartmap-v16", migratedUrls: [validTileUrl] },
+    { name: "map-tiles-v1", migratedUrls: [validTileUrl] },
+  ]);
+
+  let responsePromise: Promise<Response> | undefined;
+  listeners.get("fetch")?.({
+    request: new Request(validTileUrl),
+    respondWith: (response: Promise<Response>) => {
+      responsePromise = response;
+    },
+    waitUntil: () => undefined,
+  });
+  assert.ok(responsePromise);
+  const offlineResponse = await responsePromise;
+  assert.equal(offlineResponse.status, 200);
+  assert.equal(await offlineResponse.text(), "valid-v1-tile");
 });
 
 test("uncached static JavaScript returns an executable offline error response", async () => {

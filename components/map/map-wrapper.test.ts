@@ -51,4 +51,17 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.match(source, /role="status"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /top-32/);
+  assert.match(source, /url=\{MAP_TILES\.satelliteUrl\}/);
+  assert.doesNotMatch(
+    source,
+    /attribution=\{MAP_TILES\.satelliteAttribution\}[\s\S]{0,240}url=\{mapStyleUrl\}/,
+  );
+
+  const fallbackBranchStart = source.indexOf("satelliteFallbackActive ?");
+  const fallbackBranchEnd = source.indexOf("\n          ) : (", fallbackBranchStart);
+  assert.ok(fallbackBranchStart >= 0 && fallbackBranchEnd > fallbackBranchStart);
+  const fallbackBranch = source.slice(fallbackBranchStart, fallbackBranchEnd);
+  assert.match(fallbackBranch, /key="satellite-raster-fallback"/);
+  assert.match(fallbackBranch, /url=\{MAP_TILES\.satelliteFallbackUrl\}/);
+  assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
