@@ -11,7 +11,7 @@ const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://challenges.cloudflare.com https://vitals.vercel-insights.com https://va.vercel-scripts.com https://api.geoapify.com https://api.openrouteservice.org https://routing.openstreetmap.de",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://challenges.cloudflare.com https://vitals.vercel-insights.com https://va.vercel-scripts.com https://api.geoapify.com https://api.openrouteservice.org https://routing.openstreetmap.de https://server.arcgisonline.com https://tiles.openfreemap.org https://*.openfreemap.org https://tile.openstreetmap.org https://*.openstreetmap.org https://*.basemaps.cartocdn.com",
   "frame-src https://challenges.cloudflare.com",
   "manifest-src 'self'",
   "media-src 'self' blob:",

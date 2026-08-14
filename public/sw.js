@@ -1,10 +1,19 @@
 const CACHE_NAME = 'vsu-smartmap-v16';
-const TILE_CACHE_NAME = 'map-tiles-v1';
+const TILE_CACHE_NAME = 'map-tiles-v2';
 const TILE_CACHE_MAX_ENTRIES = 400;
 const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
+const CARTO_LIGHT_TILE_HOST = 'https://a.basemaps.cartocdn.com';
+const TRANSPARENT_TILE = Uint8Array.from([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
+  0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+  31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
+  78, 68, 174, 66, 96, 130,
+]);
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
 const IS_LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1', '0.0.0.0'].includes(self.location.hostname) &&
   !ENABLE_LOCAL_OFFLINE_PREVIEW;
+let satelliteFallbackBaseAvailable = false;
 
 const STATIC_ASSETS = [
   '/',
@@ -66,6 +75,63 @@ function isMapTileRequest(url) {
     url.hostname.endsWith('.cartocdn.com') ||
     url.hostname === 'tiles.openfreemap.org' ||
     url.hostname === 'server.arcgisonline.com';
+}
+
+function isArcGisTile(url) {
+  return url.hostname === 'server.arcgisonline.com' && /\/MapServer\/tile\//i.test(url.pathname);
+}
+
+function isArcGisReferenceTile(url) {
+  return isArcGisTile(url) && /\/Reference\//i.test(url.pathname);
+}
+
+function getCartoFallbackTileUrl(url) {
+  if (!isArcGisTile(url)) return null;
+
+  const match = url.pathname.match(/\/MapServer\/tile\/(\d+)\/(\d+)\/(\d+)(?:\.[a-z0-9]+)?$/i);
+  if (!match) return null;
+
+  const [, zoom, y, x] = match;
+  return `${CARTO_LIGHT_TILE_HOST}/light_all/${zoom}/${x}/${y}.png`;
+}
+
+function isUsableTileResponse(response) {
+  return Boolean(
+    response &&
+    response.status !== 204 &&
+    (response.ok || response.type === 'opaque')
+  );
+}
+
+function transparentTileResponse() {
+  return new Response(TRANSPARENT_TILE, {
+    status: 200,
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'image/png',
+    },
+  });
+}
+
+async function fallbackArcGisTile(url) {
+  if (isArcGisReferenceTile(url)) {
+    return satelliteFallbackBaseAvailable ? transparentTileResponse() : Response.error();
+  }
+
+  const fallbackUrl = getCartoFallbackTileUrl(url);
+  if (!fallbackUrl) return Response.error();
+
+  try {
+    const fallbackResponse = await fetch(fallbackUrl, { mode: 'no-cors' });
+    if (isUsableTileResponse(fallbackResponse)) {
+      satelliteFallbackBaseAvailable = true;
+      return fallbackResponse;
+    }
+  } catch {
+    // Return a network error below so Leaflet can surface the tile failure.
+  }
+
+  return Response.error();
 }
 
 async function trimTileCache(cache) {
@@ -334,22 +400,32 @@ self.addEventListener('fetch', (event) => {
   if (isMapTileRequest(url)) {
     event.respondWith(
       caches.open(TILE_CACHE_NAME).then((cache) => {
-        return cache.match(request).then((cachedResponse) => {
-          if (cachedResponse) {
+        return cache.match(request).then(async (cachedResponse) => {
+          if (cachedResponse && isUsableTileResponse(cachedResponse)) {
             return cachedResponse;
           }
-          return fetch(request).then((networkResponse) => {
-            if (networkResponse.ok) {
-              event.waitUntil(
-                cache
-                  .put(request, networkResponse.clone())
-                  .then(() => trimTileCache(cache))
-              );
+
+          if (cachedResponse) await cache.delete(request);
+
+          try {
+            const networkResponse = await fetch(request);
+            if (isUsableTileResponse(networkResponse)) {
+              if (networkResponse.ok) {
+                event.waitUntil(
+                  cache
+                    .put(request, networkResponse.clone())
+                    .then(() => trimTileCache(cache))
+                );
+              }
+              return networkResponse;
             }
-            return networkResponse;
-          }).catch(() => {
-            return new Response('', { status: 204 });
-          });
+
+            if (isArcGisTile(url)) return fallbackArcGisTile(url);
+          } catch {
+            if (isArcGisTile(url)) return fallbackArcGisTile(url);
+          }
+
+          return Response.error();
         });
       })
     );

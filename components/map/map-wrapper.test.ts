@@ -38,3 +38,16 @@ test("the map wrapper does not automatically fit route bounds", async () => {
   assert.doesNotMatch(source, /function MapBoundsHandler/);
   assert.doesNotMatch(source, /\.fitBounds\(/);
 });
+
+test("satellite imagery switches once to an attributed Carto raster fallback after base tile errors", async () => {
+  const source = await readMapWrapperSource();
+
+  assert.match(source, /createTileFallbackState/);
+  assert.match(source, /recordTileError/);
+  assert.match(source, /satelliteFallbackActive/);
+  assert.match(source, /satelliteFallbackUrl/);
+  assert.match(source, /tileerror/);
+  assert.match(source, /satelliteFallbackAttribution/);
+  assert.match(source, /role="status"/);
+  assert.match(source, /aria-live="polite"/);
+});

@@ -226,6 +226,7 @@ test("install settles with bounded deduplicated optional asset discovery", async
   assert.deepEqual(deletedCaches, [
     "vsu-smartmap-v14",
     "vsu-smartmap-v15",
+    "map-tiles-v1",
     "api-cache-v2",
   ]);
   assert.equal(claimCalls, 1);
@@ -324,6 +325,88 @@ test("install rejects a hung required shell in bounded time", async () => {
   assert.ok(cachedUrls.includes("https://smartmap.test/"));
   assert.ok(!cachedUrls.includes("https://smartmap.test/schedule"));
   assert.equal(errors.length, 1);
+});
+
+test("map tile failures replace stale 204s with Carto imagery and transparent references", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const fetchedUrls: string[] = [];
+  const deletedUrls: string[] = [];
+  let cacheMatchCount = 0;
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const cache = {
+    match: async () => {
+      cacheMatchCount += 1;
+      return cacheMatchCount === 1 ? new Response(null, { status: 204 }) : undefined;
+    },
+    delete: async (request: Request) => {
+      deletedUrls.push(request.url);
+      return true;
+    },
+    put: async () => undefined,
+    keys: async () => [],
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async (request: Request | string) => {
+      const url = new URL(typeof request === "string" ? request : request.url);
+      fetchedUrls.push(url.toString());
+      if (url.hostname === "server.arcgisonline.com") {
+        throw new Error("ArcGIS unavailable");
+      }
+      return new Response("carto", { status: 200 });
+    },
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async (url: string) => {
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: () => undefined,
+    });
+    assert.ok(responsePromise);
+    return responsePromise;
+  };
+
+  const baseUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/17/12345/67890";
+  const baseResponse = await dispatchFetch(baseUrl);
+  assert.equal(baseResponse?.status, 200);
+  assert.equal(await baseResponse?.text(), "carto");
+  assert.deepEqual(deletedUrls, [baseUrl]);
+  assert.ok(fetchedUrls.includes("https://a.basemaps.cartocdn.com/light_all/17/67890/12345.png"));
+
+  const referenceResponse = await dispatchFetch(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/17/12345/67890",
+  );
+  assert.equal(referenceResponse?.status, 200);
+  assert.equal(referenceResponse?.headers.get("Content-Type"), "image/png");
 });
 
 test("uncached static JavaScript returns an executable offline error response", async () => {
