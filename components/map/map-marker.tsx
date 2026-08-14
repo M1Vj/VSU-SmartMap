@@ -31,6 +31,8 @@ type MapMarkerProps = {
   onDirections?: (item: MapItem) => void;
 };
 
+type MarkerActivationModality = "pointer" | "keyboard";
+
 export function MapMarker({
   item,
   displayCoordinates = item.coordinates,
@@ -88,7 +90,7 @@ export function MapMarker({
   const pendingTouchRef = useRef<MarkerActivation | null>(null);
   const suppressNextKeyboardClickRef = useRef(false);
 
-  const activateMarker = (at: number) => {
+  const activateMarker = (at: number, _modality: MarkerActivationModality) => {
     markerRef.current?.closeTooltip();
     if (onMarkerTapOverride) {
       onMarkerTapOverride(item);
@@ -136,7 +138,7 @@ export function MapMarker({
     }
 
     lastPointerTapRef.current = resolved.activation;
-    activateMarker(now);
+    activateMarker(now, "pointer");
   };
 
   useEffect(() => {
@@ -248,7 +250,7 @@ export function MapMarker({
             original?.preventDefault();
             const now = typeof performance !== "undefined" ? performance.now() : Date.now();
             suppressNextKeyboardClickRef.current = true;
-            activateMarker(now);
+            activateMarker(now, "keyboard");
           }
         },
         mouseout: () => {

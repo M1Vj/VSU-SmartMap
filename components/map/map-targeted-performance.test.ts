@@ -22,6 +22,7 @@ test("marker pointer/touch compatibility clicks are deduplicated without suppres
   assert.match(source, /click: handleMarkerTap/);
   assert.match(source, /keydown:/);
   assert.match(source, /const activateMarker =/);
+  assert.match(source, /activateMarker\(now, "keyboard"\)/);
   assert.match(source, /suppressNextKeyboardClickRef/);
 });
 
