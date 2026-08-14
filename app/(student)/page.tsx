@@ -421,6 +421,7 @@ import {
   type RouteCommitState,
   type RouteRequestContext,
 } from "@/lib/navigation/route-commit-state";
+import { getRouteFacingDestination } from "@/lib/navigation/route-facing-destination";
 import {
   shouldClearRouteForMapSearch,
   shouldClearRouteForSelectedItem,
@@ -486,6 +487,10 @@ function MapView({
   const committedRoute = routeCommitState.committed;
   const hasActiveRoute = Boolean(committedRoute);
   const displayedRoutes = committedRoute ? [committedRoute.route] : [];
+  const routeFacingDestination = getRouteFacingDestination(
+    routeCommitState,
+    navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
+  );
   const hasNavigationState = Boolean(
     navStart || navEnd || isManualStartPending || committedRoute || routeCommitState.pending,
   );
@@ -704,7 +709,7 @@ function MapView({
             items={filtered}
             selectedId={selectedId}
             navigationOwnsViewport={doesNavigationOwnViewport({
-              hasDestination: Boolean(navEnd),
+              hasDestination: Boolean(routeFacingDestination),
               manualStartPending: isManualStartPending,
               pendingNavigation: Boolean(pendingNavigationFacility),
             })}
@@ -726,7 +731,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              destination={navEnd} 
+              destination={routeFacingDestination}
               selectedFacility={
                 selectedFacility?.id === selectedId 
                   ? (selectedFacility && 'coordinates' in selectedFacility ? selectedFacility.coordinates : null) 
@@ -757,7 +762,7 @@ function MapView({
           )}
         </MapContainerClient>
 
-        {hasHydrated && navEnd && (
+        {hasHydrated && routeFacingDestination && (
           <>
           <div
             data-route-status="true"

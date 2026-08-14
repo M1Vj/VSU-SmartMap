@@ -78,6 +78,9 @@ test("route reports and destination markers stay coupled to the committed route 
   ]);
 
   assert.match(page, /const committedRoute = routeCommitState\.committed/);
+  assert.match(page, /const routeFacingDestination = getRouteFacingDestination/);
+  assert.match(page, /destination=\{routeFacingDestination\}/);
+  assert.match(page, /hasDestination: Boolean\(routeFacingDestination\)/);
   assert.match(page, /routeDestinationId=\{committedRoute\?\.destinationId \?\? null\}/);
   assert.match(page, /destinationId: committedRoute\?\.destinationId \?\? null/);
   assert.match(page, /start: committedRoute\?\.start \?\? null/);
