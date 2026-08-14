@@ -9,6 +9,7 @@ import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { MapPopupCard } from "./map-popup-card";
 import { useIsMobile } from "./use-is-mobile";
 import { useEffect, useRef } from "react";
+import { observeMapCardHeight } from "@/lib/map/map-card-height";
 
 type MapBottomCardProps = {
   item: MapItem | null;
@@ -37,16 +38,17 @@ export function MapBottomCard({
     const card = cardRef.current;
     if (!card) return;
 
-    const reportHeight = () => onHeightChange?.(card.getBoundingClientRect().height);
-    reportHeight();
-    if (typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(reportHeight);
-    observer.observe(card);
-    return () => {
-      observer.disconnect();
-      onHeightChange?.(0);
-    };
+    const createObserver =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : (onResize: () => void) => {
+            const observer = new ResizeObserver(onResize);
+            return {
+              observe: (target: HTMLElement) => observer.observe(target),
+              disconnect: () => observer.disconnect(),
+            };
+          };
+    return observeMapCardHeight(card, (height) => onHeightChange?.(height), createObserver);
   }, [isMobile, item, onHeightChange]);
 
   if (!isMobile || !item) {

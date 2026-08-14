@@ -55,10 +55,14 @@ test("compatibility click dedupes only the same physical pointer identity", () =
     shouldDedupeCompatibilityClick(record, { pointerId: 8, detail: 1 }, 1150),
     false,
   );
-  assert.equal(
-    shouldDedupeCompatibilityClick(record, { detail: 1 }, 1150),
-    false,
-  );
+  for (const modality of ["mouse", "touch", "pen"] as const) {
+    assert.equal(
+      shouldDedupeCompatibilityClick({ ...record, modality }, { detail: 1 }, 1150),
+      true,
+      `${modality} compatibility clicks without pointerId still dedupe`,
+    );
+  }
+  assert.equal(shouldDedupeCompatibilityClick(record, { detail: 1 }, 2700), false);
 });
 
 test("keyboard synthesized click dedupes only a detail-zero activation", () => {

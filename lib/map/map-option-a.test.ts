@@ -27,6 +27,7 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   assert.match(cardSource, /onHeightChange/);
   assert.match(cardSource, /observer\.disconnect\(\)/);
   assert.match(cardSource, /onHeightChange\?\.\(0\)/);
+  assert.match(cardSource, /observeMapCardHeight/);
   assert.match(cardSource, /role="dialog"/);
 });
 

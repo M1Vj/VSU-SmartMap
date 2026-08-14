@@ -71,5 +71,6 @@ export function shouldDedupeCompatibilityClick(
 ): boolean {
   if (now - record.at < 0 || now - record.at >= maxAgeMs) return false;
   if (record.modality === "keyboard") return event.detail === 0;
+  if (event.pointerId === undefined) return true;
   return record.pointerId !== null && event.pointerId === record.pointerId;
 }

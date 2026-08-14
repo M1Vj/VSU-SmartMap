@@ -490,6 +490,7 @@ function MapView({
   const presentedNavigation = getPresentedNavigationSnapshot(runtimeState);
   const routeRequestDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? undefined;
   const routeDestinationId = committedNavigation?.destinationId ?? presentedNavigation?.destinationId ?? null;
+  const routeSelectionDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? null;
   const navigationOrigin = pendingNavigation?.origin ?? committedNavigation?.origin ?? runtimeState.navigation.origin;
   const isManualStartPending = runtimeState.navigation.phase === "acquiring";
   const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
@@ -611,7 +612,7 @@ function MapView({
     if (
     shouldClearRouteForSelectedItem({
       selectedItemId: runtimeState.selectedItemId,
-      routeDestinationId,
+      routeDestinationId: routeSelectionDestinationId,
         hasNavigationState,
       })
     ) {
@@ -621,7 +622,7 @@ function MapView({
     clearRouteState,
     hasNavigationState,
     runtimeState.selectedItemId,
-    routeDestinationId,
+    routeSelectionDestinationId,
   ]);
 
   useEffect(() => {
