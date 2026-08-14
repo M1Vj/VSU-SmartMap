@@ -209,7 +209,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full border bg-background/95 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-md"
+          className="pointer-events-none absolute left-1/2 top-32 z-[1000] -translate-x-1/2 rounded-full border bg-background/95 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-md"
         >
           Satellite imagery unavailable; showing a map fallback.
         </div>

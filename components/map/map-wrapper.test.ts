@@ -50,4 +50,5 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.match(source, /satelliteFallbackAttribution/);
   assert.match(source, /role="status"/);
   assert.match(source, /aria-live="polite"/);
+  assert.match(source, /top-32/);
 });
