@@ -58,6 +58,10 @@ test("mobile route actions use measured mini-card clearance and retain 44px targ
   assert.match(page.slice(dockStart), /primaryActionLabel/);
   assert.match(page.slice(dockStart), /Report Route/);
   assert.match(card, /ResizeObserver/);
+  assert.match(card, /const useIsomorphicLayoutEffect/);
+  assert.match(card, /typeof window === "undefined"[\s\S]*useEffect[\s\S]*useLayoutEffect/);
+  assert.match(card, /useIsomorphicLayoutEffect\(\(\) =>/);
+  assert.match(card, /reportHeight\(\);\s*const observer/);
   assert.match(card, /onHeightChange/);
   assert.match(card, /onHeightChange\?\.\(0\)/);
   assert.match(card, /observer\?\.disconnect\(\)/);
@@ -81,10 +85,11 @@ test("route reports and destination markers stay coupled to the committed route 
   assert.match(page, /totalDistanceMeters: committedRoute\?\.route\.totalDistance \?\? null/);
   assert.match(routeState, /beginRouteRequest/);
   assert.match(routeState, /failRouteRequest/);
-  assert.match(routeState, /state\.pending && !routeContextsEqual/);
+  assert.match(routeState, /!state\.pending \|\| !routeContextsEqual/);
   assert.match(navigation, /onRouteRequest\?:/);
   assert.match(navigation, /onRouteRequestFailed\?:/);
   assert.match(navigation, /onRoutesFound\?\.\(\[result\], context\)/);
+  assert.match(navigation, /preservePublishedResult: Boolean\(startPoint \|\| endPoint \|\| destinationId\)/);
 });
 
 test("facility mini-card heading is inert and Details remains the only expansion control", async () => {

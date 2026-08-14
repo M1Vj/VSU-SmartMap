@@ -36,10 +36,7 @@ export function commitRoute(
   context: RouteRequestContext,
   route: PathResult,
 ): RouteCommitState {
-  if (state.pending && !routeContextsEqual(state.pending, context)) {
-    return state;
-  }
-  if (state.committed && !state.pending) {
+  if (!state.pending || !routeContextsEqual(state.pending, context)) {
     return state;
   }
   return { committed: { ...context, route }, pending: null };

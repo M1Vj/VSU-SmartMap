@@ -36,7 +36,11 @@ const secondRoute: PathResult = {
 };
 
 function committedState(): RouteCommitState {
-  return commitRoute(clearRouteCommit(), firstContext, firstRoute);
+  return commitRoute(
+    beginRouteRequest(clearRouteCommit(), firstContext),
+    firstContext,
+    firstRoute,
+  );
 }
 
 test("a pending replacement keeps the old route identity and metrics", () => {
@@ -81,4 +85,18 @@ test("explicit clear removes committed and pending route state", () => {
     clearRouteCommit(),
     { committed: null, pending: null },
   );
+});
+
+test("a deferred completion cannot resurrect a route after explicit clear", () => {
+  const pending = beginRouteRequest(clearRouteCommit(), firstContext);
+  const cleared = clearRouteCommit();
+
+  assert.deepEqual(commitRoute(cleared, firstContext, firstRoute), cleared);
+  assert.equal(pending.pending?.destinationId, "facility-a");
+});
+
+test("a completion without a pending request is ignored", () => {
+  const cleared = clearRouteCommit();
+
+  assert.deepEqual(commitRoute(cleared, firstContext, firstRoute), cleared);
 });

@@ -9,7 +9,9 @@ import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { MapPopupCard } from "./map-popup-card";
 import { useIsMobile } from "./use-is-mobile";
 import { cancelMapPerformance, completeMapPerformance } from "@/lib/map/performance";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type MapBottomCardProps = {
   item: MapItem | null;
@@ -29,7 +31,7 @@ export function MapBottomCard({
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const resetHeightAndMetric = () => {
       onHeightChange?.(0);
       cancelMapPerformance("marker_first_interaction");

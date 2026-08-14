@@ -99,6 +99,7 @@ export function NavigationLayer({
         loadingMessage: "Waiting for user location...",
         sessionId: navigationSessionId,
         isSuccessAnnounced,
+        preservePublishedResult: Boolean(startPoint || endPoint || destinationId),
       });
     }
 
@@ -113,7 +114,11 @@ export function NavigationLayer({
           }
         : null;
       onRouteRequest?.(requestContextStore.current);
-      return coordinator.start({ sessionId: navigationSessionId, isSuccessAnnounced });
+      return coordinator.start({
+        sessionId: navigationSessionId,
+        isSuccessAnnounced,
+        preservePublishedResult: Boolean(startPoint || endPoint || destinationId),
+      });
     }
 
     requestContextStore.current = {
