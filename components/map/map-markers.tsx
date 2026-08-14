@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { getMapMarkerRenderItems } from "@/lib/map/marker-clusters";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarker } from "./map-marker";
@@ -19,7 +19,7 @@ type MapMarkersProps = {
   onDirections?: (item: MapItem) => void;
 };
 
-export function MapMarkers({
+export const MapMarkers = memo(function MapMarkers({
   items,
   selectedId,
   routeDestinationId,
@@ -71,4 +71,4 @@ export function MapMarkers({
       )}
     </>
   );
-}
+});

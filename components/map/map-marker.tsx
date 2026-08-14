@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useEffect, useRef } from "react";
+import { memo, useMemo, useEffect, useRef } from "react";
 import { Marker, Tooltip, Popup } from "@/components/map/leaflet-react";
 import { divIcon, type DivIcon, type Marker as LeafletMarker } from "leaflet";
 import {
@@ -16,11 +16,13 @@ import { useApp } from "@/lib/context/app-context";
 import { useIsMobile } from "./use-is-mobile";
 import {
   createPointerActivation,
+  isPrimaryPointerActivation,
   isPointerTap,
   shouldDedupeCompatibilityClick,
   type PointerActivation,
   type PointerActivationEvent,
 } from "@/lib/map/pointer-activation";
+import { markMapPerformance } from "@/lib/map/performance-marks";
 
 type MapMarkerProps = {
   item: MapItem;
@@ -36,7 +38,7 @@ type MapMarkerProps = {
   onDirections?: (item: MapItem) => void;
 };
 
-export function MapMarker({
+export const MapMarker = memo(function MapMarker({
   item,
   displayCoordinates = item.coordinates,
   isSelected = false,
@@ -98,6 +100,8 @@ export function MapMarker({
   } | null>(null);
   const pointerActivationRef = useRef<PointerActivation | null>(null);
   const cancelledPointerAtRef = useRef<number | null>(null);
+  const markerPerformanceStartedAtRef = useRef<number | null>(null);
+  const pendingMarkerPerformanceRef = useRef<number | null>(null);
 
   useEffect(() => {
     const marker = markerRef.current;
@@ -145,18 +149,41 @@ export function MapMarker({
   }, [hideTooltip, icon]);
 
   useEffect(() => {
+    if (!isSelected || pendingMarkerPerformanceRef.current === null) return;
+    const startedAt = pendingMarkerPerformanceRef.current;
+    pendingMarkerPerformanceRef.current = null;
+    markMapPerformance(
+      "marker-activation",
+      startedAt,
+      typeof performance === "undefined" ? Date.now() : performance.now(),
+    );
+  }, [isSelected]);
+
+  useEffect(() => {
     const marker = markerRef.current;
     const element = marker?.getElement();
     if (!marker || !element || !onMarkerActivate) return;
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (!isPrimaryPointerActivation(event as PointerActivationEvent)) {
+        pointerActivationRef.current = null;
+        markerPerformanceStartedAtRef.current = null;
+        return;
+      }
+      markerPerformanceStartedAtRef.current =
+        typeof performance === "undefined" ? Date.now() : performance.now();
       pointerActivationRef.current = createPointerActivation(item.id, event as PointerActivationEvent);
       element.setPointerCapture?.(event.pointerId);
     };
     const handlePointerUp = (event: PointerEvent) => {
       const activation = pointerActivationRef.current;
       pointerActivationRef.current = null;
-      if (!activation || !isPointerTap(activation, event as PointerActivationEvent)) {
+      if (
+        !activation ||
+        !isPrimaryPointerActivation(event as PointerActivationEvent) ||
+        !isPointerTap(activation, event as PointerActivationEvent)
+      ) {
+        markerPerformanceStartedAtRef.current = null;
         cancelledPointerAtRef.current = Date.now();
         element.releasePointerCapture?.(event.pointerId);
         return;
@@ -164,17 +191,32 @@ export function MapMarker({
       const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
       const activationId = activation.activationId;
       compatibilityActivationRef.current = { activationId, modality, pointerId: event.pointerId, at: Date.now() };
+      const startedAt = markerPerformanceStartedAtRef.current ?? (
+        typeof performance === "undefined" ? Date.now() : performance.now()
+      );
+      markerPerformanceStartedAtRef.current = null;
+      if (onMarkerTapOverride || isSelected) {
+        markMapPerformance(
+          "marker-activation",
+          startedAt,
+          typeof performance === "undefined" ? Date.now() : performance.now(),
+        );
+      } else {
+        pendingMarkerPerformanceRef.current = startedAt;
+      }
       markerRef.current?.closeTooltip();
       onMarkerActivate(item, activationId, modality);
       element.releasePointerCapture?.(event.pointerId);
     };
     const handlePointerCancel = () => {
       pointerActivationRef.current = null;
+      markerPerformanceStartedAtRef.current = null;
       cancelledPointerAtRef.current = Date.now();
     };
     const handleLostPointerCapture = () => {
       if (pointerActivationRef.current) {
         pointerActivationRef.current = null;
+        markerPerformanceStartedAtRef.current = null;
         cancelledPointerAtRef.current = Date.now();
       }
     };
@@ -189,8 +231,9 @@ export function MapMarker({
       element.removeEventListener("pointercancel", handlePointerCancel);
       element.removeEventListener("lostpointercapture", handleLostPointerCapture);
       pointerActivationRef.current = null;
+      markerPerformanceStartedAtRef.current = null;
     };
-  }, [item, onMarkerActivate]);
+  }, [isSelected, item, onMarkerActivate, onMarkerTapOverride]);
 
   const handleViewDetails = () => {
     setFacilitySheetOpen(true);
@@ -251,6 +294,16 @@ export function MapMarker({
             markerRef.current?.closeTooltip();
             const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
             compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
+            const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+            if (onMarkerTapOverride || isSelected) {
+              markMapPerformance(
+                "marker-activation",
+                startedAt,
+                typeof performance === "undefined" ? Date.now() : performance.now(),
+              );
+            } else {
+              pendingMarkerPerformanceRef.current = startedAt;
+            }
             onMarkerActivate?.(item, activationId, "keyboard");
             if (onMarkerActivate) return;
             if (onMarkerTapOverride) {
@@ -306,4 +359,4 @@ export function MapMarker({
       )}
     </Marker>
   );
-}
+});

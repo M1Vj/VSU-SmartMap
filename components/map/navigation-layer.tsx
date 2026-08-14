@@ -74,13 +74,13 @@ export function NavigationLayer({
   navigationOrigin = null,
 }: NavigationLayerProps) {
   const routeEngine = useMemo(() => createRouteEngine(), []);
-  const requestMetadata: NavigationRequestMetadata = {
+  const requestMetadata = useMemo<NavigationRequestMetadata>(() => ({
     destinationId,
     origin: navigationOrigin ?? (waitingForUserLocation ? "live" : "manual"),
     mode,
     start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
     end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
-  };
+  }), [destinationId, endPoint, mode, navigationOrigin, startPoint, waitingForUserLocation]);
   const coordinator = useMemo(
     () =>
       createRouteRequestCoordinator<PathResult>({
@@ -104,15 +104,10 @@ export function NavigationLayer({
         requestStarted: (requestId) => onRouteRequestStarted?.(requestId, requestMetadata),
       }),
     [
-      destinationId,
-      endPoint,
-      mode,
-      navigationOrigin,
+      requestMetadata,
       onRouteCommitted,
       onRouteFailed,
       onRouteRequestStarted,
-      startPoint,
-      waitingForUserLocation,
     ],
   );
 
@@ -241,17 +236,23 @@ export function NavigationLayer({
       return nearestId;
     };
 
-    let requestSignal: AbortSignal | undefined;
     const buildInternalRoute = async (
       from: { lat: number; lng: number },
       to: { lat: number; lng: number },
-      targetId?: string
+      targetId?: string,
+      signal?: AbortSignal,
     ): Promise<PathResult | null> => {
+      if (signal?.aborted) {
+        throw new DOMException("Route request was cancelled", "AbortError");
+      }
       const startNodeId = snapToGraph(from.lat, from.lng, false);
       const endNodeId = snapToGraph(to.lat, to.lng, true, targetId);
+      if (signal?.aborted) {
+        throw new DOMException("Route request was cancelled", "AbortError");
+      }
       if (!startNodeId || !endNodeId) return null;
 
-      const route = await routeEngine.route({ startNodeId, endNodeId, mode, signal: requestSignal });
+      const route = await routeEngine.route({ startNodeId, endNodeId, mode, signal });
       if (!route) return null;
 
       const startNode = makeNode("route-start", from);
@@ -274,7 +275,6 @@ export function NavigationLayer({
     };
 
     const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
-      requestSignal = signal;
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
       return resolveNavigationRoute({

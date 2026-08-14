@@ -18,7 +18,12 @@ function dependencies(startInside: boolean, endInside: boolean) {
     dependencies: {
       isInside: (point: { lat: number }) => point.lat === 1 ? startInside : endInside,
       findGate: () => ({ id: "gate", lat: 3, lng: 3, type: "node" as const }),
-      buildInternalRoute: (): PathResult | null => route("internal"),
+      buildInternalRoute: (
+        _from: { lat: number; lng: number },
+        _to: { lat: number; lng: number },
+        _destinationId?: string,
+        _signal?: AbortSignal,
+      ): PathResult | null | Promise<PathResult | null> => route("internal"),
       externalPath: async (_start: unknown, _end: unknown, _mode: unknown, signal?: AbortSignal): Promise<PathResult | null> => {
         if (signal) signals.push(signal);
         return route("external");
@@ -65,6 +70,54 @@ test("inside to inside stays internal without calling an external provider", asy
 
   assert.equal(result.path[0].id, "internal");
   assert.deepEqual(signals, []);
+});
+
+test("internal route building receives the request signal for cancellation", async () => {
+  const { dependencies: deps } = dependencies(true, true);
+  let receivedSignal: AbortSignal | undefined;
+  deps.buildInternalRoute = async (
+    _from: { lat: number; lng: number },
+    _to: { lat: number; lng: number },
+    _destinationId: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<PathResult | null> => {
+    receivedSignal = signal;
+    return route("internal");
+  };
+  const controller = new AbortController();
+
+  await resolveNavigationRoute({
+    start: { lat: 1, lng: 1 },
+    end: { lat: 2, lng: 2 },
+    mode: "walking",
+    signal: controller.signal,
+    dependencies: deps,
+  });
+
+  assert.equal(receivedSignal, controller.signal);
+});
+
+test("an aborted internal route build cannot publish after cancellation", async () => {
+  const { dependencies: deps } = dependencies(true, true);
+  deps.buildInternalRoute = (
+    _from: { lat: number; lng: number },
+    _to: { lat: number; lng: number },
+    _destinationId: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<PathResult | null> => new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true });
+  });
+  const controller = new AbortController();
+  const pending = resolveNavigationRoute({
+    start: { lat: 1, lng: 1 },
+    end: { lat: 2, lng: 2 },
+    mode: "walking",
+    signal: controller.signal,
+    dependencies: deps,
+  });
+  controller.abort();
+
+  await assert.rejects(pending, (error: unknown) => error instanceof DOMException && error.name === "AbortError");
 });
 
 test("an internal graph miss uses an actual external route instead of a straight line", async () => {

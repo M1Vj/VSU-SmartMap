@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PathResult } from "@/lib/types/graph";
+import { shouldClearRouteForSelectedItem } from "@/lib/navigation/selection-route-reset";
 import {
   createInitialMapRuntimeState,
+  getRouteFacingEndpoint,
   mapRuntimeReducer,
   type MapRuntimeEvent,
 } from "./map-runtime";
@@ -28,9 +30,9 @@ test("runtime derives one presentation state for every navigation phase", () => 
 
   assert.equal(state.navigation.phase, "active");
   assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.selectionDestinationId, "facility-1");
   assert.equal(state.presentation.markerMode, "destination-focused");
   assert.equal(state.presentation.controls.primaryAction, "clear");
-  assert.equal(state.presentation.announcement, "Route found!");
 });
 
 test("stale route results cannot replace the committed route", () => {
@@ -133,7 +135,7 @@ test("manual start resolution keeps the exact request and updates origin", () =>
   assert.equal(state.presentation.controls.primaryAction, "cancel");
 });
 
-test("runtime controls distinguish replacement cancellation from committed-route clearing", () => {
+test("runtime controls clear the committed route during replacement and failure", () => {
   let state = createInitialMapRuntimeState();
   state = mapRuntimeReducer(state, {
     type: "navigation/requested",
@@ -150,7 +152,7 @@ test("runtime controls distinguish replacement cancellation from committed-route
     destinationId: "facility-1",
     origin: "live",
   });
-  assert.equal(state.presentation.controls.primaryAction, "cancel");
+  assert.equal(state.presentation.controls.primaryAction, "clear");
   state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
   assert.equal(state.presentation.controls.primaryAction, "clear");
 });
@@ -270,4 +272,117 @@ test("a fresh recalculation request replaces atomically while stale results rema
   assert.equal(committed.navigation.committed?.mode, "driving");
   assert.deepEqual(committed.navigation.committed?.start, { lat: 11, lng: 11 });
   assert.equal(committed.navigation.committed?.route.totalDistance, 220);
+});
+
+test("selection ownership survives a failed replacement without relabeling the committed route", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 10, lng: 10 },
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-b",
+    origin: "manual",
+    end: { lat: 11, lng: 11 },
+  });
+
+  assert.equal(state.navigation.selectionDestinationId, "facility-b");
+  state = mapRuntimeReducer(state, {
+    type: "navigation/failed",
+    requestId: 2,
+    message: "provider unavailable",
+  });
+
+  assert.equal(state.navigation.committed?.destinationId, "facility-a");
+  assert.equal(state.navigation.selectionDestinationId, "facility-b");
+  assert.equal(state.navigation.request, null);
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "facility-b",
+      routeDestinationId: state.navigation.selectionDestinationId,
+      hasNavigationState: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldClearRouteForSelectedItem({
+      selectedItemId: "unrelated",
+      routeDestinationId: state.navigation.selectionDestinationId,
+      hasNavigationState: true,
+    }),
+    true,
+  );
+
+  state = mapRuntimeReducer(state, { type: "navigation/cleared" });
+  assert.equal(state.navigation.selectionDestinationId, null);
+});
+
+test("route-facing endpoint stays committed during a pending or failed replacement", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 10, lng: 10 },
+  });
+  assert.deepEqual(getRouteFacingEndpoint(state, { lat: 12, lng: 12 }), { lat: 10, lng: 10 });
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-b",
+    origin: "manual",
+    end: { lat: 11, lng: 11 },
+  });
+
+  assert.deepEqual(getRouteFacingEndpoint(state, { lat: 12, lng: 12 }), { lat: 10, lng: 10 });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/failed",
+    requestId: 2,
+    message: "provider unavailable",
+  });
+  assert.deepEqual(getRouteFacingEndpoint(state, { lat: 12, lng: 12 }), { lat: 10, lng: 10 });
+});
+
+test("awaiting a replacement start keeps manual controls available over the committed overlay", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 10, lng: 10 },
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-b",
+    origin: "manual",
+    awaitingStart: true,
+    end: { lat: 11, lng: 11 },
+  });
+
+  assert.equal(state.navigation.phase, "acquiring");
+  assert.equal(state.navigation.committed?.destinationId, "facility-a");
+  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.presentation.controls.primaryAction, "clear");
+  assert.equal(state.presentation.controls.canReportRoute, true);
+  assert.equal(state.presentation.controls.statusText, "Waiting for your location...");
+
+  state = mapRuntimeReducer(state, {
+    type: "navigation/resolving",
+    requestId: 2,
+    origin: "manual",
+    start: { lat: 9, lng: 9 },
+  });
+  assert.equal(state.navigation.phase, "refreshing");
+  assert.equal(state.navigation.committedRoute, route);
 });

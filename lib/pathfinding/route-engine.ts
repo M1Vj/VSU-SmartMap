@@ -250,10 +250,11 @@ export function createRouteEngine() {
       signal?: AbortSignal;
     }): Promise<PathResult | null> {
       throwIfAborted(request.signal);
+      const graph = prepared;
       await Promise.resolve();
       throwIfAborted(request.signal);
-      return prepared
-        ? findPreparedPath(prepared, request.startNodeId, request.endNodeId, request.mode, request.signal)
+      return graph
+        ? findPreparedPath(graph, request.startNodeId, request.endNodeId, request.mode, request.signal)
         : null;
     },
   };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createPointerActivation,
+  isPrimaryPointerActivation,
   isPointerTap,
   shouldDedupeCompatibilityClick,
   type PointerActivationEvent,
@@ -37,6 +38,15 @@ test("pointer duration beyond tap threshold cancels marker activation", () => {
 test("pointer identity must match before a pointerup can activate", () => {
   const start = createPointerActivation("facility-1", event({ pointerId: 7 }));
   assert.equal(isPointerTap(start, event({ pointerId: 8, timeStamp: 1100 })), false);
+});
+
+test("only primary left-button pointers can activate markers", () => {
+  assert.equal(isPrimaryPointerActivation(event({ button: 0, isPrimary: true })), true);
+  assert.equal(isPrimaryPointerActivation(event({ button: 2, isPrimary: true })), false);
+  assert.equal(isPrimaryPointerActivation(event({ button: 1, isPrimary: true })), false);
+  assert.equal(isPrimaryPointerActivation(event({ button: 0, isPrimary: false })), false);
+  assert.equal(isPrimaryPointerActivation(event({ pointerType: "touch", isPrimary: true })), true);
+  assert.equal(isPrimaryPointerActivation(event({ pointerType: "pen", isPrimary: true })), true);
 });
 
 test("compatibility click dedupes only the same physical pointer identity", () => {

@@ -1,15 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
+import { markMapPerformance } from "@/lib/map/performance-marks";
+import {
+  createPointerActivation,
+  isPrimaryPointerActivation,
+  isPointerTap,
+  shouldDedupeCompatibilityClick,
+  type CompatibilityActivationRecord,
+  type PointerActivation,
+  type PointerActivationEvent,
+} from "@/lib/map/pointer-activation";
 
-const TAP_MOVE_TOLERANCE_PX = 12;
-const TAP_MAX_DURATION_MS = 350;
 const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-control",
   ".leaflet-marker-icon",
@@ -17,6 +25,69 @@ const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-tooltip",
   ".leaflet-interactive",
 ].join(",");
+
+class InteractionCallbackRegistry {
+  private items: readonly MapItem[];
+  private onSelect: (item: MapItem) => void;
+  private onMarkerTapOverride?: (item: MapItem) => void;
+  private onClearSelection?: () => void;
+  private onMapClick?: (point: { lat: number; lng: number }) => void;
+  private onDirections?: (item: MapItem) => void;
+
+  constructor({
+    items,
+    onSelect,
+    onMarkerTapOverride,
+    onClearSelection,
+    onMapClick,
+    onDirections,
+  }: Pick<MapSelectionLayerProps, "items" | "onSelect" | "onMarkerTapOverride" | "onClearSelection" | "onMapClick" | "onDirections">) {
+    this.items = items;
+    this.onSelect = onSelect;
+    this.onMarkerTapOverride = onMarkerTapOverride;
+    this.onClearSelection = onClearSelection;
+    this.onMapClick = onMapClick;
+    this.onDirections = onDirections;
+  }
+
+  update({
+    items,
+    onSelect,
+    onMarkerTapOverride,
+    onClearSelection,
+    onMapClick,
+    onDirections,
+  }: Pick<MapSelectionLayerProps, "items" | "onSelect" | "onMarkerTapOverride" | "onClearSelection" | "onMapClick" | "onDirections">) {
+    this.items = items;
+    this.onSelect = onSelect;
+    this.onMarkerTapOverride = onMarkerTapOverride;
+    this.onClearSelection = onClearSelection;
+    this.onMapClick = onMapClick;
+    this.onDirections = onDirections;
+  }
+
+  marker(itemId: string) {
+    const item = this.items.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    if (this.onMarkerTapOverride) {
+      this.onMarkerTapOverride(item);
+      return;
+    }
+    this.onSelect(item);
+  }
+
+  background(point?: { lat: number; lng: number }) {
+    if (point && this.onMapClick) {
+      this.onMapClick(point);
+      return;
+    }
+    this.onClearSelection?.();
+  }
+
+  directions(item: MapItem) {
+    this.onDirections?.(item);
+  }
+}
 
 type MapSelectionLayerProps = {
   items: readonly MapItem[];
@@ -48,32 +119,36 @@ export function MapSelectionLayer({
   const map = useMap();
   const prevSelectedId = useRef<string | null>(null);
   const previousViewRef = useRef<MapViewState | null>(null);
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const mouseStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const [zoom, setZoom] = useState(() => map.getZoom());
-  const itemsRef = useRef(items);
-  const onSelectRef = useRef(onSelect);
-  const onMarkerTapOverrideRef = useRef(onMarkerTapOverride);
-  const onClearSelectionRef = useRef(onClearSelection);
-  itemsRef.current = items;
-  onSelectRef.current = onSelect;
-  onMarkerTapOverrideRef.current = onMarkerTapOverride;
-  onClearSelectionRef.current = onClearSelection;
-  const interactionGateway = useMemo(
-    () => createInteractionGateway({
-      onMarkerActivate: (itemId) => {
-        const item = itemsRef.current.find((candidate) => candidate.id === itemId);
-        if (!item) return;
-        if (onMarkerTapOverrideRef.current) {
-          onMarkerTapOverrideRef.current(item);
-          return;
-        }
-        onSelectRef.current(item);
-      },
-      onBackground: () => onClearSelectionRef.current?.(),
-    }),
-    [],
+  const backgroundPointerRef = useRef<PointerActivation | null>(null);
+  const backgroundCompatibilityRef = useRef<CompatibilityActivationRecord | null>(null);
+  const backgroundCancelledAtRef = useRef<number | null>(null);
+  const mapReadyStartedAtRef = useRef(
+    typeof performance === "undefined" ? Date.now() : performance.now(),
   );
+  const mapReadyMarkedRef = useRef(false);
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  const [interactionRegistry] = useState(
+    () => new InteractionCallbackRegistry({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections }),
+  );
+  useLayoutEffect(() => {
+    interactionRegistry.update({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections });
+  }, [interactionRegistry, items, onClearSelection, onDirections, onMapClick, onMarkerTapOverride, onSelect]);
+  const [interactionGateway] = useState(
+    () => createInteractionGateway({
+      onMarkerActivate: (itemId) => interactionRegistry.marker(itemId),
+      onBackground: (point) => interactionRegistry.background(point),
+    }),
+  );
+
+  useEffect(() => {
+    if (mapReadyMarkedRef.current) return;
+    mapReadyMarkedRef.current = true;
+    markMapPerformance(
+      "map-ready",
+      mapReadyStartedAtRef.current,
+      typeof performance === "undefined" ? Date.now() : performance.now(),
+    );
+  }, []);
 
   const getCurrentView = useCallback(() => ({
     center: {
@@ -83,7 +158,24 @@ export function MapSelectionLayer({
     zoom: map.getZoom(),
   }), [map]);
 
-  const handlePlainMapInteraction = useCallback((target: HTMLElement | null, point?: { lat: number; lng: number }) => {
+  const handleMarkerActivate = useCallback((item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => {
+    interactionGateway.dispatch({ type: "marker", itemId: item.id, activationId, modality });
+  }, [interactionGateway]);
+  const handleMarkerSelect = useCallback((item: MapItem) => {
+    interactionRegistry.marker(item.id);
+  }, [interactionRegistry]);
+  const handleMarkerDeselect = useCallback(() => {
+    interactionRegistry.background();
+  }, [interactionRegistry]);
+  const handleMarkerDirections = useCallback((item: MapItem) => {
+    interactionRegistry.directions(item);
+  }, [interactionRegistry]);
+
+  const handlePlainMapInteraction = useCallback((
+    target: HTMLElement | null,
+    point: { lat: number; lng: number } | undefined,
+    activationId: string,
+  ) => {
     if (!target) {
       return;
     }
@@ -92,13 +184,8 @@ export function MapSelectionLayer({
       return;
     }
 
-    if (point && onMapClick) {
-      onMapClick(point);
-      return;
-    }
-
-    interactionGateway.dispatch({ type: "background", target: "background" });
-  }, [interactionGateway, onMapClick]);
+    interactionGateway.dispatch({ type: "background", target: "background", activationId, point });
+  }, [interactionGateway]);
 
   useEffect(() => {
     const container = map.getContainer();
@@ -120,123 +207,125 @@ export function MapSelectionLayer({
       });
     };
 
-    const handleMouseDown = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!target || !container.contains(target)) {
-        mouseStartRef.current = null;
+      if (
+        !target ||
+        !container.contains(target) ||
+        target.closest(MAP_INTERACTIVE_SELECTOR) ||
+        !isPrimaryPointerActivation(event as PointerActivationEvent)
+      ) {
+        backgroundPointerRef.current = null;
         return;
       }
 
-      mouseStartRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-        time: Date.now(),
+      backgroundCancelledAtRef.current = null;
+      backgroundPointerRef.current = createPointerActivation(
+        "background",
+        event as PointerActivationEvent,
+      );
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const activation = backgroundPointerRef.current;
+      backgroundPointerRef.current = null;
+      if (
+        !activation ||
+        !isPrimaryPointerActivation(event as PointerActivationEvent) ||
+        !isPointerTap(activation, event as PointerActivationEvent)
+      ) {
+        if (activation) backgroundCancelledAtRef.current = Date.now();
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (!target || !container.contains(target) || target.closest(MAP_INTERACTIVE_SELECTOR)) {
+        return;
+      }
+
+      const latlng = map.mouseEventToLatLng(event as unknown as MouseEvent);
+      const modality = activation.pointerType;
+      backgroundCompatibilityRef.current = {
+        activationId: activation.activationId,
+        modality,
+        pointerId: event.pointerId,
+        at: Date.now(),
       };
+      handlePlainMapInteraction(
+        target,
+        { lat: latlng.lat, lng: latlng.lng },
+        activation.activationId,
+      );
+    };
+
+    const handlePointerCancel = () => {
+      backgroundPointerRef.current = null;
+      backgroundCompatibilityRef.current = null;
+      backgroundCancelledAtRef.current = Date.now();
     };
 
     const handleClick = (event: MouseEvent) => {
+      const pointerEvent = event as MouseEvent & { pointerId?: number };
       const target = event.target as HTMLElement | null;
       if (target && !container.contains(target)) {
         return;
       }
-
-      const start = mouseStartRef.current;
-      mouseStartRef.current = null;
-      if (start) {
-        const movedX = Math.abs(event.clientX - start.x);
-        const movedY = Math.abs(event.clientY - start.y);
-        const duration = Date.now() - start.time;
-
-        if (
-          movedX > TAP_MOVE_TOLERANCE_PX ||
-          movedY > TAP_MOVE_TOLERANCE_PX ||
-          duration > TAP_MAX_DURATION_MS
-        ) {
-          return;
-        }
+      if (!target || target.closest(MAP_INTERACTIVE_SELECTOR)) {
+        return;
       }
 
-      const latlng = onMapClick ? map.mouseEventToLatLng(event) : null;
-
+      const now = Date.now();
+      const cancelledAt = backgroundCancelledAtRef.current;
+      if (cancelledAt !== null) {
+        backgroundCancelledAtRef.current = null;
+        backgroundCompatibilityRef.current = null;
+        if (now - cancelledAt < 700) return;
+      }
+      const compatibility = backgroundCompatibilityRef.current;
+      const isCompatibility = compatibility
+        ? shouldDedupeCompatibilityClick(
+            compatibility,
+            { pointerId: pointerEvent.pointerId, detail: event.detail },
+            now,
+          )
+        : false;
+      backgroundCompatibilityRef.current = null;
+      const activationId = isCompatibility
+        ? compatibility?.activationId ?? `background:click:${event.timeStamp}`
+        : `background:click:${pointerEvent.pointerId ?? "mouse"}:${event.timeStamp}`;
+      const latlng = map.mouseEventToLatLng(event);
       handlePlainMapInteraction(
         target,
-        latlng ? { lat: latlng.lat, lng: latlng.lng } : undefined,
+        { lat: latlng.lat, lng: latlng.lng },
+        activationId,
       );
-    };
-
-    const handleTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touch) {
-        touchStartRef.current = null;
-        return;
-      }
-
-      touchStartRef.current = {
-        x: touch.clientX,
-        y: touch.clientY,
-        time: Date.now(),
-      };
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      const start = touchStartRef.current;
-      touchStartRef.current = null;
-
-      if (!start) {
-        return;
-      }
-
-      const touch = event.changedTouches[0];
-      if (!touch) {
-        return;
-      }
-
-      const movedX = Math.abs(touch.clientX - start.x);
-      const movedY = Math.abs(touch.clientY - start.y);
-      const duration = Date.now() - start.time;
-
-      if (
-        movedX > TAP_MOVE_TOLERANCE_PX ||
-        movedY > TAP_MOVE_TOLERANCE_PX ||
-        duration > TAP_MAX_DURATION_MS
-      ) {
-        return;
-      }
-
-      const target = event.target as HTMLElement | null;
-      if (!target) {
-        return;
-      }
-
-      if (onMapClick) {
-        const latlng = map.mouseEventToLatLng(touch as unknown as MouseEvent);
-        handlePlainMapInteraction(target, { lat: latlng.lat, lng: latlng.lng });
-        return;
-      }
-
-      handlePlainMapInteraction(target);
     };
 
     map.on("zoomend", handleZoomEnd);
     map.on("zoomstart", closeOpenTooltip);
     map.on("movestart", closeOpenTooltip);
     map.on("dragstart", closeOpenTooltip);
-    container.addEventListener("mousedown", handleMouseDown, true);
+    container.addEventListener("pointerdown", handlePointerDown, true);
+    container.addEventListener("pointerup", handlePointerUp, true);
+    container.addEventListener("pointercancel", handlePointerCancel, true);
+    container.addEventListener("lostpointercapture", handlePointerCancel, true);
     document.addEventListener("click", handleClick, true);
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchend", handleTouchEnd, { passive: true });
 
     return () => {
       map.off("zoomend", handleZoomEnd);
       map.off("zoomstart", closeOpenTooltip);
       map.off("movestart", closeOpenTooltip);
       map.off("dragstart", closeOpenTooltip);
-      container.removeEventListener("mousedown", handleMouseDown, true);
+      container.removeEventListener("pointerdown", handlePointerDown, true);
+      container.removeEventListener("pointerup", handlePointerUp, true);
+      container.removeEventListener("pointercancel", handlePointerCancel, true);
+      container.removeEventListener("lostpointercapture", handlePointerCancel, true);
       document.removeEventListener("click", handleClick, true);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchend", handleTouchEnd);
+      backgroundPointerRef.current = null;
+      backgroundCompatibilityRef.current = null;
+      backgroundCancelledAtRef.current = null;
     };
-  }, [handlePlainMapInteraction, map, onMapClick]);
+  }, [handlePlainMapInteraction, map]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -294,13 +383,11 @@ export function MapSelectionLayer({
       routeDestinationId={routeDestinationId}
       minimizeNonDestinationMarkers={minimizeNonDestinationMarkers}
       zoom={zoom}
-      onSelect={onSelect}
-      onMarkerActivate={(item, activationId, modality) => {
-        interactionGateway.dispatch({ type: "marker", itemId: item.id, activationId, modality });
-      }}
-      onMarkerTapOverride={onMarkerTapOverride}
-      onDeselect={onClearSelection}
-      onDirections={onDirections}
+        onSelect={handleMarkerSelect}
+        onMarkerActivate={handleMarkerActivate}
+        onMarkerTapOverride={onMarkerTapOverride}
+        onDeselect={handleMarkerDeselect}
+        onDirections={handleMarkerDirections}
     />
   );
 }

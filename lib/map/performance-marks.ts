@@ -3,7 +3,7 @@ export type MapPerformanceEvent = "map-ready" | "marker-activation" | "route-req
 const EVENT_LIMIT = 64;
 type PerformanceEvent = { name: MapPerformanceEvent; durationMs: number; requestId?: number };
 const events: PerformanceEvent[] = [];
-const routeRequests = new Map<number, number>();
+const routeRequests = new Map<number, { startedAt: number; refreshing: boolean }>();
 
 function now(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -16,20 +16,23 @@ export function markMapPerformance(name: MapPerformanceEvent, startedAt: number,
   if (events.length > EVENT_LIMIT) events.shift();
 }
 
-export function beginMapPerformanceRequest(requestId: number, startedAt = now()): void {
+export function beginMapPerformanceRequest(requestId: number, startedAt = now(), refreshing = false): void {
   // The runtime accepts only the latest request. Retire any older start mark
   // so a stale completion cannot publish a duration after replacement/clear.
   for (const previousRequestId of routeRequests.keys()) {
     if (previousRequestId !== requestId) routeRequests.delete(previousRequestId);
   }
-  routeRequests.set(requestId, startedAt);
+  routeRequests.set(requestId, { startedAt, refreshing });
 }
 
 function finishMapPerformanceRequest(name: "route-commit" | "route-failure", requestId: number, endedAt = now()): void {
-  const startedAt = routeRequests.get(requestId);
-  if (startedAt === undefined) return;
+  const request = routeRequests.get(requestId);
+  if (request === undefined) return;
   routeRequests.delete(requestId);
-  markMapPerformance(name, startedAt, endedAt, requestId);
+  if (request.refreshing) {
+    markMapPerformance("route-refresh", request.startedAt, endedAt, requestId);
+  }
+  markMapPerformance(name, request.startedAt, endedAt, requestId);
 }
 
 export function commitMapPerformanceRequest(requestId: number, endedAt = now()): void {

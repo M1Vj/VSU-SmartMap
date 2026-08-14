@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { VSU_MAIN_GATE } from "@/lib/constants/map";
 import {
   createMapRuntimeController,
+  getRouteFacingEndpoint,
   getPresentedNavigationSnapshot,
 } from "@/lib/map/map-runtime";
 import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
@@ -490,7 +491,8 @@ function MapView({
   const presentedNavigation = getPresentedNavigationSnapshot(runtimeState);
   const routeRequestDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? undefined;
   const routeDestinationId = committedNavigation?.destinationId ?? presentedNavigation?.destinationId ?? null;
-  const routeSelectionDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? null;
+  const routeSelectionDestinationId = runtimeState.navigation.selectionDestinationId;
+  const routeFacingEnd = getRouteFacingEndpoint(runtimeState, navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null);
   const navigationOrigin = pendingNavigation?.origin ?? committedNavigation?.origin ?? runtimeState.navigation.origin;
   const isManualStartPending = runtimeState.navigation.phase === "acquiring";
   const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
@@ -684,7 +686,11 @@ function MapView({
         start: metadata.start,
         end: metadata.end,
       });
-      beginMapPerformanceRequest(requestId, typeof performance === "undefined" ? Date.now() : performance.now());
+      beginMapPerformanceRequest(
+        requestId,
+        typeof performance === "undefined" ? Date.now() : performance.now(),
+        current.navigation.committed !== null,
+      );
     }
 
     runtime.dispatch({
@@ -726,7 +732,11 @@ function MapView({
       start: decision.mode === "live" ? { lat: decision.start.lat, lng: decision.start.lng } : null,
       end,
     });
-    beginMapPerformanceRequest(requestId, requestStartedAt);
+    beginMapPerformanceRequest(
+      requestId,
+      requestStartedAt,
+      runtime.getState().navigation.committed !== null,
+    );
     setNavEnd(end as LatLng);
 
     if (decision.mode === "live") {
@@ -795,7 +805,7 @@ function MapView({
             items={filtered}
             selectedId={runtimeState.selectedItemId}
             navigationOwnsViewport={doesNavigationOwnViewport({
-              hasDestination: Boolean(navEnd),
+              hasDestination: Boolean(routeFacingEnd),
               manualStartPending: isManualStartPending,
               pendingNavigation: Boolean(pendingNavigationFacility),
             })}
@@ -821,7 +831,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              destination={navEnd} 
+              destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 
                   ? (selectedFacility && 'coordinates' in selectedFacility ? selectedFacility.coordinates : null) 
@@ -855,7 +865,7 @@ function MapView({
           )}
         </MapContainerClient>
 
-        {hasHydrated && navEnd && (
+        {hasHydrated && routeFacingEnd && (
           <div data-map-status-hud className="pointer-events-none absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
             {navigationControls.statusText && (
               <div
@@ -904,17 +914,17 @@ function MapView({
           </div>
         )}
 
-        {hasHydrated && navEnd && (
+        {hasHydrated && routeFacingEnd && (
           <div
             data-map-action-dock
             style={{ "--map-mini-card-height": `${mapBottomCardHeight}px` } as CSSProperties}
-            className="fixed inset-x-0 bottom-[calc(6.5rem+var(--map-mini-card-height,0px)+1rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(6.5rem+var(--map-mini-card-height,0px)+1rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
           >
             {runtimeState.presentation.controls.primaryAction !== "none" && (
               <Button
-                variant={hasActiveRoute ? "destructive" : "outline"}
+                variant={hasCommittedOverlay ? "destructive" : "outline"}
                 size="sm"
-                className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                className="pointer-events-auto h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                 onClick={clearRouteState}
                 aria-label={`${navigationControls.primaryActionLabel} navigation`}
               >
@@ -925,7 +935,7 @@ function MapView({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                className="pointer-events-auto h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                 onClick={() => setRouteReportOpen(true)}
                 aria-label="Report route"
               >

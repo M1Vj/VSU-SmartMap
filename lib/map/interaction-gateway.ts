@@ -9,13 +9,14 @@ export type BackgroundGesture = {
   type: "background";
   target: "background" | "marker" | "control";
   activationId?: string;
+  point?: { lat: number; lng: number };
 };
 
 export type InteractionEvent = MarkerActivation | BackgroundGesture;
 
 export function createInteractionGateway(options: {
   onMarkerActivate: (itemId: string) => void;
-  onBackground?: () => void;
+  onBackground?: (point?: { lat: number; lng: number }) => void;
 }) {
   const seenActivationIds = new Set<string>();
   const activePointerIds = new Set<number>();
@@ -38,7 +39,8 @@ export function createInteractionGateway(options: {
     if (event.target !== "background" || (event.activationId && seenActivationIds.has(event.activationId))) {
       return;
     }
-    options.onBackground?.();
+    if (event.activationId) remember(event.activationId);
+    options.onBackground?.(event.point);
   };
 
   return {

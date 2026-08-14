@@ -104,7 +104,7 @@ export function BoardingHouseMapPopupCard({
           asChild
           size="sm"
           variant="outline"
-          className={cn("gap-2", isBottomSheet ? "h-10 w-full text-sm" : "h-8 flex-1 text-xs")}
+          className={cn("gap-2", isBottomSheet ? "h-11 min-h-11 w-full text-sm" : "h-8 flex-1 text-xs")}
         >
           <Link href={`/boarding-houses/${listing.slug}`}>
             <Info className="h-3 w-3" aria-hidden />

@@ -3,6 +3,8 @@ export type PointerModality = "mouse" | "touch" | "pen";
 export interface PointerActivationEvent {
   pointerId: number;
   pointerType: string;
+  button?: number;
+  isPrimary?: boolean;
   clientX: number;
   clientY: number;
   timeStamp: number;
@@ -35,6 +37,11 @@ export const POINTER_TAP_MAX_DURATION_MS = 350;
 
 export function normalizePointerModality(pointerType: string): PointerModality {
   return pointerType === "touch" || pointerType === "pen" ? pointerType : "mouse";
+}
+
+export function isPrimaryPointerActivation(event: PointerActivationEvent): boolean {
+  if (event.isPrimary === false) return false;
+  return event.button === undefined || event.button === 0;
 }
 
 export function createPointerActivation(

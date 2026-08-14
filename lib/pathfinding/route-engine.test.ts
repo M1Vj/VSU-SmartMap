@@ -63,6 +63,20 @@ test("route requests honour cancellation before committing work", async () => {
   );
 });
 
+test("route requests keep the graph snapshot captured before an async yield", async () => {
+  const engine = createRouteEngine();
+  engine.setGraph(nodes, edges, "graph-old");
+  const pending = engine.route({ startNodeId: "a", endNodeId: "c", mode: "walking" });
+  engine.setGraph(
+    nodes,
+    [{ id: "ac", source_id: "a", target_id: "c", weight: 1, bidirectional: true, type: "walkway" }],
+    "graph-new",
+  );
+
+  const result = await pending;
+  assert.equal(result?.path.map((node) => node.id).join(">"), "a>b>c");
+});
+
 test("prepared route lookup can be reused without rebuilding node indexes", () => {
   const prepared = prepareRouteGraph(nodes, edges, "graph-1");
   const first = prepared.nodeById;

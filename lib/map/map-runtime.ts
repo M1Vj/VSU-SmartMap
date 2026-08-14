@@ -42,6 +42,8 @@ export interface MapRuntimeState {
     origin: NavigationOrigin | null;
     mode: TransportMode;
     destinationId: string | null;
+    /** Item selection that owns the current navigation flow, including a failed replacement. */
+    selectionDestinationId: string | null;
     pendingRequestId: number | null;
     committedRoute: PathResult | null;
     request: NavigationRequestSnapshot | null;
@@ -55,7 +57,6 @@ export interface MapRuntimeState {
       canReportRoute: boolean;
       statusText: string | null;
     };
-    announcement: string | null;
   };
 }
 
@@ -99,6 +100,7 @@ export function createInitialMapRuntimeState(
       origin: null,
       mode,
       destinationId: null,
+      selectionDestinationId: null,
       pendingRequestId: null,
       committedRoute: null,
       request: null,
@@ -132,19 +134,10 @@ function derivePresentation(
   const hasRoute = Boolean(input.committed?.route ?? input.committedRoute);
   const routeMode: MarkerMode = hasDestination || hasRoute ? "destination-focused" : "default";
 
-  let announcement: string | null = null;
-  if (input.phase === "active" && hasRoute) announcement = "Route found!";
-  if (input.phase === "failed") announcement = input.error ?? "No route found.";
-
   return {
     markerMode: routeMode,
     controls: {
-      primaryAction:
-        !hasDestination
-          ? "none"
-          : input.phase === "active" || (input.phase === "failed" && hasRoute)
-            ? "clear"
-            : "cancel",
+      primaryAction: !hasDestination ? "none" : hasRoute ? "clear" : "cancel",
       canReportRoute: hasRoute && input.phase !== "cleared" && input.phase !== "idle",
       statusText:
         input.phase === "acquiring"
@@ -153,7 +146,6 @@ function derivePresentation(
             ? "Loading route..."
             : null,
     },
-    announcement,
   };
 }
 
@@ -173,6 +165,7 @@ export function mapRuntimeReducer(
       phase: "cleared" as const,
       origin: null,
       destinationId: null,
+      selectionDestinationId: null,
       pendingRequestId: null,
       committedRoute: null,
       request: null,
@@ -186,15 +179,14 @@ export function mapRuntimeReducer(
     const navigation = {
       ...state.navigation,
       phase: event.awaitingStart
-        ? hasCommittedRoute
-          ? ("refreshing" as const)
-          : ("acquiring" as const)
+        ? ("acquiring" as const)
         : hasCommittedRoute
           ? ("refreshing" as const)
           : ("resolving" as const),
       origin: event.origin,
       mode: event.mode ?? state.navigation.mode,
       destinationId: event.destinationId,
+      selectionDestinationId: event.destinationId,
       pendingRequestId: event.requestId,
       request: {
         requestId: event.requestId,
@@ -254,6 +246,7 @@ export function mapRuntimeReducer(
       pendingRequestId: null,
       committedRoute: event.route,
       destinationId: snapshot.destinationId,
+      selectionDestinationId: snapshot.destinationId,
       origin: snapshot.origin,
       mode: snapshot.mode,
       request: null,
@@ -286,6 +279,19 @@ export function getPresentedNavigationSnapshot(
   state: MapRuntimeState,
 ): CommittedNavigationSnapshot | NavigationRequestSnapshot | null {
   return state.navigation.committed ?? state.navigation.request;
+}
+
+/**
+ * Returns the endpoint that should drive visible map controls and camera hints.
+ * A committed route remains authoritative while a replacement is resolving or
+ * has failed; persisted/request metadata is only used before the first commit.
+ */
+export function getRouteFacingEndpoint(
+  state: MapRuntimeState,
+  persistedEnd: NavigationPoint | null = null,
+): NavigationPoint | null {
+  if (state.navigation.committed) return state.navigation.committed.end;
+  return state.navigation.request?.end ?? persistedEnd;
 }
 
 export interface MapRuntimeController {
