@@ -429,6 +429,7 @@ import {
   shouldClearRouteForSelectedItem,
   shouldRestoreCommittedRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
+import { canReuseCommittedRoute } from "@/lib/navigation/route-reuse";
 
 function MapView({
   filtered,
@@ -483,6 +484,7 @@ function MapView({
   const [routeReportOpen, setRouteReportOpen] = useState(false);
   const [mapBottomCardHeight, setMapBottomCardHeight] = useState(0);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
+  const [reuseCommittedRouteAfterRestore, setReuseCommittedRouteAfterRestore] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
@@ -498,6 +500,15 @@ function MapView({
   const isManualStartPending = runtimeState.navigation.phase === "acquiring";
   const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
   const hasCommittedOverlay = Boolean(committedRoute);
+  const shouldReuseCommittedRoute =
+    reuseCommittedRouteAfterRestore &&
+    canReuseCommittedRoute({
+      committed: committedNavigation,
+      destinationId: routeRequestDestinationId,
+      mode: navMode,
+      start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
+      end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
+    });
   const hasNavigationState = Boolean(
     navStart || navEnd || isManualStartPending || pendingNavigation || committedNavigation,
   );
@@ -576,6 +587,7 @@ function MapView({
     if (pendingRequestId != null) clearMapPerformanceRequest(pendingRequestId);
     clearMapPerformanceRequest(navigationSessionId);
     clearNavigation();
+    setReuseCommittedRouteAfterRestore(false);
     setManualLocationRequestPending(false);
     runtime.dispatch({ type: "navigation/cleared" });
     setRouteReportOpen(false);
@@ -613,6 +625,7 @@ function MapView({
         : null,
     );
     setNavMode(committed.mode);
+    setReuseCommittedRouteAfterRestore(true);
     setManualLocationRequestPending(false);
     setNavigationSessionId((sessionId) => sessionId + 1);
     return true;
@@ -781,6 +794,7 @@ function MapView({
     const requestId = navigationSessionId + 1;
     const end = { lat: item.coordinates.lat, lng: item.coordinates.lng };
     setNavigationSessionId(requestId);
+    setReuseCommittedRouteAfterRestore(false);
     runtime.dispatch({
       type: "navigation/requested",
       requestId,
@@ -931,6 +945,7 @@ function MapView({
               onRouteRequestStarted={handleRouteRequestStarted}
               committedRoute={committedRoute}
               navigationOrigin={navigationOrigin}
+              reuseCommittedRoute={shouldReuseCommittedRoute}
             />
           )}
         </MapContainerClient>

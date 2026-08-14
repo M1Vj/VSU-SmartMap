@@ -233,7 +233,7 @@ export const MapMarker = memo(function MapMarker({
       pointerActivationRef.current = null;
       markerPerformanceStartedAtRef.current = null;
     };
-  }, [isSelected, item, onMarkerActivate, onMarkerTapOverride]);
+  }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride]);
 
   const handleViewDetails = () => {
     setFacilitySheetOpen(true);

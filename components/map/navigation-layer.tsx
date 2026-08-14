@@ -50,6 +50,7 @@ interface NavigationLayerProps {
   onRouteRequestStarted?: (requestId: number, metadata: NavigationRequestMetadata) => void;
   committedRoute?: PathResult | null;
   navigationOrigin?: NavigationOrigin | null;
+  reuseCommittedRoute?: boolean;
 }
 
 export function NavigationLayer({
@@ -72,6 +73,7 @@ export function NavigationLayer({
   onRouteRequestStarted,
   committedRoute = null,
   navigationOrigin = null,
+  reuseCommittedRoute = false,
 }: NavigationLayerProps) {
   const routeEngine = useMemo(() => createRouteEngine(), []);
   const requestMetadata = useMemo<NavigationRequestMetadata>(() => ({
@@ -116,7 +118,7 @@ export function NavigationLayer({
   }, [edges, nodes, routeEngine]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || reuseCommittedRoute) {
       return coordinator.start({});
     }
 
@@ -309,7 +311,7 @@ export function NavigationLayer({
       onError: releaseRouteFoundAnnouncement,
       resolve: resolveRoute,
     });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, reuseCommittedRoute, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
 
   if (!committedRoute) return null;
 

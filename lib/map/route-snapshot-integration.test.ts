@@ -24,6 +24,8 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /setNavEnd\(\s*committed\.end/);
   assert.match(source, /setNavMode\(committed\.mode\)/);
   assert.match(source, /setNavigationSessionId\(\(sessionId\) => sessionId \+ 1\)/);
+  assert.match(source, /canReuseCommittedRoute/);
+  assert.match(source, /reuseCommittedRoute=\{shouldReuseCommittedRoute\}/);
   assert.match(source, /destination=\{routeFacingEnd\}/);
   assert.match(source, /hasDestination: Boolean\(routeFacingEnd\)/);
   assert.match(source, /navigationOrigin=\{navigationOrigin\}/);
@@ -66,6 +68,8 @@ test("route adapter allocates fresh IDs for calculations and forwards metadata",
   assert.doesNotMatch(source, /resolve: resolveRoute,[\s\S]{0,120}requestId: navigationSessionId/);
   assert.doesNotMatch(source, /let requestSignal/);
   assert.match(source, /buildInternalRoute[\s\S]{0,260}signal\?: AbortSignal/);
+  assert.match(source, /reuseCommittedRoute\?: boolean/);
+  assert.match(source, /if \(!enabled \|\| reuseCommittedRoute\)/);
 });
 
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {

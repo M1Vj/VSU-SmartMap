@@ -51,5 +51,7 @@ test("marker adapter forwards pointer identity/modality before Leaflet click com
   assert.match(markerSource, /isPrimaryPointerActivation/);
   assert.match(markerSource, /original\.button/);
   assert.match(markerSource, /compatibilityActivationRef/);
+  assert.match(markerSource, /element\.removeEventListener\("pointercancel"/);
+  assert.match(markerSource, /\[icon, isSelected, item, onMarkerActivate, onMarkerTapOverride\]/);
   assert.match(markerSource, /markMapPerformance\([\s\S]{0,120}"marker-activation"/);
 });
