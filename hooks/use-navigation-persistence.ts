@@ -23,6 +23,15 @@ export const EMPTY_NAVIGATION_STATE: NavigationState = {
   routeStartTime: null,
 };
 
+export function removeStoredNavigationState(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+  } catch {
+    // Safari private mode and disabled storage can throw on removal too.
+  }
+}
+
 function isPoint(value: unknown): value is LatLng {
   if (!value || typeof value !== 'object') return false;
   const point = value as { lat?: unknown; lng?: unknown };
@@ -76,10 +85,10 @@ function readStoredNavigationState(): NavigationState {
 
     const parsed = parseStoredNavigationState(JSON.parse(stored));
     if (parsed !== EMPTY_NAVIGATION_STATE) return parsed;
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    removeStoredNavigationState();
   } catch (error) {
     console.error("Failed to parse navigation state from localStorage", error);
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    removeStoredNavigationState();
   }
 
   return EMPTY_NAVIGATION_STATE;
@@ -100,7 +109,7 @@ export function useNavigationPersistence() {
         navigationState.origin === null &&
         navigationState.routeStartTime === null
       ) {
-        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        removeStoredNavigationState();
         return;
       }
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(navigationState));
@@ -149,9 +158,7 @@ export function useNavigationPersistence() {
 
   const clearNavigation = useCallback(() => {
     setNavigationState(EMPTY_NAVIGATION_STATE);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
-    }
+    removeStoredNavigationState();
   }, []);
 
   return {

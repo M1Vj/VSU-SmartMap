@@ -25,6 +25,7 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /setNavMode\(committed\.mode\)/);
   assert.match(source, /setNavigationSessionId\(\(sessionId\) => sessionId \+ 1\)/);
   assert.match(source, /canReuseCommittedRoute/);
+  assert.match(source, /canReuseCommittedRoute\(\{[\s\S]{0,500}origin: navigationOrigin/);
   assert.match(source, /reuseCommittedRoute=\{shouldReuseCommittedRoute\}/);
   assert.match(source, /destination=\{routeFacingEnd\}/);
   assert.match(source, /hasDestination: Boolean\(routeFacingEnd\)/);
@@ -42,6 +43,14 @@ test("map page hydrates valid persisted navigation and restores committed metada
   assert.match(source, /next\.navigation\.phase === "failed"/);
   assert.match(source, /const committed = next\.navigation\.committed[\s\S]{0,700}setNavigationRoute\([\s\S]{0,500}committed\.destinationId[\s\S]{0,300}committed\.origin/);
   assert.match(source, /runtimeState\.navigation\.phase === "failed"[\s\S]{0,260}runtimeState\.navigation\.error[\s\S]{0,320}role="alert"/);
+});
+
+test("terminal graph-load failure retires only the exact pending route request", async () => {
+  const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /navigationGraphError/);
+  assert.match(source, /if \(!cachedGraphAvailable\) \{[\s\S]{0,180}setNavigationGraphError/);
+  assert.match(source, /handleRouteFailed\(navigationGraphError, requestId\)/);
+  assert.match(source, /before\.navigation\.pendingRequestId !== requestId/);
 });
 
 test("pending replacement selection does not clear a committed route", () => {
@@ -83,6 +92,17 @@ test("route adapter allocates fresh IDs for calculations and forwards metadata",
   assert.match(source, /buildInternalRoute[\s\S]{0,260}signal\?: AbortSignal/);
   assert.match(source, /reuseCommittedRoute\?: boolean/);
   assert.match(source, /if \(!enabled \|\| reuseCommittedRoute\)/);
+});
+
+test("route request identity stays coordinator-owned after calculation starts", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+  const coordinatorSource = await readFile(new URL("../../lib/navigation/route-request-coordinator.ts", import.meta.url), "utf8");
+  assert.match(coordinatorSource, /requestId: options\.requestId \?\? \+\+nextRequestId/);
+  assert.match(coordinatorSource, /callbacks\.requestStarted\?\.\(request\.requestId\)/);
+  assert.match(pageSource, /type: "navigation\/requested"[\s\S]{0,260}requestId/);
+  assert.match(pageSource, /beginMapPerformanceRequest\(\s*requestId/);
+  assert.match(pageSource, /commitMapPerformanceRequest\(requestId\)/);
+  assert.match(pageSource, /failMapPerformanceRequest\(requestId\)/);
 });
 
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {

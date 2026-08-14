@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   EMPTY_NAVIGATION_STATE,
   parseStoredNavigationState,
+  removeStoredNavigationState,
 } from "./use-navigation-persistence";
 
 const now = 1_700_000_000_000;
@@ -49,4 +50,26 @@ test("expired or incomplete persisted navigation cannot resurrect a cleared rout
     parseStoredNavigationState({ navStart: { lat: 11, lng: 124 } }, now),
     EMPTY_NAVIGATION_STATE,
   );
+});
+
+test("disabled storage cannot turn cleanup into a persistence error", () => {
+  const globalObject = globalThis as typeof globalThis & {
+    window?: unknown;
+    localStorage?: unknown;
+  };
+  const previousWindow = globalObject.window;
+  const previousStorage = globalObject.localStorage;
+  try {
+    Object.defineProperty(globalObject, "window", { configurable: true, value: {} });
+    Object.defineProperty(globalObject, "localStorage", {
+      configurable: true,
+      value: { removeItem: () => { throw new Error("storage disabled"); } },
+    });
+    assert.doesNotThrow(() => removeStoredNavigationState());
+  } finally {
+    if (previousWindow === undefined) Reflect.deleteProperty(globalObject, "window");
+    else Object.defineProperty(globalObject, "window", { configurable: true, value: previousWindow });
+    if (previousStorage === undefined) Reflect.deleteProperty(globalObject, "localStorage");
+    else Object.defineProperty(globalObject, "localStorage", { configurable: true, value: previousStorage });
+  }
 });

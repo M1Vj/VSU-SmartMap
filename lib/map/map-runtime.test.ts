@@ -62,6 +62,32 @@ test("stale route results cannot replace the committed route", () => {
   assert.equal(stale.navigation.phase, "refreshing");
 });
 
+test("terminal graph failures retire only the exact pending request", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 11,
+    destinationId: "facility-graph",
+    origin: "live",
+  });
+  const stale = mapRuntimeReducer(state, {
+    type: "navigation/failed",
+    requestId: 10,
+    message: "graph unavailable",
+  });
+  assert.equal(stale.navigation.pendingRequestId, 11);
+  assert.equal(stale.navigation.phase, "resolving");
+
+  state = mapRuntimeReducer(state, {
+    type: "navigation/failed",
+    requestId: 11,
+    message: "graph unavailable",
+  });
+  assert.equal(state.navigation.pendingRequestId, null);
+  assert.equal(state.navigation.phase, "failed");
+  assert.equal(state.navigation.error, "graph unavailable");
+});
+
 test("clear explicitly retires the committed route instead of inferring from an empty result array", () => {
   let state = createInitialMapRuntimeState();
   state = mapRuntimeReducer(state, {

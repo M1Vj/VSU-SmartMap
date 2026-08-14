@@ -134,6 +134,7 @@ function MapTab() {
   }, []);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [graphData, setGraphData] = useState<{ nodes: MapNode[]; edges: MapEdge[] }>({ nodes: [], edges: [] });
+  const [navigationGraphError, setNavigationGraphError] = useState<string | null>(null);
   const loadFiltersRef = useRef({ debouncedQuery, selectedCategories });
   const requestedBoardingHouseId = searchParams.get("boardingHouse");
   const hasBoardingUrlFlag = searchParams.get("boarding") === "1";
@@ -225,6 +226,7 @@ function MapTab() {
       };
 
       const load = async () => {
+        setNavigationGraphError(null);
         const cached = await getCachedFacilities();
         const cachedNav = await getCachedNavigationGraph();
         
@@ -237,6 +239,7 @@ function MapTab() {
 
         if (!cached?.length && isOfflineCacheSession()) {
           setError("Map data has not been cached on this device yet. Reconnect once to save the campus map for offline use.");
+          setNavigationGraphError("Directions are unavailable right now. The map still works.");
           setItems([]);
           setFiltered([]);
           setIsLoading(false);
@@ -244,9 +247,11 @@ function MapTab() {
         }
 
         const loadNavigation = async () => {
-           if (cachedNav) {
-             setGraphData(filterGraphToRoutingBoundary(cachedNav.nodes, cachedNav.edges));
-           }
+           const cachedGraph = cachedNav
+             ? filterGraphToRoutingBoundary(cachedNav.nodes, cachedNav.edges)
+             : null;
+           const cachedGraphAvailable = Boolean(cachedGraph?.nodes.length && cachedGraph.edges.length);
+           if (cachedGraph) setGraphData(cachedGraph);
            
            try {
              const [nodesRes, edgesRes] = await Promise.all([
@@ -262,13 +267,21 @@ function MapTab() {
                throw nodesRes.error ?? edgesRes.error;
              }
 
-             if (nodesRes.data && edgesRes.data) {
-               setGraphData(filterGraphToRoutingBoundary(nodesRes.data, edgesRes.data));
+             const remoteGraph = nodesRes.data && edgesRes.data
+               ? filterGraphToRoutingBoundary(nodesRes.data, edgesRes.data)
+               : null;
+             if (remoteGraph?.nodes.length && remoteGraph.edges.length && nodesRes.data && edgesRes.data) {
+               setGraphData(remoteGraph);
+               setNavigationGraphError(null);
                await setCachedNavigationGraph(nodesRes.data, edgesRes.data);
+             } else if (!cachedGraphAvailable) {
+               setNavigationGraphError("Directions are unavailable right now. The map still works.");
+               toast.error("Directions are unavailable right now. The map still works.");
              }
            } catch (e) {
              console.warn("Failed to sync navigation graph", e);
-             if (!cachedNav) {
+             if (!cachedGraphAvailable) {
+               setNavigationGraphError("Directions are unavailable right now. The map still works.");
                toast.error("Directions are unavailable right now. The map still works.");
              }
            }
@@ -402,6 +415,7 @@ function MapTab() {
             selectFacility(null);
           }}
           graphData={graphData}
+          navigationGraphError={navigationGraphError}
           pendingNavigationFacility={pendingNavigationFacility}
           onPendingNavigationConsumed={clearPendingNavigationFacility}
         />
@@ -442,6 +456,7 @@ function MapView({
   onSelect,
   onClearSelection,
   graphData,
+  navigationGraphError,
   pendingNavigationFacility,
   onPendingNavigationConsumed,
 }: {
@@ -455,6 +470,7 @@ function MapView({
   onSelect: (id: string) => void;
   onClearSelection: () => void;
   graphData: { nodes: MapNode[], edges: MapEdge[] };
+  navigationGraphError: string | null;
   pendingNavigationFacility: Facility | null;
   onPendingNavigationConsumed: () => void;
 }) {
@@ -516,6 +532,7 @@ function MapView({
     canReuseCommittedRoute({
       committed: committedNavigation,
       destinationId: routeRequestDestinationId,
+      origin: navigationOrigin,
       mode: navMode,
       start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
       end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
@@ -834,6 +851,13 @@ function MapView({
       setManualLocationRequestPending(false);
     }
   }, [clearNavigation, runtime, setNavigationRoute]);
+
+  useEffect(() => {
+    if (!navigationGraphError) return;
+    const requestId = runtime.getState().navigation.pendingRequestId;
+    if (requestId == null) return;
+    handleRouteFailed(navigationGraphError, requestId);
+  }, [handleRouteFailed, navigationGraphError, runtime, runtimeState.navigation.pendingRequestId]);
 
   const handleRouteRequestStarted = useCallback((requestId: number, metadata: NavigationRequestMetadata) => {
     const current = runtime.getState();
