@@ -1,4 +1,3 @@
-export const CARTO_LIGHT_TILE_HOST = "https://a.basemaps.cartocdn.com";
 export const DEFAULT_TILE_FALLBACK_ERROR_THRESHOLD = 3;
 
 export type TileFallbackState = {
@@ -26,21 +25,4 @@ export function recordTileError(state: TileFallbackState): TileFallbackState {
     errorCount,
     active: errorCount >= state.threshold,
   };
-}
-
-export function tileFallbackUrlFromArcGis(url: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-
-  if (parsed.hostname !== "server.arcgisonline.com") return null;
-
-  const match = parsed.pathname.match(/\/MapServer\/tile\/(\d+)\/(\d+)\/(\d+)(?:\.[a-z0-9]+)?$/i);
-  if (!match) return null;
-
-  const [, zoom, y, x] = match;
-  return `${CARTO_LIGHT_TILE_HOST}/light_all/${zoom}/${x}/${y}.png`;
 }

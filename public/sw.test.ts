@@ -25,6 +25,8 @@ test("private requests are handled network-only before cache strategies", () => 
 
 test("map tiles never cache or synthesize empty 204 responses", () => {
   assert.match(source, /const TILE_CACHE_NAME = ['"]map-tiles-v2['"]/);
+  assert.match(source, /const PREVIOUS_TILE_CACHE_NAME = ['"]map-tiles-v1['"]/);
+  assert.match(source, /async function migratePreviousTileCache/);
   assert.match(source, /response\.status !== 204/);
   const mapTileStart = source.indexOf("if (isMapTileRequest(url))");
   const mapTileEnd = source.indexOf("if (isNextRscRequest(url, request))", mapTileStart);
@@ -33,11 +35,9 @@ test("map tiles never cache or synthesize empty 204 responses", () => {
   assert.match(source.slice(mapTileStart, mapTileEnd), /Response\.error\(\)/);
 });
 
-test("ArcGIS tile failures use safe Carto conversion and transparent references", () => {
-  assert.match(source, /function getCartoFallbackTileUrl/);
-  assert.match(source, /light_all/);
-  assert.match(source, /function isArcGisReferenceTile/);
-  assert.match(source, /TRANSPARENT_TILE/);
-  assert.ok(source.includes("MapServer\\/tile\\/"));
-  assert.match(source, /light_all\/\$\{zoom\}\/\$\{x\}\/\$\{y\}\.png/);
+test("ArcGIS tile failures stay network errors for the MapWrapper fallback", () => {
+  assert.doesNotMatch(source, /CARTO_LIGHT_TILE_HOST/);
+  assert.doesNotMatch(source, /TRANSPARENT_TILE/);
+  assert.doesNotMatch(source, /fallbackArcGisTile|getCartoFallbackTileUrl|satelliteFallbackBaseAvailable/);
+  assert.match(source, /Response\.error\(\)/);
 });
