@@ -96,9 +96,12 @@ export function useMapEvents(eventHandlers: LeafletEventHandlerFnMap): L.Map {
   return map;
 }
 
-type TileLayerProps = TileLayerOptions & { url: string };
+type TileLayerProps = TileLayerOptions & {
+  url: string;
+  eventHandlers?: LeafletEventHandlerFnMap;
+};
 
-export function TileLayer({ url, ...options }: TileLayerProps) {
+export function TileLayer({ url, eventHandlers, ...options }: TileLayerProps) {
   const map = useMap();
   const initialUrl = useRef(url);
   const initialOptions = useRef(options);
@@ -121,6 +124,7 @@ export function TileLayer({ url, ...options }: TileLayerProps) {
     if (typeof options.opacity === "number") layer.setOpacity(options.opacity);
     if (typeof options.zIndex === "number") layer.setZIndex(options.zIndex);
   }, [layer, options.opacity, options.zIndex]);
+  useEventHandlers(layer, eventHandlers);
 
   return null;
 }

@@ -5,12 +5,13 @@ import "@maplibre/maplibre-gl-leaflet";
 import L from "leaflet";
 import { MapContainer, TileLayer, useMap } from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useApp } from "@/lib/context/app-context";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
 import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
+import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
@@ -114,10 +115,24 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   const { resolvedTheme } = useTheme();
   const { mapStyle } = useApp();
   const [mounted, setMounted] = useState(false);
+  const [satelliteFallbackActive, setSatelliteFallbackActive] = useState(false);
+  const satelliteTileFallbackState = useRef(createTileFallbackState());
+
+  const handleSatelliteTileError = useCallback(() => {
+    const nextState = recordTileError(satelliteTileFallbackState.current);
+    satelliteTileFallbackState.current = nextState;
+    if (nextState.active) setSatelliteFallbackActive(true);
+  }, []);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (mapStyle === "satellite") return;
+    satelliteTileFallbackState.current = createTileFallbackState();
+    setSatelliteFallbackActive(false);
+  }, [mapStyle]);
 
   const mapStyleUrl = (() => {
     if (!mounted) return MAP_TILES.url;
@@ -152,25 +167,36 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         className={className ?? "h-full w-full"}
       >
         {mapStyle === "satellite" ? (
-          <>
+          satelliteFallbackActive ? (
             <TileLayer
-              key={mapStyleUrl}
-              attribution={MAP_TILES.satelliteAttribution}
-              url={mapStyleUrl}
+              key="satellite-raster-fallback"
+              attribution={MAP_TILES.satelliteFallbackAttribution}
+              url={MAP_TILES.satelliteFallbackUrl}
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
             />
-            <TileLayer
-              url={MAP_TILES.satelliteTransportUrl}
-              maxZoom={MAP_MAX_ZOOM}
-              maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
-            />
-            <TileLayer
-              url={MAP_TILES.satelliteLabelsUrl}
-              maxZoom={MAP_MAX_ZOOM}
-              maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
-            />
-          </>
+          ) : (
+            <>
+              <TileLayer
+                key={mapStyleUrl}
+                attribution={MAP_TILES.satelliteAttribution}
+                url={mapStyleUrl}
+                maxZoom={MAP_MAX_ZOOM}
+                maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+                eventHandlers={{ tileerror: handleSatelliteTileError }}
+              />
+              <TileLayer
+                url={MAP_TILES.satelliteTransportUrl}
+                maxZoom={MAP_MAX_ZOOM}
+                maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+              />
+              <TileLayer
+                url={MAP_TILES.satelliteLabelsUrl}
+                maxZoom={MAP_MAX_ZOOM}
+                maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+              />
+            </>
+          )
         ) : (
           <OpenFreeMapVectorLayer key={mapStyleUrl} styleUrl={mapStyleUrl} />
         )}
@@ -179,6 +205,15 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         <SmoothWheelZoom />
         {children}
       </MapContainer>
+      {satelliteFallbackActive && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full border bg-background/95 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-md"
+        >
+          Satellite imagery unavailable; showing a map fallback.
+        </div>
+      )}
     </div>
   );
 }

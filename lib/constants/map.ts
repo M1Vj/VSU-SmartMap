@@ -19,6 +19,8 @@ export const MAP_TILES = {
     "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
   satelliteTransportUrl:
     "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+  satelliteFallbackUrl:
+    "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   // Raster (XYZ) fallbacks for plain Leaflet TileLayer surfaces (location
   // pickers). The `url`/`darkUrl` above are MapLibre vector STYLE documents and
   // only render in the MapLibre GL main map — they appear blank in Leaflet.
@@ -28,6 +30,8 @@ export const MAP_TILES = {
     '© <a href="https://openfreemap.org">OpenFreeMap</a> · Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   satelliteAttribution:
     'Tiles © <a href="https://www.esri.com/">Esri</a>',
+  satelliteFallbackAttribution:
+    '© <a href="https://carto.com/attributions">CARTO</a> · Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   rasterStreetAttribution:
     '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   rasterDarkAttribution:

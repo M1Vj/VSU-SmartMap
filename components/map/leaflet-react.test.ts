@@ -29,3 +29,8 @@ test("adapter owns native layer cleanup and stable overlay portals", () => {
   assert.match(source, /layer\.bindTooltip/);
   assert.match(source, /layer\.bindPopup/);
 });
+
+test("tile layers expose Leaflet tile errors to map-level fallbacks", () => {
+  assert.match(source, /type TileLayerProps = TileLayerOptions & \{[\s\S]*eventHandlers\?: LeafletEventHandlerFnMap/);
+  assert.match(source, /useEventHandlers\(layer, eventHandlers\)/);
+});

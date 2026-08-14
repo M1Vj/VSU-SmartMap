@@ -58,3 +58,19 @@ test("proxy applies browser security headers to dynamic responses", async () => 
   assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
   assert.match(response.headers.get("permissions-policy") ?? "", /geolocation=\(self\)/);
 });
+
+test("proxy CSP permits the map style, imagery, raster, and fallback tile hosts", async () => {
+  const { proxy } = await proxyModule;
+  const response = await proxy(new NextRequest("https://example.test/map"));
+  const policy = response.headers.get("content-security-policy") ?? "";
+  const connectSource = policy
+    .split("; ")
+    .find((directive) => directive.startsWith("connect-src "));
+
+  assert.match(policy, /img-src 'self' blob: data: https:/);
+  assert.match(connectSource ?? "", /https:\/\/server\.arcgisonline\.com/);
+  assert.match(connectSource ?? "", /https:\/\/tiles\.openfreemap\.org/);
+  assert.match(connectSource ?? "", /https:\/\/tile\.openstreetmap\.org/);
+  assert.match(connectSource ?? "", /https:\/\/\*\.openstreetmap\.org/);
+  assert.match(connectSource ?? "", /https:\/\/\*\.basemaps\.cartocdn\.com/);
+});
