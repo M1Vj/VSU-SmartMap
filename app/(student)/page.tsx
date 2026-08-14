@@ -420,7 +420,7 @@ import {
   cancelPendingRouteReplacement,
   clearRouteCommit,
   commitRoute,
-  failRouteRequest,
+  resolveRouteRequestFailure,
   type RouteCommitState,
   type RouteRequestContext,
 } from "@/lib/navigation/route-commit-state";
@@ -472,6 +472,7 @@ function MapView({
   const { position, error: locationError, startTracking } = geo;
   
   const [targetFacilityId, setTargetFacilityId] = useState<string | undefined>(undefined);
+  const [routeDestinationId, setRouteDestinationId] = useState<string | undefined>(undefined);
   
   // Use persistent navigation state
   const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
@@ -489,15 +490,16 @@ function MapView({
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
   const committedRoute = routeCommitState.committed;
+  const routeCommitStateRef = useRef(routeCommitState);
   const hasActiveRoute = Boolean(committedRoute);
   const displayedRoutes = committedRoute ? [committedRoute.route] : [];
   const currentRouteRequestContext = useMemo<RouteRequestContext>(() => ({
-    destinationId: targetFacilityId ?? null,
+    destinationId: routeDestinationId ?? null,
     start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
     end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
     mode: navMode,
     origin: navigationOrigin,
-  }), [navEnd, navMode, navStart, navigationOrigin, targetFacilityId]);
+  }), [navEnd, navMode, navStart, navigationOrigin, routeDestinationId]);
   const shouldReuseCommittedRoute =
     reuseCommittedRoute && canReuseCommittedRoute(committedRoute, currentRouteRequestContext);
   const routeFacingDestination = getRouteFacingDestination(
@@ -520,6 +522,10 @@ function MapView({
     setHasHydrated(true);
   }, []);
 
+  useEffect(() => {
+    routeCommitStateRef.current = routeCommitState;
+  }, [routeCommitState]);
+
   const dismissRouteFoundAnnouncement = useCallback((retiredSessionId?: number) => {
     const toastId = routeAnnouncementTracker.reset(retiredSessionId);
     if (toastId) toast.dismiss(toastId);
@@ -534,6 +540,18 @@ function MapView({
     return () => dismissRouteFoundAnnouncement();
   }, [dismissRouteFoundAnnouncement]);
 
+  const restoreCommittedRouteContext = useCallback((context: RouteRequestContext, retireSession = true) => {
+    if (retireSession) {
+      setNavigationSessionId((sessionId) => sessionId + 1);
+    }
+    setRouteDestinationId(context.destinationId ?? undefined);
+    setNavStart(context.start ? { lat: context.start.lat, lng: context.start.lng } as LatLng : null);
+    setNavEnd(context.end ? { lat: context.end.lat, lng: context.end.lng } as LatLng : null);
+    setNavigationOrigin(context.origin);
+    setNavMode(context.mode);
+    setReuseCommittedRoute(true);
+  }, [setNavEnd, setNavStart]);
+
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
     clearNavigation();
@@ -541,29 +559,35 @@ function MapView({
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setTargetFacilityId(undefined);
+    setRouteDestinationId(undefined);
     setReuseCommittedRoute(false);
-    setRouteCommitState(clearRouteCommit());
+    const clearedRouteState = clearRouteCommit();
+    routeCommitStateRef.current = clearedRouteState;
+    setRouteCommitState(clearedRouteState);
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
 
   const cancelRouteReplacementAndRestore = useCallback((context: RouteRequestContext) => {
     dismissRouteFoundAnnouncement(navigationSessionId);
     cancelMapPerformance("route_calculation");
-    setNavigationSessionId((sessionId) => sessionId + 1);
+    const currentRouteState = routeCommitStateRef.current;
+    if (
+      currentRouteState.committed &&
+      currentRouteState.pending &&
+      currentRouteState.committed.destinationId === context.destinationId
+    ) {
+      routeCommitStateRef.current = cancelPendingRouteReplacement(currentRouteState);
+    }
     setRouteCommitState((state) => {
       if (!state.committed || !state.pending) return state;
       if (state.committed.destinationId !== context.destinationId) return state;
       return cancelPendingRouteReplacement(state);
     });
     setTargetFacilityId(context.destinationId ?? undefined);
-    setNavStart(context.start ? { lat: context.start.lat, lng: context.start.lng } as LatLng : null);
-    setNavEnd(context.end ? { lat: context.end.lat, lng: context.end.lng } as LatLng : null);
-    setNavigationOrigin(context.origin);
-    setNavMode(context.mode);
-    setReuseCommittedRoute(true);
+    restoreCommittedRouteContext(context);
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
-  }, [dismissRouteFoundAnnouncement, navigationSessionId, setNavEnd, setNavStart]);
+  }, [dismissRouteFoundAnnouncement, navigationSessionId, restoreCommittedRouteContext]);
 
   useEffect(() => {
     setNavMode(defaultTransportMode);
@@ -575,10 +599,12 @@ function MapView({
       const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
       const routeStart = clampPointToVsuCampus(liveStart);
 
+      if (navStart?.lat === routeStart.lat && navStart.lng === routeStart.lng) return;
+
       setReuseCommittedRoute(false);
       setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
     }
-  }, [position, navigationOrigin, navEnd, setNavStart]);
+  }, [position, navigationOrigin, navEnd, navStart, setNavStart]);
 
   useEffect(() => {
     if (!manualLocationRequestPending || !isManualStartPending || !position || !navEnd) return;
@@ -659,17 +685,31 @@ function MapView({
   }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
 
   const handleRouteRequest = useCallback((context: RouteRequestContext | null) => {
-    setRouteCommitState((state) => (context ? beginRouteRequest(state, context) : clearRouteCommit()));
+    if (context) {
+      setRouteDestinationId(context.destinationId ?? undefined);
+      routeCommitStateRef.current = beginRouteRequest(routeCommitStateRef.current, context);
+      setRouteCommitState((state) => beginRouteRequest(state, context));
+      return;
+    }
+
+    routeCommitStateRef.current = clearRouteCommit();
+    setRouteCommitState(clearRouteCommit());
   }, []);
 
   const handleRoutesFound = useCallback((routes: PathResult[], context?: RouteRequestContext) => {
     if (!context || routes.length === 0) return;
+    routeCommitStateRef.current = commitRoute(routeCommitStateRef.current, context, routes[0]);
     setRouteCommitState((state) => commitRoute(state, context, routes[0]));
   }, []);
 
-  const handleRouteRequestFailed = useCallback(() => {
-    setRouteCommitState((state) => failRouteRequest(state));
-  }, []);
+  const handleRouteRequestFailed = useCallback((failedContext: RouteRequestContext | null) => {
+    const transition = resolveRouteRequestFailure(routeCommitStateRef.current, failedContext);
+    if (transition.restoreContext) {
+      restoreCommittedRouteContext(transition.restoreContext, false);
+    }
+    routeCommitStateRef.current = transition.state;
+    setRouteCommitState((state) => resolveRouteRequestFailure(state, failedContext).state);
+  }, [restoreCommittedRouteContext]);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
     return routeAnnouncementTracker.claim(sessionId);
@@ -690,6 +730,7 @@ function MapView({
     setNavigationSessionId((sessionId) => sessionId + 1);
     setReuseCommittedRoute(false);
     setTargetFacilityId(item.id);
+    setRouteDestinationId(item.id);
     setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
 
     if (decision.mode === "live") {
@@ -816,10 +857,11 @@ function MapView({
             <NavigationLayer
               startPoint={navStart} 
               endPoint={navEnd} 
-              destinationId={targetFacilityId}
+              destinationId={routeDestinationId}
               mode={navMode} 
               nodes={graphData.nodes}
               edges={graphData.edges}
+              displayedRoute={committedRoute?.route ?? null}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
               navigationSessionId={navigationSessionId}
               navigationOrigin={navigationOrigin}

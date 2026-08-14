@@ -46,6 +46,38 @@ export function failRouteRequest(state: RouteCommitState): RouteCommitState {
   return cancelPendingRouteReplacement(state);
 }
 
+export type RouteRequestFailureTransition = {
+  state: RouteCommitState;
+  restoreContext: RouteRequestContext | null;
+};
+
+export function resolveRouteRequestFailure(
+  state: RouteCommitState,
+  failedContext: RouteRequestContext | null,
+): RouteRequestFailureTransition {
+  if (
+    !state.pending ||
+    !failedContext ||
+    !areRouteRequestContextsEqual(state.pending, failedContext)
+  ) {
+    return { state, restoreContext: null };
+  }
+
+  const committed = state.committed;
+  return {
+    state: failRouteRequest(state),
+    restoreContext: committed
+      ? {
+          destinationId: committed.destinationId,
+          start: committed.start,
+          end: committed.end,
+          mode: committed.mode,
+          origin: committed.origin,
+        }
+      : null,
+  };
+}
+
 export function cancelPendingRouteReplacement(
   state: RouteCommitState,
 ): RouteCommitState {
@@ -61,6 +93,13 @@ export function canReuseCommittedRoute(
   current: RouteRequestContext | null,
 ): boolean {
   return committed !== null && current !== null && routeContextsEqual(committed, current);
+}
+
+export function areRouteRequestContextsEqual(
+  first: RouteRequestContext,
+  second: RouteRequestContext,
+): boolean {
+  return routeContextsEqual(first, second);
 }
 
 function routeContextsEqual(

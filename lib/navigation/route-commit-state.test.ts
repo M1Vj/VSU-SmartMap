@@ -7,6 +7,7 @@ import {
   clearRouteCommit,
   commitRoute,
   failRouteRequest,
+  resolveRouteRequestFailure,
   type RouteCommitState,
 } from "./route-commit-state.ts";
 import type { PathResult } from "@/lib/types/graph";
@@ -83,6 +84,28 @@ test("replacement failure retains the old committed route and clears pending sta
   assert.equal(state.committed?.destinationId, "facility-a");
   assert.equal(state.committed?.route.totalDistance, 100);
   assert.equal(state.pending, null);
+});
+
+test("replacement failure restores the committed request context and ignores stale failures", () => {
+  const pending = beginRouteRequest(committedState(), secondContext);
+
+  const transition = resolveRouteRequestFailure(pending, secondContext);
+  assert.deepEqual(transition.restoreContext, firstContext);
+  assert.deepEqual(transition.state, failRouteRequest(pending));
+
+  assert.deepEqual(resolveRouteRequestFailure(pending, firstContext), {
+    state: pending,
+    restoreContext: null,
+  });
+  assert.deepEqual(resolveRouteRequestFailure(pending, null), {
+    state: pending,
+    restoreContext: null,
+  });
+
+  const changedStart = { ...firstContext, start: { lat: 10.5, lng: 20.5 } };
+  const pendingA = beginRouteRequest(transition.state, changedStart);
+  assert.deepEqual(pendingA.pending, changedStart);
+  assert.deepEqual(pendingA.committed?.route, firstRoute);
 });
 
 test("replacement success atomically swaps route and identity", () => {

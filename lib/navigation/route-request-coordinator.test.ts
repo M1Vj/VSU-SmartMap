@@ -179,6 +179,52 @@ test("a failed replacement preserves the last successful route", async () => {
   assert.equal(events.filter((event) => event.startsWith("error:")).length, 1);
 });
 
+test("retiring a failed replacement can preserve its error feedback", async () => {
+  const { coordinator, events } = harness();
+
+  coordinator.start({ resolve: async () => "committed route" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  coordinator.start({
+    resolve: async () => {
+      throw new Error("replacement failed");
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const errorId = events.find((event) => event.startsWith("error:"))?.slice("error:".length);
+  assert.ok(errorId);
+
+  coordinator.start({
+    preservePublishedResult: true,
+    preserveActiveErrorToast: true,
+  });
+
+  assert.equal(events.filter((event) => event === `dismiss:${errorId}`).length, 0);
+});
+
+test("replacement effect cleanup hands failed feedback to the committed-route restore", async () => {
+  const { coordinator, events } = harness();
+
+  coordinator.start({ resolve: async () => "committed route" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const cleanupReplacement = coordinator.start({
+    preservePublishedResult: true,
+    resolve: async () => {
+      throw new Error("replacement failed");
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const errorId = events.find((event) => event.startsWith("error:"))?.slice("error:".length);
+  assert.ok(errorId);
+  cleanupReplacement();
+  coordinator.start({ preservePublishedResult: true, preserveActiveErrorToast: true });
+
+  assert.equal(events.filter((event) => event === `dismiss:${errorId}`).length, 0);
+});
+
 test("delayed old failure cannot clear or show an error after replacement", async () => {
   const { coordinator, events } = harness();
   const first = deferred<string>();

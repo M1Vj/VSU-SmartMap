@@ -117,6 +117,11 @@ test("selection transitions retain route owners and atomically cancel a replacem
   assert.match(page, /setNavEnd\(context\.end/);
   assert.match(page, /setNavigationOrigin\(context\.origin\)/);
   assert.match(page, /setNavMode\(context\.mode\)/);
+  assert.match(page, /setRouteCommitState\(\(state\) => beginRouteRequest\(state, context\)\)/);
+  const failureHandlerStart = page.indexOf("const handleRouteRequestFailed");
+  const failureHandlerEnd = page.indexOf("const claimRouteFoundAnnouncement", failureHandlerStart);
+  assert.ok(failureHandlerStart >= 0 && failureHandlerEnd > failureHandlerStart);
+  assert.doesNotMatch(page.slice(failureHandlerStart, failureHandlerEnd), /setTargetFacilityId/);
   assert.match(page, /cancelMapPerformance\("route_calculation"\)/);
   assert.match(routeState, /cancelPendingRouteReplacement/);
   assert.match(navigation, /sessionId: navigationSessionId/);
@@ -141,8 +146,33 @@ test("restoring a committed route retires the replacement without starting anoth
     navigation.match(/if \(reuseCommittedRoute\) \{([\s\S]*?)\n\s*\}/)?.[1] ?? "",
     /resolve:/,
   );
-  assert.match(coordinator, /if \(active\) cancel\(active\)/);
+  assert.match(coordinator, /if \(active\) cancel\(active/);
   assert.match(coordinator, /options\.resolve === undefined/);
+});
+
+test("failed replacements restore committed inputs and render only the parent-owned route", async () => {
+  const [page, navigation] = await Promise.all([
+    readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./navigation-layer.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const \[routeDestinationId, setRouteDestinationId\]/);
+  assert.match(page, /onRouteRequestFailed=\{handleRouteRequestFailed\}/);
+  assert.match(page, /restoreCommittedRouteContext/);
+  assert.match(page, /restoreCommittedRouteContext\(transition\.restoreContext, false\)/);
+  assert.match(page, /context\.start/);
+  assert.match(page, /context\.end/);
+  assert.match(page, /setNavigationOrigin\(context\.origin\)/);
+  assert.match(page, /setNavMode\(context\.mode\)/);
+  assert.match(page, /if \(navStart\?\.lat === routeStart\.lat && navStart\.lng === routeStart\.lng\) return/);
+  assert.match(page, /displayedRoute=\{committedRoute\?\.route \?\? null\}/);
+  assert.match(page, /destinationId=\{routeDestinationId\}/);
+  assert.match(navigation, /displayedRoute\?: PathResult \| null/);
+  assert.doesNotMatch(navigation, /const \[path, setPath\] = useState/);
+  assert.doesNotMatch(navigation, /setPath\(result\)/);
+  assert.match(navigation, /if \(!displayedRoute\) return null/);
+  assert.match(navigation, /displayedRoute\.path\.map/);
+  assert.match(navigation, /onRouteRequestFailed\?\.\(requestContextStore\.current\)/);
 });
 
 test("facility mini-card heading is inert and Details remains the only expansion control", async () => {

@@ -18,6 +18,7 @@ interface StartRouteRequest<Result> {
   onSuccess?: (id: string) => void;
   onError?: () => void;
   preservePublishedResult?: boolean;
+  preserveActiveErrorToast?: boolean;
   resolve?: (signal: AbortSignal) => Promise<Result>;
 }
 
@@ -29,6 +30,7 @@ interface ActiveRequest {
   toastType: "loading" | "success" | "error" | null;
   successToastTracked: boolean;
   isSuccessAnnounced?: () => boolean;
+  preserveErrorOnCleanup: boolean;
 }
 
 let nextToastId = 0;
@@ -38,16 +40,22 @@ export function createRouteRequestCoordinator<Result>(
 ) {
   let active: ActiveRequest | null = null;
   let hasPublishedResult = false;
+  let preservedErrorToastId: string | null = null;
 
-  const cancel = (request: ActiveRequest) => {
+  const cancel = (
+    request: ActiveRequest,
+    { preserveActiveErrorToast = false }: { preserveActiveErrorToast?: boolean } = {},
+  ) => {
     request.controller.abort();
     if (request.toastVisible) {
       const preserveSuccess =
         request.toastType === "success" &&
         (request.successToastTracked ||
           (request.sessionId !== undefined && request.isSuccessAnnounced?.() === true));
-      if (preserveSuccess) {
+      const preserveError = preserveActiveErrorToast && request.toastType === "error";
+      if (preserveSuccess || preserveError) {
         request.toastVisible = false;
+        if (preserveError) preservedErrorToastId = request.id;
         return;
       }
 
@@ -58,7 +66,11 @@ export function createRouteRequestCoordinator<Result>(
 
   return {
     start(options: StartRouteRequest<Result>): () => void {
-      if (active) cancel(active);
+      if (!options.preserveActiveErrorToast && preservedErrorToastId) {
+        callbacks.dismiss(preservedErrorToastId);
+        preservedErrorToastId = null;
+      }
+      if (active) cancel(active, { preserveActiveErrorToast: options.preserveActiveErrorToast });
 
       const request: ActiveRequest = {
         controller: new AbortController(),
@@ -68,6 +80,7 @@ export function createRouteRequestCoordinator<Result>(
         toastType: null,
         successToastTracked: false,
         isSuccessAnnounced: options.isSuccessAnnounced,
+        preserveErrorOnCleanup: options.preservePublishedResult === true && hasPublishedResult,
       };
       active = request;
       const preservePublishedResult =
@@ -125,7 +138,7 @@ export function createRouteRequestCoordinator<Result>(
 
       return () => {
         if (active !== request) return;
-        cancel(request);
+        cancel(request, { preserveActiveErrorToast: request.preserveErrorOnCleanup });
         active = null;
       };
     },

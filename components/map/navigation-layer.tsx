@@ -32,8 +32,9 @@ interface NavigationLayerProps {
   releaseRouteFoundAnnouncement?: () => void;
   navigationOrigin?: RouteRequestContext["origin"];
   reuseCommittedRoute?: boolean;
+  displayedRoute?: PathResult | null;
   onRouteRequest?: (context: RouteRequestContext | null) => void;
-  onRouteRequestFailed?: () => void;
+  onRouteRequestFailed?: (context: RouteRequestContext | null) => void;
   onRoutesFound?: (routes: PathResult[], context?: RouteRequestContext) => void;
 }
 
@@ -52,14 +53,13 @@ export function NavigationLayer({
   releaseRouteFoundAnnouncement,
   navigationOrigin = null,
   reuseCommittedRoute = false,
+  displayedRoute = null,
   onRouteRequest,
   onRouteRequestFailed,
   onRoutesFound,
 }: NavigationLayerProps) {
-  const [path, setPath] = useState<PathResult | null>(null);
   const [requestContextStore] = useState<{ current: RouteRequestContext | null }>(() => ({ current: null }));
   const publishRoute = useCallback((result: PathResult) => {
-    setPath(result);
     const context = requestContextStore.current;
     if (context) onRoutesFound?.([result], context);
   }, [onRoutesFound, requestContextStore]);
@@ -68,7 +68,6 @@ export function NavigationLayer({
       createRouteRequestCoordinator<PathResult>({
         clear: ({ preservePublishedResult = false } = {}) => {
           if (preservePublishedResult) return;
-          setPath(null);
           onRoutesFound?.([]);
         },
         publish: publishRoute,
@@ -91,6 +90,7 @@ export function NavigationLayer({
       return coordinator.start({
         sessionId: navigationSessionId,
         preservePublishedResult: true,
+        preserveActiveErrorToast: true,
       });
     }
 
@@ -311,28 +311,28 @@ export function NavigationLayer({
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
       onError: () => {
           releaseRouteFoundAnnouncement?.();
-          onRouteRequestFailed?.();
+          onRouteRequestFailed?.(requestContextStore.current);
         },
         preservePublishedResult: true,
         resolve: resolveRoute,
       });
   }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationOrigin, navigationSessionId, reuseCommittedRoute, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, onRouteRequest, onRouteRequestFailed, coordinator, requestContextStore]);
 
-  if (!path) return null;
+  if (!displayedRoute) return null;
 
   return (
     <>
       <Polyline
-        positions={path.path.map((node) => [node.lat, node.lng])}
+        positions={displayedRoute.path.map((node) => [node.lat, node.lng])}
         pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9 }}
       />
       <CircleMarker
-        center={[path.path[0].lat, path.path[0].lng]}
+        center={[displayedRoute.path[0].lat, displayedRoute.path[0].lng]}
         radius={6}
         pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1 }}
       />
       <CircleMarker
-        center={[path.path[path.path.length - 1].lat, path.path[path.path.length - 1].lng]}
+        center={[displayedRoute.path[displayedRoute.path.length - 1].lat, displayedRoute.path[displayedRoute.path.length - 1].lng]}
         radius={6}
         pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1 }}
       />
