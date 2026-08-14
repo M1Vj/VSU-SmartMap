@@ -16,7 +16,7 @@ import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { useApp } from "@/lib/context/app-context";
 import { useIsMobile } from "./use-is-mobile";
 import { startMapPerformance } from "@/lib/map/performance";
-import { shouldSuppressCompatibilityActivation, type MarkerActivation } from "@/lib/map/marker-activation";
+import { resolveMarkerActivation, type MarkerActivation } from "@/lib/map/marker-activation";
 
 type MapMarkerProps = {
   item: MapItem;
@@ -86,53 +86,68 @@ export function MapMarker({
   const markerRef = useRef<LeafletMarker>(null);
   const lastPointerTapRef = useRef<MarkerActivation | null>(null);
   const pendingTouchRef = useRef<MarkerActivation | null>(null);
+  const suppressNextKeyboardClickRef = useRef(false);
 
-  const handleMarkerTap = (event: LeafletMouseEvent) => {
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const originalEvent = event.originalEvent as MouseEvent & {
-      pointerType?: string;
-      sourceCapabilities?: { firesTouchEvents?: boolean } | null;
-    };
-    const pendingTouch = pendingTouchRef.current;
-    const samePendingPoint = pendingTouch && now - pendingTouch.at <= 500
-      ? Math.abs(pendingTouch.lat - event.latlng.lat) < 0.00001 &&
-        Math.abs(pendingTouch.lng - event.latlng.lng) < 0.00001
-      : false;
-    const pointerTouch = originalEvent.pointerType === "touch";
-    const firesTouchEvents = originalEvent.sourceCapabilities?.firesTouchEvents === true;
-    const isTouch = pointerTouch || samePendingPoint;
-    const isCompatibilityMouse = !pointerTouch && firesTouchEvents && !samePendingPoint;
-    const current: MarkerActivation = {
-      lat: event.latlng.lat,
-      lng: event.latlng.lng,
-      at: now,
-      input: isTouch ? "touch" : "mouse",
-      compatibility: isCompatibilityMouse,
-      activationId: pendingTouch?.activationId,
-    };
-
-    pendingTouchRef.current = null;
-
-    if (shouldSuppressCompatibilityActivation(lastPointerTapRef.current, current)) {
-      return;
-    }
-
-    lastPointerTapRef.current = current;
+  const activateMarker = (at: number) => {
     markerRef.current?.closeTooltip();
     if (onMarkerTapOverride) {
       onMarkerTapOverride(item);
       return;
     }
-    startMapPerformance("marker_first_interaction", now);
+    startMapPerformance("marker_first_interaction", at);
     onSelect?.(item);
+  };
+
+  const handleMarkerTap = (event: LeafletMouseEvent) => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const originalEvent = event.originalEvent as MouseEvent & {
+      pointerType?: string;
+      pointerId?: number;
+      changedTouches?: TouchList;
+      sourceCapabilities?: { firesTouchEvents?: boolean } | null;
+    };
+    const clickDetail = typeof originalEvent?.detail === "number" ? originalEvent.detail : null;
+    if (suppressNextKeyboardClickRef.current && (clickDetail === 0 || clickDetail === null)) {
+      suppressNextKeyboardClickRef.current = false;
+      return;
+    }
+    suppressNextKeyboardClickRef.current = false;
+    const resolved = resolveMarkerActivation({
+      lat: event.latlng.lat,
+      lng: event.latlng.lng,
+      at: now,
+      pointerType:
+        originalEvent.pointerType === "touch" || originalEvent.pointerType === "mouse"
+          ? originalEvent.pointerType
+          : undefined,
+      firesTouchEvents: originalEvent.sourceCapabilities?.firesTouchEvents,
+      activationId:
+        typeof originalEvent.pointerId === "number"
+          ? originalEvent.pointerId
+          : originalEvent.changedTouches?.[0]?.identifier,
+      previous: lastPointerTapRef.current,
+      pending: pendingTouchRef.current,
+    });
+
+    pendingTouchRef.current = null;
+
+    if (resolved.suppress) {
+      return;
+    }
+
+    lastPointerTapRef.current = resolved.activation;
+    activateMarker(now);
   };
 
   useEffect(() => {
     const element = markerRef.current?.getElement();
     if (!element) return;
 
-    const markTouch = (event: PointerEvent | TouchEvent) => {
-      if ("pointerType" in event && event.pointerType !== "touch") return;
+    const markPointer = (event: PointerEvent | TouchEvent) => {
+      const pointerType =
+        "pointerType" in event && (event.pointerType === "touch" || event.pointerType === "mouse")
+          ? event.pointerType
+          : "touch";
       const touch = "changedTouches" in event ? event.changedTouches[0] : null;
       const activationId = "pointerId" in event ? event.pointerId : touch?.identifier;
 
@@ -140,17 +155,18 @@ export function MapMarker({
         lat: displayCoordinates.lat,
         lng: displayCoordinates.lng,
         at: typeof performance !== "undefined" ? performance.now() : Date.now(),
-        input: "touch",
+        input: pointerType,
         compatibility: false,
+        awaitingCompatibility: pointerType === "touch",
         activationId: typeof activationId === "number" ? activationId : undefined,
       };
     };
 
-    element.addEventListener("pointerdown", markTouch as EventListener, { passive: true });
-    element.addEventListener("touchstart", markTouch as EventListener, { passive: true });
+    element.addEventListener("pointerdown", markPointer as EventListener, { passive: true });
+    element.addEventListener("touchstart", markPointer as EventListener, { passive: true });
     return () => {
-      element.removeEventListener("pointerdown", markTouch as EventListener);
-      element.removeEventListener("touchstart", markTouch as EventListener);
+      element.removeEventListener("pointerdown", markPointer as EventListener);
+      element.removeEventListener("touchstart", markPointer as EventListener);
     };
   }, [displayCoordinates.lat, displayCoordinates.lng, icon]);
 
@@ -230,12 +246,9 @@ export function MapMarker({
           const key = original?.key;
           if (key === "Enter" || key === " " || key === "Spacebar") {
             original?.preventDefault();
-            markerRef.current?.closeTooltip();
-            if (onMarkerTapOverride) {
-              onMarkerTapOverride(item);
-              return;
-            }
-            onSelect?.(item);
+            const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+            suppressNextKeyboardClickRef.current = true;
+            activateMarker(now);
           }
         },
         mouseout: () => {

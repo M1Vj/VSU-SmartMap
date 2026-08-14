@@ -414,6 +414,14 @@ import {
 } from "@/lib/navigation/manual-start";
 import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
 import {
+  beginRouteRequest,
+  clearRouteCommit,
+  commitRoute,
+  failRouteRequest,
+  type RouteCommitState,
+  type RouteRequestContext,
+} from "@/lib/navigation/route-commit-state";
+import {
   shouldClearRouteForMapSearch,
   shouldClearRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
@@ -467,7 +475,7 @@ function MapView({
   const [navMode, setNavMode] = useState<TransportMode>('walking');
   const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
   const [isManualStartPending, setIsManualStartPending] = useState(false);
-  const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
+  const [routeCommitState, setRouteCommitState] = useState<RouteCommitState>(clearRouteCommit);
   const [miniCardHeight, setMiniCardHeight] = useState(0);
   const [routeReportOpen, setRouteReportOpen] = useState(false);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
@@ -475,8 +483,12 @@ function MapView({
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
-  const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
-  const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
+  const committedRoute = routeCommitState.committed;
+  const hasActiveRoute = Boolean(committedRoute);
+  const displayedRoutes = committedRoute ? [committedRoute.route] : [];
+  const hasNavigationState = Boolean(
+    navStart || navEnd || isManualStartPending || committedRoute || routeCommitState.pending,
+  );
   const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
   const navigationControls = getNavigationControlsState({
     hasActiveRoute,
@@ -511,7 +523,7 @@ function MapView({
     setIsManualStartPending(false);
     setManualLocationRequestPending(false);
     setTargetFacilityId(undefined);
-    setAvailableRoutes([]);
+    setRouteCommitState(clearRouteCommit());
     setRouteReportOpen(false);
   }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
 
@@ -576,8 +588,17 @@ function MapView({
     }
   }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
 
-  const handleRoutesFound = useCallback((routes: PathResult[]) => {
-    setAvailableRoutes(routes);
+  const handleRouteRequest = useCallback((context: RouteRequestContext | null) => {
+    setRouteCommitState((state) => (context ? beginRouteRequest(state, context) : clearRouteCommit()));
+  }, []);
+
+  const handleRoutesFound = useCallback((routes: PathResult[], context?: RouteRequestContext) => {
+    if (!context || routes.length === 0) return;
+    setRouteCommitState((state) => commitRoute(state, context, routes[0]));
+  }, []);
+
+  const handleRouteRequestFailed = useCallback(() => {
+    setRouteCommitState((state) => failRouteRequest(state));
   }, []);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
@@ -687,7 +708,7 @@ function MapView({
               manualStartPending: isManualStartPending,
               pendingNavigation: Boolean(pendingNavigationFacility),
             })}
-            routeDestinationId={hasActiveRoute ? targetFacilityId ?? null : null}
+            routeDestinationId={committedRoute?.destinationId ?? null}
             minimizeNonDestinationMarkers={hasActiveRoute}
             onSelect={(item) => onSelect(item.id)}
             onMarkerTapOverride={isManualStartPending ? handleManualStartMarkerTap : undefined}
@@ -718,16 +739,19 @@ function MapView({
             <NavigationLayer
               startPoint={navStart} 
               endPoint={navEnd} 
-            destinationId={targetFacilityId}
+              destinationId={targetFacilityId}
               mode={navMode} 
               nodes={graphData.nodes}
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
               navigationSessionId={navigationSessionId}
+              navigationOrigin={navigationOrigin}
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
               releaseRouteFoundAnnouncement={releaseRouteFoundAnnouncement}
+              onRouteRequest={handleRouteRequest}
+              onRouteRequestFailed={handleRouteRequestFailed}
               onRoutesFound={handleRoutesFound}
             />
           )}
@@ -748,15 +772,15 @@ function MapView({
               </div>
             )}
 
-            {!isManualStartPending && availableRoutes[0] && (
+            {!isManualStartPending && displayedRoutes[0] && (
                 <div className="flex animate-in gap-3 rounded-full border bg-background/90 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground shadow-lg ring-1 ring-black/5 backdrop-blur fade-in slide-in-from-top-1">
                     <span className="flex items-center gap-1">
                         <Route className="h-3 w-3" />
-                        {availableRoutes[0].totalDistance.toFixed(0)}m
+                        {displayedRoutes[0].totalDistance.toFixed(0)}m
                     </span>
                     <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {availableRoutes[0].estimatedTime} min
+                        {displayedRoutes[0].estimatedTime} min
                     </span>
                 </div>
             )}
@@ -819,15 +843,21 @@ function MapView({
           open={routeReportOpen}
           onOpenChange={setRouteReportOpen}
           context={{
-            fromText: navigationOrigin === "live" ? "My location" : navigationOrigin === "manual" && navStart ? "Custom start pin" : null,
-            toText: selectedBoardingHouse?.name ?? selectedFacility?.name ?? null,
-            destinationId: targetFacilityId ?? selectedBoardingHouse?.id ?? selectedFacility?.id ?? null,
-            start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
-            end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
-            mode: navMode,
+            fromText: committedRoute?.origin === "live"
+              ? "My location"
+              : committedRoute?.origin === "manual"
+                ? "Custom start pin"
+                : null,
+            toText: committedRoute?.destinationId
+              ? filtered.find((item) => item.id === committedRoute.destinationId)?.name ?? "Selected destination"
+              : null,
+            destinationId: committedRoute?.destinationId ?? null,
+            start: committedRoute?.start ?? null,
+            end: committedRoute?.end ?? null,
+            mode: committedRoute?.mode ?? null,
             routeIndex: 0,
-            routeCount: availableRoutes.length,
-            totalDistanceMeters: availableRoutes[0]?.totalDistance ?? null,
+            routeCount: displayedRoutes.length,
+            totalDistanceMeters: committedRoute?.route.totalDistance ?? null,
           }}
         />
 

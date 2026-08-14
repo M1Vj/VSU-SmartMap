@@ -15,12 +15,14 @@ test("marker pointer/touch compatibility clicks are deduplicated without suppres
   const source = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
 
   assert.match(source, /lastPointerTapRef/);
-  assert.match(source, /shouldSuppressCompatibilityActivation/);
+  assert.match(source, /resolveMarkerActivation/);
   assert.match(source, /sourceCapabilities\?\.firesTouchEvents/);
   assert.match(source, /pointerdown/);
   assert.match(source, /touchstart/);
   assert.match(source, /click: handleMarkerTap/);
   assert.match(source, /keydown:/);
+  assert.match(source, /const activateMarker =/);
+  assert.match(source, /suppressNextKeyboardClickRef/);
 });
 
 test("route replacement does not clear the rendered path before a replacement result exists", async () => {
@@ -56,10 +58,32 @@ test("mobile route actions use measured mini-card clearance and retain 44px targ
   assert.match(page.slice(dockStart), /Report Route/);
   assert.match(card, /ResizeObserver/);
   assert.match(card, /onHeightChange/);
-  assert.match(card, /onHeightChange\(0\)/);
-  assert.match(card, /observer\.disconnect\(\)/);
+  assert.match(card, /onHeightChange\?\.\(0\)/);
+  assert.match(card, /observer\?\.disconnect\(\)/);
+  assert.match(card, /return resetHeightAndMetric/);
   assert.match(facility, /isBottomSheet \? "h-11 w-full/);
   assert.match(boarding, /isBottomSheet \? "h-11 w-full/);
+});
+
+test("route reports and destination markers stay coupled to the committed route during replacement", async () => {
+  const [page, routeState, navigation] = await Promise.all([
+    readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../lib/navigation/route-commit-state.ts", import.meta.url), "utf8"),
+    readFile(new URL("./navigation-layer.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const committedRoute = routeCommitState\.committed/);
+  assert.match(page, /routeDestinationId=\{committedRoute\?\.destinationId \?\? null\}/);
+  assert.match(page, /destinationId: committedRoute\?\.destinationId \?\? null/);
+  assert.match(page, /start: committedRoute\?\.start \?\? null/);
+  assert.match(page, /end: committedRoute\?\.end \?\? null/);
+  assert.match(page, /totalDistanceMeters: committedRoute\?\.route\.totalDistance \?\? null/);
+  assert.match(routeState, /beginRouteRequest/);
+  assert.match(routeState, /failRouteRequest/);
+  assert.match(routeState, /state\.pending && !routeContextsEqual/);
+  assert.match(navigation, /onRouteRequest\?:/);
+  assert.match(navigation, /onRouteRequestFailed\?:/);
+  assert.match(navigation, /onRoutesFound\?\.\(\[result\], context\)/);
 });
 
 test("facility mini-card heading is inert and Details remains the only expansion control", async () => {

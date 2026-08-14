@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, Polyline } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
 import type { LatLng } from "leaflet";
@@ -14,6 +14,7 @@ import {
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
 import { recordMapPerformance } from "@/lib/map/performance";
+import type { RouteRequestContext } from "@/lib/navigation/route-commit-state";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
 
 interface NavigationLayerProps {
@@ -29,7 +30,10 @@ interface NavigationLayerProps {
   claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
   registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
   releaseRouteFoundAnnouncement?: () => void;
-  onRoutesFound?: (routes: PathResult[]) => void;
+  navigationOrigin?: RouteRequestContext["origin"];
+  onRouteRequest?: (context: RouteRequestContext | null) => void;
+  onRouteRequestFailed?: () => void;
+  onRoutesFound?: (routes: PathResult[], context?: RouteRequestContext) => void;
 }
 
 export function NavigationLayer({
@@ -45,9 +49,18 @@ export function NavigationLayer({
   claimRouteFoundAnnouncement,
   registerRouteFoundAnnouncement,
   releaseRouteFoundAnnouncement,
+  navigationOrigin = null,
+  onRouteRequest,
+  onRouteRequestFailed,
   onRoutesFound,
 }: NavigationLayerProps) {
   const [path, setPath] = useState<PathResult | null>(null);
+  const [requestContextStore] = useState<{ current: RouteRequestContext | null }>(() => ({ current: null }));
+  const publishRoute = useCallback((result: PathResult) => {
+    setPath(result);
+    const context = requestContextStore.current;
+    if (context) onRoutesFound?.([result], context);
+  }, [onRoutesFound, requestContextStore]);
   const coordinator = useMemo(
     () =>
       createRouteRequestCoordinator<PathResult>({
@@ -56,17 +69,14 @@ export function NavigationLayer({
           setPath(null);
           onRoutesFound?.([]);
         },
-        publish: (result) => {
-          setPath(result);
-          onRoutesFound?.([result]);
-        },
+        publish: publishRoute,
         loading: (message, id) => toast.loading(message, { id }),
         success: (message, id) => toast.success(message, { id }),
         error: (message, id) => toast.error(message, { id }),
         dismiss: (id) => toast.dismiss(id),
         reportError: (error) => console.error("NavigationLayer: Process error", error),
       }),
-    [onRoutesFound],
+    [onRoutesFound, publishRoute],
   );
 
   useEffect(() => {
@@ -76,6 +86,15 @@ export function NavigationLayer({
         : () => hasRouteFoundAnnouncement(navigationSessionId);
 
     if (waitingForUserLocation) {
+      // eslint-disable-next-line react-hooks/immutability
+      requestContextStore.current = {
+        destinationId: destinationId ?? null,
+        start: null,
+        end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
+        mode,
+        origin: navigationOrigin,
+      };
+      onRouteRequest?.(requestContextStore.current);
       return coordinator.start({
         loadingMessage: "Waiting for user location...",
         sessionId: navigationSessionId,
@@ -84,8 +103,27 @@ export function NavigationLayer({
     }
 
     if (!startPoint || !endPoint || !nodes || nodes.length === 0 || !edges || edges.length === 0) {
+      requestContextStore.current = endPoint || destinationId
+        ? {
+            destinationId: destinationId ?? null,
+            start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
+            end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
+            mode,
+            origin: navigationOrigin,
+          }
+        : null;
+      onRouteRequest?.(requestContextStore.current);
       return coordinator.start({ sessionId: navigationSessionId, isSuccessAnnounced });
     }
+
+    requestContextStore.current = {
+      destinationId: destinationId ?? null,
+      start: { lat: startPoint.lat, lng: startPoint.lng },
+      end: { lat: endPoint.lat, lng: endPoint.lng },
+      mode,
+      origin: navigationOrigin,
+    };
+    onRouteRequest?.(requestContextStore.current);
 
     const makeNode = (id: string, point: { lat: number; lng: number }): MapNode => ({
       id,
@@ -257,11 +295,14 @@ export function NavigationLayer({
         navigationSessionId === undefined || !registerRouteFoundAnnouncement
           ? undefined
           : (toastId) => registerRouteFoundAnnouncement(navigationSessionId, toastId),
-      onError: releaseRouteFoundAnnouncement,
-      preservePublishedResult: true,
-      resolve: resolveRoute,
-    });
-  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator]);
+      onError: () => {
+          releaseRouteFoundAnnouncement?.();
+          onRouteRequestFailed?.();
+        },
+        preservePublishedResult: true,
+        resolve: resolveRoute,
+      });
+  }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, destinationId, navigationOrigin, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, onRouteRequest, onRouteRequestFailed, coordinator, requestContextStore]);
 
   if (!path) return null;
 

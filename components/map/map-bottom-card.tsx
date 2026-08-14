@@ -30,17 +30,20 @@ export function MapBottomCard({
   const cardRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (!isMobile || !item || !onHeightChange) {
+    const resetHeightAndMetric = () => {
       onHeightChange?.(0);
       cancelMapPerformance("marker_first_interaction");
-      return;
+    };
+
+    if (!isMobile || !item || !onHeightChange) {
+      resetHeightAndMetric();
+      return resetHeightAndMetric;
     }
 
     const card = cardRef.current;
     if (!card) {
-      onHeightChange(0);
-      cancelMapPerformance("marker_first_interaction");
-      return;
+      resetHeightAndMetric();
+      return resetHeightAndMetric;
     }
 
     const reportHeight = () => {
@@ -49,14 +52,11 @@ export function MapBottomCard({
       if (height > 0) completeMapPerformance("marker_first_interaction");
     };
     reportHeight();
-    if (typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(reportHeight);
-    observer.observe(card);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reportHeight);
+    observer?.observe(card);
     return () => {
-      observer.disconnect();
-      onHeightChange(0);
-      cancelMapPerformance("marker_first_interaction");
+      observer?.disconnect();
+      resetHeightAndMetric();
     };
   }, [isMobile, item, onHeightChange]);
 
