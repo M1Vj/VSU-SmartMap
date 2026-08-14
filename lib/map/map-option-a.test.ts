@@ -8,9 +8,10 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
 
   assert.match(pageSource, /data-map-status-hud/);
   assert.match(pageSource, /data-map-action-dock/);
-  assert.match(pageSource, /fixed inset-x-0 bottom-\[calc\(7\.25rem\+min\(42vh,22rem\)\+env\(safe-area-inset-bottom,0px\)\)\]/);
-  const statusStart = pageSource.indexOf("<div data-map-status-hud");
-  const actionStart = pageSource.indexOf("<div data-map-action-dock");
+  assert.match(pageSource, /fixed inset-x-0 bottom-\[calc\(6\.5rem\+var\(--map-mini-card-height,0px\)\+1rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
+  assert.match(pageSource, /--map-mini-card-height/);
+  const statusStart = pageSource.indexOf("data-map-status-hud");
+  const actionStart = pageSource.indexOf("data-map-action-dock");
   assert.ok(statusStart >= 0 && actionStart > statusStart);
   assert.match(pageSource.slice(statusStart, actionStart), /aria-label="Use my location as route start"/);
   assert.match(pageSource.slice(statusStart, actionStart), /aria-label="Start route from main gate"/);
@@ -22,6 +23,10 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   const dockSource = pageSource.slice(actionStart);
   assert.equal((dockSource.match(/className="h-11/g) ?? []).length >= 2, true);
   assert.match(cardSource, /bottom-\[calc\(7\.25rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
+  assert.match(cardSource, /ResizeObserver/);
+  assert.match(cardSource, /onHeightChange/);
+  assert.match(cardSource, /observer\.disconnect\(\)/);
+  assert.match(cardSource, /onHeightChange\?\.\(0\)/);
   assert.match(cardSource, /role="dialog"/);
 });
 

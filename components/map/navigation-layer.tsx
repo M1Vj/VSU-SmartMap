@@ -20,6 +20,15 @@ import {
   getRouteGraphRevision,
   isPreparedNodeNavigable,
 } from "@/lib/pathfinding/route-engine";
+import type { NavigationOrigin, NavigationPoint } from "@/lib/map/map-runtime";
+
+export interface NavigationRequestMetadata {
+  destinationId: string | undefined;
+  origin: NavigationOrigin;
+  mode: TransportMode;
+  start: NavigationPoint | null;
+  end: NavigationPoint | null;
+}
 
 interface NavigationLayerProps {
   startPoint: LatLng | null;
@@ -36,10 +45,11 @@ interface NavigationLayerProps {
   claimRouteFoundAnnouncement?: (sessionId: number) => boolean;
   registerRouteFoundAnnouncement?: (sessionId: number, toastId: string) => void;
   releaseRouteFoundAnnouncement?: () => void;
-  onRouteCommitted?: (route: PathResult, requestId: number) => void;
+  onRouteCommitted?: (route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => void;
   onRouteFailed?: (message: string, requestId: number) => void;
   onRouteRequestStarted?: (requestId: number) => void;
   committedRoute?: PathResult | null;
+  navigationOrigin?: NavigationOrigin | null;
 }
 
 export function NavigationLayer({
@@ -61,6 +71,7 @@ export function NavigationLayer({
   onRouteFailed,
   onRouteRequestStarted,
   committedRoute = null,
+  navigationOrigin = null,
 }: NavigationLayerProps) {
   const routeEngine = useMemo(() => createRouteEngine(), []);
   const coordinator = useMemo(
@@ -68,7 +79,15 @@ export function NavigationLayer({
       createRouteRequestCoordinator<PathResult>({
         clear: () => undefined,
         publish: (result, requestId) => {
-          if (requestId !== undefined) onRouteCommitted?.(result, requestId);
+          if (requestId !== undefined) {
+            onRouteCommitted?.(result, requestId, {
+              destinationId,
+              origin: navigationOrigin ?? (waitingForUserLocation ? "live" : "manual"),
+              mode,
+              start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
+              end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
+            });
+          }
         },
         loading: (message, id) => toast.loading(message, { id }),
         success: (message, id) => toast.success(message, { id }),
@@ -83,7 +102,17 @@ export function NavigationLayer({
         },
         requestStarted: (requestId) => onRouteRequestStarted?.(requestId),
       }),
-    [onRouteCommitted, onRouteFailed, onRouteRequestStarted],
+    [
+      destinationId,
+      endPoint,
+      mode,
+      navigationOrigin,
+      onRouteCommitted,
+      onRouteFailed,
+      onRouteRequestStarted,
+      startPoint,
+      waitingForUserLocation,
+    ],
   );
 
   useEffect(() => {

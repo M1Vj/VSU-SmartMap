@@ -154,3 +154,70 @@ test("runtime controls distinguish replacement cancellation from committed-route
   state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
   assert.equal(state.presentation.controls.primaryAction, "clear");
 });
+
+test("replacement keeps the committed route snapshot authoritative until atomic success", () => {
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-old",
+    origin: "live",
+    mode: "walking",
+    start: { lat: 10, lng: 10 },
+    end: { lat: 10.1, lng: 10.1 },
+  });
+  state = mapRuntimeReducer(state, { type: "navigation/committed", requestId: 1, route });
+
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-new",
+    origin: "manual",
+    mode: "driving",
+    start: { lat: 11, lng: 11 },
+    end: { lat: 11.1, lng: 11.1 },
+  });
+
+  assert.equal(state.navigation.committed?.destinationId, "facility-old");
+  assert.equal(state.navigation.committed?.origin, "live");
+  assert.equal(state.navigation.committed?.mode, "walking");
+  assert.deepEqual(state.navigation.committed?.start, { lat: 10, lng: 10 });
+  assert.equal(state.navigation.request?.destinationId, "facility-new");
+  assert.equal(state.navigation.request?.origin, "manual");
+  assert.equal(state.navigation.request?.mode, "driving");
+
+  state = mapRuntimeReducer(state, { type: "navigation/failed", requestId: 2, message: "provider unavailable" });
+  assert.equal(state.navigation.committed?.destinationId, "facility-old");
+  assert.equal(state.navigation.request?.destinationId, "facility-new");
+
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 3,
+    destinationId: "facility-new",
+    origin: "manual",
+    mode: "driving",
+    start: { lat: 11, lng: 11 },
+    end: { lat: 11.1, lng: 11.1 },
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 3,
+    route: { ...route, totalDistance: 250 },
+  });
+  assert.equal(state.navigation.committed?.destinationId, "facility-new");
+  assert.equal(state.navigation.committed?.origin, "manual");
+  assert.equal(state.navigation.committed?.mode, "driving");
+  assert.equal(state.navigation.committed?.route.totalDistance, 250);
+
+  const stale = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 1,
+    route: { ...route, totalDistance: 999 },
+  });
+  assert.equal(stale.navigation.committed?.destinationId, "facility-new");
+  assert.equal(stale.navigation.committed?.route.totalDistance, 250);
+
+  state = mapRuntimeReducer(state, { type: "navigation/cleared" });
+  assert.equal(state.navigation.committed, null);
+  assert.equal(state.navigation.request, null);
+});

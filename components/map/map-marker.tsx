@@ -14,6 +14,13 @@ import { MapPopupCard } from "./map-popup-card";
 import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
 import { useApp } from "@/lib/context/app-context";
 import { useIsMobile } from "./use-is-mobile";
+import {
+  createPointerActivation,
+  isPointerTap,
+  shouldDedupeCompatibilityClick,
+  type PointerActivation,
+  type PointerActivationEvent,
+} from "@/lib/map/pointer-activation";
 
 type MapMarkerProps = {
   item: MapItem;
@@ -86,8 +93,11 @@ export function MapMarker({
   const compatibilityActivationRef = useRef<{
     activationId: string;
     modality: "mouse" | "touch" | "pen" | "keyboard";
+    pointerId: number | null;
     at: number;
   } | null>(null);
+  const pointerActivationRef = useRef<PointerActivation | null>(null);
+  const cancelledPointerAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     const marker = markerRef.current;
@@ -140,22 +150,45 @@ export function MapMarker({
     if (!marker || !element || !onMarkerActivate) return;
 
     const handlePointerDown = (event: PointerEvent) => {
+      pointerActivationRef.current = createPointerActivation(item.id, event as PointerActivationEvent);
       element.setPointerCapture?.(event.pointerId);
     };
     const handlePointerUp = (event: PointerEvent) => {
+      const activation = pointerActivationRef.current;
+      pointerActivationRef.current = null;
+      if (!activation || !isPointerTap(activation, event as PointerActivationEvent)) {
+        cancelledPointerAtRef.current = Date.now();
+        element.releasePointerCapture?.(event.pointerId);
+        return;
+      }
       const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
-      const activationId = compatibilityActivationRef.current?.activationId ?? `${item.id}:pointer:${event.pointerId}:${event.timeStamp}`;
-      compatibilityActivationRef.current = { activationId, modality, at: Date.now() };
+      const activationId = activation.activationId;
+      compatibilityActivationRef.current = { activationId, modality, pointerId: event.pointerId, at: Date.now() };
       markerRef.current?.closeTooltip();
       onMarkerActivate(item, activationId, modality);
       element.releasePointerCapture?.(event.pointerId);
     };
+    const handlePointerCancel = () => {
+      pointerActivationRef.current = null;
+      cancelledPointerAtRef.current = Date.now();
+    };
+    const handleLostPointerCapture = () => {
+      if (pointerActivationRef.current) {
+        pointerActivationRef.current = null;
+        cancelledPointerAtRef.current = Date.now();
+      }
+    };
 
     element.addEventListener("pointerdown", handlePointerDown);
     element.addEventListener("pointerup", handlePointerUp);
+    element.addEventListener("pointercancel", handlePointerCancel);
+    element.addEventListener("lostpointercapture", handleLostPointerCapture);
     return () => {
       element.removeEventListener("pointerdown", handlePointerDown);
       element.removeEventListener("pointerup", handlePointerUp);
+      element.removeEventListener("pointercancel", handlePointerCancel);
+      element.removeEventListener("lostpointercapture", handleLostPointerCapture);
+      pointerActivationRef.current = null;
     };
   }, [item, onMarkerActivate]);
 
@@ -187,7 +220,16 @@ export function MapMarker({
         click: (event) => {
           markerRef.current?.closeTooltip();
           const original = (event as { originalEvent?: MouseEvent & { pointerId?: number; pointerType?: string } }).originalEvent;
-          const compatibility = compatibilityActivationRef.current && Date.now() - compatibilityActivationRef.current.at < 1500
+          const cancelledAt = cancelledPointerAtRef.current;
+          if (cancelledAt !== null && Date.now() - cancelledAt < 700) {
+            cancelledPointerAtRef.current = null;
+            return;
+          }
+          const compatibility = compatibilityActivationRef.current && shouldDedupeCompatibilityClick(
+            compatibilityActivationRef.current,
+            { pointerId: original?.pointerId, detail: original?.detail },
+            Date.now(),
+          )
             ? compatibilityActivationRef.current
             : null;
           compatibilityActivationRef.current = null;
@@ -208,7 +250,7 @@ export function MapMarker({
             original?.preventDefault();
             markerRef.current?.closeTooltip();
             const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
-            compatibilityActivationRef.current = { activationId, modality: "keyboard", at: Date.now() };
+            compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
             onMarkerActivate?.(item, activationId, "keyboard");
             if (onMarkerActivate) return;
             if (onMarkerTapOverride) {
