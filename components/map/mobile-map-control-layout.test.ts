@@ -54,8 +54,11 @@ test("small mobile popup clearance leaves a usable scrollable surface", async ()
     readFile(new URL("./map-marker-popup-shell.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, 128\]\}/);
-  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, 248\]\}/);
+  assert.match(markerSource, /computePopupAutoPanPadding/);
+  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, popupAutoPanPadding\.top\]\}/);
+  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, popupAutoPanPadding\.bottom\]\}/);
+  assert.match(markerSource, /ResizeObserver/);
+  assert.match(markerSource, /data-map-popup-obstacle/);
   assert.match(
     shellSource,
     /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
@@ -65,4 +68,30 @@ test("small mobile popup clearance leaves a usable scrollable surface", async ()
   const viewportHeight = 568;
   const fixedPopupClearance = 376;
   assert.ok(viewportHeight - fixedPopupClearance >= 192);
+});
+
+test("selected marker clearance observes only the selected marker and cleans up every listener", async () => {
+  const markerSource = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
+
+  assert.match(markerSource, /if \(!isSelected\)/);
+  assert.match(markerSource, /resizeObserver\.disconnect\(\)/);
+  assert.match(markerSource, /window\.addEventListener\("resize"/);
+  assert.match(markerSource, /window\.removeEventListener\("resize"/);
+  assert.match(markerSource, /map\.on\("resize"/);
+  assert.match(markerSource, /map\.off\("resize"/);
+  assert.match(markerSource, /\[isSelected, isRouteDestination/);
+});
+
+test("map obstacle tags cover top search/status and bottom floating controls", async () => {
+  const pageSource = await readFile(
+    new URL("../../app/(student)/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok((pageSource.match(/data-map-popup-obstacle="top"/g) ?? []).length >= 2);
+  assert.ok((pageSource.match(/data-map-popup-obstacle="bottom"/g) ?? []).length >= 4);
+  assert.match(
+    pageSource,
+    /data-map-popup-obstacle="bottom"[\s\S]{0,220}left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\][\s\S]{0,220}h-11 w-11/,
+  );
 });

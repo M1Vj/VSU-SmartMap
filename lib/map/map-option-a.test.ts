@@ -153,11 +153,29 @@ test("anchored popup auto-pan and height contracts protect compact mobile viewpo
     readFile(new URL("../../components/map/map-marker-popup-shell.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, 128\]\}/);
-  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, 248\]\}/);
+  assert.match(markerSource, /computePopupAutoPanPadding/);
+  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, popupAutoPanPadding\.top\]\}/);
+  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, popupAutoPanPadding\.bottom\]\}/);
   assert.match(
     shellSource,
     /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
   );
   assert.match(shellSource, /min-h-0 overflow-y-auto/);
+});
+
+test("selected popup clearance measures tagged obstacles and cleans up its single lifecycle", async () => {
+  const [markerSource, helperSource] = await Promise.all([
+    readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./map-popup-clearance.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(markerSource, /useMap/);
+  assert.match(markerSource, /const obstacleSelector = .*data-map-popup-obstacle/);
+  assert.match(markerSource, /new ResizeObserver/);
+  assert.match(markerSource, /resizeObserver\.disconnect\(\)/);
+  assert.match(markerSource, /window\.removeEventListener\("resize"/);
+  assert.match(markerSource, /map\.off\("resize"/);
+  assert.match(markerSource, /isRouteDestination/);
+  assert.match(helperSource, /top = Math\.max\(top,/);
+  assert.match(helperSource, /bottom = Math\.max\(bottom,/);
 });

@@ -357,7 +357,10 @@ function MapTab() {
       tabIndex={0}
     >
       <div className="relative flex-1 w-full overflow-hidden">
-        <div className="absolute right-4 top-[4.5rem] z-[1000]">
+        <div
+          data-map-popup-obstacle="top"
+          className="absolute right-4 top-[4.5rem] z-[1000]"
+        >
           <div className="flex flex-col items-end gap-2">
             <MapSearchPanel
               items={items}
@@ -372,7 +375,10 @@ function MapTab() {
         {/* Floating Action Button (Submit) */}
         {/* Preserve the same gap above mobile tabs on home-indicator devices. */}
         {/* Desktop remains bottom-8 */}
-        <div className="absolute right-6 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-30 md:right-8 md:bottom-8">
+        <div
+          data-map-popup-obstacle="bottom"
+          className="absolute right-6 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-30 md:right-8 md:bottom-8"
+        >
           <Button
             type="button"
             size="default"
@@ -1072,6 +1078,11 @@ function MapView({
               }
               geo={geo}
           />
+          <div
+            aria-hidden="true"
+            data-map-popup-obstacle="bottom"
+            className="pointer-events-none absolute left-[12px] bottom-[calc(160px+env(safe-area-inset-bottom))] h-11 w-11 md:bottom-[80px]"
+          />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (
           <NavigationLayer
@@ -1100,7 +1111,11 @@ function MapView({
         </MapContainerClient>
 
         {hasHydrated && routeFacingEnd && (
-          <div data-map-status-hud className="pointer-events-none absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
+          <div
+            data-map-status-hud
+            data-map-popup-obstacle="top"
+            className="pointer-events-none absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2"
+          >
             {navigationControls.statusText && (
               <div
                 className="rounded-full border bg-background/95 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg ring-1 ring-black/5 backdrop-blur"
@@ -1160,6 +1175,7 @@ function MapView({
         {hasHydrated && routeFacingEnd && (
           <div
             data-map-action-dock
+            data-map-popup-obstacle="bottom"
             className="pointer-events-none fixed inset-x-0 bottom-[calc(120px+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
           >
             {runtimeState.presentation.controls.primaryAction !== "none" && (
@@ -1194,7 +1210,10 @@ function MapView({
         />
 
         {!hasResults && !error && !isLoading && hasActiveFilters && (
-          <div className="pointer-events-none absolute bottom-[calc(6.5rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur md:bottom-12">
+          <div
+            data-map-popup-obstacle="bottom"
+            className="pointer-events-none absolute bottom-[calc(6.5rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur md:bottom-12"
+          >
             <p className="text-sm font-medium text-foreground">No locations found.</p>
           </div>
         )}

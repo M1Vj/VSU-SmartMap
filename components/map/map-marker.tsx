@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo, useEffect, useRef, useCallback, useState } from "react";
-import { Marker, Tooltip, Popup } from "@/components/map/leaflet-react";
+import { Marker, Tooltip, Popup, useMap } from "@/components/map/leaflet-react";
 import { divIcon, type DivIcon, type Marker as LeafletMarker } from "leaflet";
 import {
   getPinAssetForCategory,
@@ -36,6 +36,12 @@ import {
   recordMapEvidenceEvent,
   registerDestinationMarkerForEvidence,
 } from "@/lib/map/e2e-probe-bridge";
+import {
+  computePopupAutoPanPadding,
+  DEFAULT_POPUP_BOTTOM_PADDING,
+  DEFAULT_POPUP_TOP_PADDING,
+  type PopupObstacleRect,
+} from "@/lib/map/map-popup-clearance";
 
 type MapMarkerProps = {
   item: MapItem;
@@ -65,6 +71,7 @@ export const MapMarker = memo(function MapMarker({
   onDirections,
 }: MapMarkerProps) {
   const { setFacilitySheetOpen } = useApp();
+  const map = useMap();
   const isMinimized = !isRouteDestination && (forceMinimized || zoom < 16);
   // Label shows only at high zoom and ONLY if NOT selected (avoids redundancy)
   const showSideLabel = zoom >= 18.5 && !isSelected && !forceMinimized;
@@ -124,6 +131,10 @@ export const MapMarker = memo(function MapMarker({
   const popupFocusFrameRef = useRef<number | null>(null);
   const markerRestoreFrameRef = useRef<number | null>(null);
   const markerRestoreGenerationRef = useRef(0);
+  const [popupAutoPanPadding, setPopupAutoPanPadding] = useState({
+    top: DEFAULT_POPUP_TOP_PADDING,
+    bottom: DEFAULT_POPUP_BOTTOM_PADDING,
+  });
   const popupLifecycle = useMemo(() => createMarkerPopupLifecycleController(), []);
 
   const cancelPopupOpen = useCallback(() => {
@@ -297,6 +308,63 @@ export const MapMarker = memo(function MapMarker({
       typeof performance === "undefined" ? Date.now() : performance.now(),
     );
   }, [isSelected]);
+
+  useEffect(() => {
+    if (!isSelected || onMarkerTapOverride) {
+      setPopupAutoPanPadding({
+        top: DEFAULT_POPUP_TOP_PADDING,
+        bottom: DEFAULT_POPUP_BOTTOM_PADDING,
+      });
+      return;
+    }
+
+    const mapContainer = map.getContainer();
+    const obstacleSelector = '[data-map-popup-obstacle="top"], [data-map-popup-obstacle="bottom"]';
+    const measurePopupClearance = () => {
+      if (typeof document === "undefined") return;
+      const mapRect = mapContainer.getBoundingClientRect();
+      const obstacles = Array.from(
+        document.querySelectorAll<HTMLElement>(obstacleSelector),
+      ).flatMap((element): PopupObstacleRect[] => {
+        const side = element.dataset.mapPopupObstacle;
+        if (side !== "top" && side !== "bottom") return [];
+        const rect = element.getBoundingClientRect();
+        return [{ side, top: rect.top, bottom: rect.bottom }];
+      });
+      setPopupAutoPanPadding(
+        computePopupAutoPanPadding({
+          mapRect,
+          obstacles,
+        }),
+      );
+    };
+
+    measurePopupClearance();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(measurePopupClearance);
+    resizeObserver?.observe(mapContainer);
+    document.querySelectorAll<HTMLElement>(obstacleSelector).forEach((element) => {
+      resizeObserver?.observe(element);
+    });
+    const handleWindowResize = () => measurePopupClearance();
+    const handleMapResize = () => measurePopupClearance();
+    window.addEventListener("resize", handleWindowResize);
+    map.on("resize", handleMapResize);
+
+    return () => {
+      if (resizeObserver) resizeObserver.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+      map.off("resize", handleMapResize);
+    };
+  }, [isSelected, isRouteDestination, onMarkerTapOverride, map]);
+
+  useEffect(() => {
+    const popup = readyMarker?.getPopup();
+    if (!popup) return;
+    popup.options.autoPanPaddingTopLeft = [12, popupAutoPanPadding.top];
+    popup.options.autoPanPaddingBottomRight = [12, popupAutoPanPadding.bottom];
+  }, [popupAutoPanPadding, readyMarker]);
 
   useEffect(() => {
     const marker = markerRef.current;
@@ -544,8 +612,8 @@ export const MapMarker = memo(function MapMarker({
           closeButton={false}
           closeOnEscapeKey={false}
           autoPan
-          autoPanPaddingTopLeft={[12, 128]}
-          autoPanPaddingBottomRight={[12, 248]}
+          autoPanPaddingTopLeft={[12, popupAutoPanPadding.top]}
+          autoPanPaddingBottomRight={[12, popupAutoPanPadding.bottom]}
         >
           <MapMarkerPopupShell
             label={accessibleName}
