@@ -41,6 +41,7 @@ import {
 } from "@/lib/map/facility-marker-list";
 import { toast } from "sonner";
 import { VSU_MAIN_GATE } from "@/lib/constants/map";
+import { cn } from "@/lib/utils";
 import {
   createMapRuntimeController,
   getRouteFacingEndpoint,
@@ -377,7 +378,10 @@ function MapTab() {
           <Button
             type="button"
             size="default"
-            className="gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5"
+            className={cn(
+              "gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
+              (selectedFacility || selectedBoardingHouse) && "hidden md:inline-flex",
+            )}
             onClick={() => setSuggestOpen(true)}
             title="Submit a location"
             data-tour="map-submit"
@@ -1005,7 +1009,10 @@ function MapView({
   }, [isManualStartPending, resolveManualStart]);
 
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      style={{ "--map-mini-card-height": `${mapBottomCardHeight}px` } as CSSProperties}
+    >
       <div className="relative h-full w-full overflow-hidden">
         <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
@@ -1049,6 +1056,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
+              className="left-[12px] bottom-[calc(10rem+var(--map-mini-card-height,0px)+env(safe-area-inset-bottom))] md:bottom-[80px]"
               destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 

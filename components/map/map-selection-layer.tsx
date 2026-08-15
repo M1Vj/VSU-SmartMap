@@ -22,6 +22,7 @@ const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const MAP_INTERACTIVE_SELECTOR = [
+  "[data-map-control]",
   ".leaflet-control",
   ".leaflet-marker-icon",
   ".leaflet-popup",
