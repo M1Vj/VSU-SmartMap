@@ -28,7 +28,7 @@ test("facility popup actions use explicit 44px button semantics", () => {
   const buttons = markup.match(/<button\b[^>]*>/g) ?? [];
   assert.equal(buttons.length, 2);
   assert.equal(buttons.every((button) => /type="button"/.test(button)), true);
-  assert.equal(buttons.every((button) => /h-11/.test(button) && /min-h-11/.test(button)), true);
+  assert.equal(buttons.every((button) => /h-auto/.test(button) && /min-h-11/.test(button)), true);
   assert.equal(buttons.every((button) => /min-w-\[6\.5rem\]/.test(button)), true);
   assert.match(markup, /Details/);
   assert.match(markup, /Navigate/);
@@ -41,6 +41,9 @@ test("facility popup no longer contains bottom-sheet or fake loading behavior", 
   assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
   assert.match(source, /className="flex w-full flex-wrap gap-2"/);
   assert.equal((source.match(/min-w-\[6\.5rem\] flex-1/g) ?? []).length, 2);
+  assert.equal((source.match(/h-auto min-h-11/g) ?? []).length, 2);
+  assert.equal((source.match(/whitespace-normal/g) ?? []).length, 2);
+  assert.equal((source.match(/leading-tight/g) ?? []).length, 3);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

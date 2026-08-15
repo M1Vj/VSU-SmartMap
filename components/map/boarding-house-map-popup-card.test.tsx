@@ -60,11 +60,11 @@ test("boarding popup keeps Details as a semantic link and Navigate as a 44px but
   const links = markup.match(/<a\b[^>]*>/g) ?? [];
   assert.equal(buttons.length, 1);
   assert.match(buttons[0], /type="button"/);
-  assert.match(buttons[0], /h-11/);
+  assert.match(buttons[0], /h-auto/);
   assert.match(buttons[0], /min-h-11/);
   assert.match(buttons[0], /min-w-\[6\.5rem\]/);
   assert.match(markup, /<a\b[^>]*href="\/boarding-houses\/boarding-1"/);
-  assert.match(markup, /<a\b[^>]*class="[^"\n]*h-11[^"\n]*min-h-11/);
+  assert.match(markup, /<a\b[^>]*class="[^"\n]*h-auto[^"\n]*min-h-11/);
   assert.equal(links.every((link) => /min-w-\[6\.5rem\]/.test(link)), true);
   assert.match(markup, /pr-10/);
 });
@@ -77,8 +77,14 @@ test("boarding popup has no bottom-sheet or timer-based action behavior", async 
   assert.match(source, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
   assert.match(source, /className="flex w-full flex-wrap gap-2"/);
-  assert.match(source, /<Link[^>]*className="min-w-\[6\.5rem\] flex-1"/);
-  assert.match(source, /min-w-\[6\.5rem\] flex-1 gap-2 bg-blue-600/);
+  assert.match(source, /<Link[^>]*className="min-w-\[6\.5rem\] flex-1 whitespace-normal text-center leading-tight"/);
+  assert.match(
+    source,
+    /h-auto min-h-11 min-w-\[6\.5rem\] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight bg-blue-600/,
+  );
+  assert.equal((source.match(/h-auto min-h-11/g) ?? []).length, 2);
+  assert.equal((source.match(/whitespace-normal/g) ?? []).length, 3);
+  assert.equal((source.match(/leading-tight/g) ?? []).length >= 2, true);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

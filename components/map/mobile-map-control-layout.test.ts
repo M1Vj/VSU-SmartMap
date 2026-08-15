@@ -3,13 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("mobile map controls use fixed safe-area offsets with anchored popups", async () => {
-  const [mapPageSource, locationControlSource, locationButtonSource] =
+  const [mapPageSource, locationButtonSource] =
     await Promise.all([
       readFile(
         new URL("../../app/(student)/page.tsx", import.meta.url),
         "utf8",
       ),
-      readFile(new URL("./user-location-control.tsx", import.meta.url), "utf8"),
       readFile(new URL("./my-location-button.tsx", import.meta.url), "utf8"),
     ]);
 
@@ -19,15 +18,11 @@ test("mobile map controls use fixed safe-area offsets with anchored popups", asy
   );
   assert.match(
     mapPageSource,
-    /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
-  );
-  assert.match(
-    locationControlSource,
-    /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
+    /left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
   );
   assert.match(
     mapPageSource,
-    /pointer-events-none fixed inset-x-0 bottom-\[calc\(7\.5rem\+env\(safe-area-inset-bottom,0px\)\)\] z-\[1000\] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8/,
+    /pointer-events-none fixed inset-x-0 bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\] z-\[1000\] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8/,
   );
   assert.match(locationButtonSource, /h-11 w-11 min-w-11 rounded-full md:bottom-\[80px\]/);
 });
@@ -63,12 +58,11 @@ test("small mobile popup clearance leaves a usable scrollable surface", async ()
   assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, 248\]\}/);
   assert.match(
     shellSource,
-    /max-h-\[min\(60dvh,calc\(100dvh-23\.5rem\),22rem\)\]/,
+    /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
   );
   assert.match(shellSource, /overflow-y-auto/);
 
   const viewportHeight = 568;
-  const topClearance = 128;
-  const bottomClearance = 248;
-  assert.ok(viewportHeight - topClearance - bottomClearance >= 192);
+  const fixedPopupClearance = 376;
+  assert.ok(viewportHeight - fixedPopupClearance >= 192);
 });

@@ -21,8 +21,9 @@ test("renders a labelled non-modal popup shell with a reachable close control", 
   assert.match(markup, /aria-label="Close DASS popup"/);
   assert.match(markup, /data-map-popup-first-control="true"/);
   assert.match(markup, /h-11 w-11/);
-  assert.match(markup, /max-h-/);
+  assert.match(markup, /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/);
   assert.match(markup, /overflow-y-auto/);
+  assert.ok(568 - 376 >= 192);
 });
 
 test("Escape is owned by the popup while other keys pass through", () => {

@@ -11,8 +11,8 @@ test("Option A keeps status and actions clear of the anchored popup surface", as
   assert.match(pageSource, /data-map-action-dock/);
   assert.doesNotMatch(pageSource, /MapBottomCard|mapBottomCardHeight|--map-mini-card-height/);
   assert.doesNotMatch(pageSource, /onHeightChange=\{setMapBottomCardHeight\}/);
-  assert.match(pageSource, /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\]/);
-  assert.match(pageSource, /pointer-events-none fixed inset-x-0 bottom-\[calc\(7\.5rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
+  assert.match(pageSource, /left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(pageSource, /pointer-events-none fixed inset-x-0 bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\]/);
   const statusStart = pageSource.indexOf("data-map-status-hud");
   const actionStart = pageSource.indexOf("data-map-action-dock");
   assert.ok(statusStart >= 0 && actionStart > statusStart);
@@ -32,8 +32,8 @@ test("Option A keeps status and actions clear of the anchored popup surface", as
   assert.match(selectionSource, /"map-ready"/);
   assert.match(selectionSource, /map\.whenReady\(/);
   assert.match(selectionSource, /requestAnimationFrame\(/);
-  assert.match(facilityPopupSource, /h-11 min-h-11 min-w-\[6\.5rem\] flex-1/);
-  assert.match(boardingPopupSource, /h-11 min-h-11 min-w-\[6\.5rem\] flex-1/);
+  assert.match(facilityPopupSource, /h-auto min-h-11 min-w-\[6\.5rem\] flex-1/);
+  assert.match(boardingPopupSource, /h-auto min-h-11 min-w-\[6\.5rem\] flex-1/);
   assert.match(facilityPopupSource, /onDirections\?: \(\) => number \| null;/);
   assert.match(boardingPopupSource, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(facilityPopupSource, /layout\?:|bottom-sheet/);
@@ -157,7 +157,7 @@ test("anchored popup auto-pan and height contracts protect compact mobile viewpo
   assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, 248\]\}/);
   assert.match(
     shellSource,
-    /max-h-\[min\(60dvh,calc\(100dvh-23\.5rem\),22rem\)\]/,
+    /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
   );
   assert.match(shellSource, /min-h-0 overflow-y-auto/);
 });

@@ -1063,7 +1063,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              className="left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-[80px]"
+              className="left-[12px] bottom-[calc(160px+env(safe-area-inset-bottom))] md:bottom-[80px]"
               destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 
@@ -1160,7 +1160,7 @@ function MapView({
         {hasHydrated && routeFacingEnd && (
           <div
             data-map-action-dock
-            className="pointer-events-none fixed inset-x-0 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(120px+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
           >
             {runtimeState.presentation.controls.primaryAction !== "none" && (
               <Button
