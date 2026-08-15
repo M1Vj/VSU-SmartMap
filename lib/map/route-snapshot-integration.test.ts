@@ -111,19 +111,24 @@ test("route adapter allocates fresh IDs for calculations and forwards metadata",
 test("navigation keeps destination geometry honest and renders only the committed route", async () => {
   const source = await readFile(new URL("../../components/map/navigation-layer.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /import \{ shouldAppendRequestedEndpoint \} from "@\/lib\/navigation\/route-endpoint"/);
+  assert.match(source, /getRenderableRouteEndpoints,[\s\S]{0,100}shouldAppendRequestedEndpoint[\s\S]{0,100}from "@\/lib\/navigation\/route-endpoint"/);
   assert.match(source, /const snappedEndNode = preparedGraph\.nodeById\.get\(endNodeId\)/);
   assert.match(source, /const destinationHasBuildingEntries = Boolean\(targetId && preparedGraph\.buildingEntriesById\.has\(targetId\)\)/);
   assert.match(source, /shouldAppendRequestedEndpoint\(\{[\s\S]{0,220}destinationHasBuildingEntries[\s\S]{0,220}snappedNodeType: snappedEndNode\?\.type/);
   assert.match(source, /if \(shouldAppendRequestedEndpoint\([\s\S]{0,260}finalPath\.push\(endNode\)/);
 
   assert.match(source, /if \(!committedRoute\) return null/);
+  assert.match(source, /const routeEndpoints = getRenderableRouteEndpoints\(committedRoute\.path\)/);
+  assert.match(source, /if \(!routeEndpoints\) return null/);
   assert.match(source, /positions=\{committedRoute\.path\.map/);
   assert.doesNotMatch(source, /positions=\{path\.map/);
+  assert.doesNotMatch(source, /committedRoute\.path\[0\]/);
+  assert.doesNotMatch(source, /committedRoute\.path\[committedRoute\.path\.length - 1\]/);
+  assert.match(source, /center=\{\[routeEndpoints\.start\.lat, routeEndpoints\.start\.lng\]\}/);
+  assert.match(source, /center=\{\[routeEndpoints\.end\.lat, routeEndpoints\.end\.lng\]\}/);
   assert.match(source, /className: "map-route-line"/);
   assert.match(source, /className: "map-route-start"/);
   assert.match(source, /className: "map-route-end"/);
-  assert.match(source, /committedRoute\.path\[committedRoute\.path\.length - 1\]/);
 });
 
 test("route request identity stays coordinator-owned after calculation starts", async () => {

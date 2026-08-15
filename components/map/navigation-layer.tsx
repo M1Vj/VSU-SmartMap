@@ -13,7 +13,10 @@ import {
 } from "@/lib/pathfinding/transition-gates";
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
-import { shouldAppendRequestedEndpoint } from "@/lib/navigation/route-endpoint";
+import {
+  getRenderableRouteEndpoints,
+  shouldAppendRequestedEndpoint,
+} from "@/lib/navigation/route-endpoint";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
 import {
   createRouteEngine,
@@ -321,6 +324,8 @@ export function NavigationLayer({
   }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, reuseCommittedRoute, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
 
   if (!committedRoute) return null;
+  const routeEndpoints = getRenderableRouteEndpoints(committedRoute.path);
+  if (!routeEndpoints) return null;
 
   return (
     <>
@@ -329,12 +334,12 @@ export function NavigationLayer({
         pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9, className: "map-route-line" }}
       />
       <CircleMarker
-        center={[committedRoute.path[0].lat, committedRoute.path[0].lng]}
+        center={[routeEndpoints.start.lat, routeEndpoints.start.lng]}
         radius={6}
         pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1, className: "map-route-start" }}
       />
       <CircleMarker
-        center={[committedRoute.path[committedRoute.path.length - 1].lat, committedRoute.path[committedRoute.path.length - 1].lng]}
+        center={[routeEndpoints.end.lat, routeEndpoints.end.lng]}
         radius={6}
         pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1, className: "map-route-end" }}
       />
