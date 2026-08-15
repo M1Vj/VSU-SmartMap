@@ -99,6 +99,64 @@ test("keeps co-located groups at their centroid below fan-out zoom", () => {
   assert.equal(spread[0].displayCoordinates.lng, 124.7920000005);
 });
 
+test("keeps one stable render entry per source item below fan-out zoom", () => {
+  const source = [
+    item("library", 10.7468, 124.7955),
+    item("admin", 10.7471, 124.7956),
+    item("gate", 10.7445, 124.7923),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 15);
+
+  assert.deepEqual(
+    spread.map(({ item: renderedItem }) => renderedItem.id),
+    source.map(({ id }) => id),
+  );
+  assert.deepEqual(
+    spread.map(({ trueCoordinates }) => trueCoordinates),
+    source.map(({ coordinates }) => coordinates),
+  );
+  assert.equal(spread.length, source.length);
+});
+
+test("keeps selected and destination items at true coordinates at overview zoom", () => {
+  const source = [
+    item("selected", 10.745, 124.792),
+    item("destination", 10.7450001, 124.7920001),
+    item("nearby-a", 10.7450002, 124.7920002),
+    item("nearby-b", 10.7450003, 124.7920003),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 15, {
+    protectedIds: new Set(["selected", "destination"]),
+  });
+
+  assert.equal(spread.length, source.length);
+  assert.deepEqual(spread.find(({ item: renderedItem }) => renderedItem.id === "selected")?.displayCoordinates, source[0].coordinates);
+  assert.deepEqual(spread.find(({ item: renderedItem }) => renderedItem.id === "destination")?.displayCoordinates, source[1].coordinates);
+  assert.deepEqual(
+    spread.map(({ item: renderedItem }) => renderedItem.id),
+    source.map(({ id }) => id),
+  );
+});
+
+test("keeps every item at true coordinates when all marker IDs are protected", () => {
+  const source = [
+    item("facility-a", 10.745, 124.792),
+    item("facility-b", 10.7450001, 124.7920001),
+    item("facility-c", 10.7450002, 124.7920002),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 15, {
+    protectedIds: new Set(source.map(({ id }) => id)),
+  });
+
+  assert.deepEqual(
+    spread.map(({ displayCoordinates }) => displayCoordinates),
+    source.map(({ coordinates }) => coordinates),
+  );
+});
+
 test("same-building pins stay true at campus zoom and fan only when the ring is honest", () => {
   // Real case: a department pin ~5m from its college pin. At campus zoom a
   // fan ring would displace pins ~50m, so they stay put (click-to-zoom

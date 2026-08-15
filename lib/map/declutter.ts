@@ -1,7 +1,7 @@
 import type { LatLng } from "@/lib/types/common";
 
-export const FAN_OUT_MIN_ZOOM = 16;
-export const OVERLAP_THRESHOLD_PIXELS = 34;
+const FAN_OUT_MIN_ZOOM = 16;
+const OVERLAP_THRESHOLD_PIXELS = 34;
 // Fan-out regime only: never group pins farther apart than one building
 // footprint — a larger pixel-derived tolerance chains unrelated buildings
 // into one ring far from their true locations. Below FAN_OUT_MIN_ZOOM the
@@ -18,7 +18,7 @@ const BASE_RADIUS_PIXELS = 24;
 const EARTH_METERS_PER_DEGREE = 111_320;
 const EQUATOR_METERS_PER_PIXEL = 156_543.03392;
 
-export type DeclutterableItem = {
+type DeclutterableItem = {
   readonly id: string;
   readonly coordinates: LatLng;
 };
@@ -44,6 +44,7 @@ export type SpreadCoLocatedItem<T extends DeclutterableItem> = {
 export function spreadCoLocatedItems<T extends DeclutterableItem>(
   items: readonly T[],
   zoom: number,
+  options: { readonly protectedIds?: ReadonlySet<string> } = {},
 ): SpreadCoLocatedItem<T>[] {
   const output = items.map((item) => ({
     item,
@@ -52,6 +53,7 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
   }));
 
   const zoomBucket = Math.floor(zoom);
+  const protectedIds = options.protectedIds ?? EMPTY_PROTECTED_IDS;
   const lat = averageLatitude(items);
   const overlapDegrees = getPixelsAsDegrees(
     OVERLAP_THRESHOLD_PIXELS,
@@ -66,17 +68,17 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
           lat: Math.min(overlapDegrees.lat, buildingDegrees.lat),
           lng: Math.min(overlapDegrees.lng, buildingDegrees.lng),
         };
-  const groups = groupItemsByDistance(items, toleranceDegrees);
+  const groups = groupOverlappingItems(items, toleranceDegrees);
 
   for (const group of groups) {
-    if (group.length < 2) {
-      continue;
-    }
-
-    const centroid = getCentroid(group.map(({ item }) => item.coordinates));
-
     if (zoomBucket < FAN_OUT_MIN_ZOOM) {
-      for (const member of group) {
+      const declutterableMembers = group.filter(({ item }) => !protectedIds.has(item.id));
+      if (declutterableMembers.length < 2) {
+        continue;
+      }
+
+      const centroid = getCentroid(declutterableMembers.map(({ item }) => item.coordinates));
+      for (const member of declutterableMembers) {
         output[member.index] = {
           ...output[member.index],
           displayCoordinates: centroid,
@@ -84,6 +86,12 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
       }
       continue;
     }
+
+    if (group.length < 2) {
+      continue;
+    }
+
+    const centroid = getCentroid(group.map(({ item }) => item.coordinates));
 
     const orderedGroup = [...group].sort((a, b) => a.item.id.localeCompare(b.item.id));
     const radiusPixels = Math.max(
@@ -110,7 +118,7 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
   return output;
 }
 
-export function groupItemsByDistance<T extends DeclutterableItem>(
+function groupOverlappingItems<T extends DeclutterableItem>(
   items: readonly T[],
   tolerance: LatLng,
 ): IndexedItem<T>[][] {
@@ -143,7 +151,7 @@ function areCoordinatesNear(a: LatLng, b: LatLng, tolerance: LatLng) {
   );
 }
 
-export function getCentroid(coordinates: readonly LatLng[]): LatLng {
+function getCentroid(coordinates: readonly LatLng[]): LatLng {
   const total = coordinates.reduce(
     (sum, coordinate) => ({
       lat: sum.lat + coordinate.lat,
@@ -176,7 +184,7 @@ function getMetersAsDegrees(meters: number, lat: number): LatLng {
   };
 }
 
-export function getPixelsAsDegrees(pixels: number, lat: number, zoomBucket: number): LatLng {
+function getPixelsAsDegrees(pixels: number, lat: number, zoomBucket: number): LatLng {
   const latitudeScale = Math.max(0.1, Math.cos((lat * Math.PI) / 180));
   const metersPerPixel = (EQUATOR_METERS_PER_PIXEL * latitudeScale) / 2 ** zoomBucket;
   const meters = pixels * metersPerPixel;
@@ -186,3 +194,5 @@ export function getPixelsAsDegrees(pixels: number, lat: number, zoomBucket: numb
     lng: meters / (EARTH_METERS_PER_DEGREE * latitudeScale),
   };
 }
+
+const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
