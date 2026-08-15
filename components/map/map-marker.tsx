@@ -288,14 +288,16 @@ export const MapMarker = memo(function MapMarker({
     const element = readyMarker?.getElement();
     if (!element) return;
     const evidenceKind = item.kind === "boarding_house" ? "boarding" : "facility";
+    element.dataset.mapItemId = item.id;
     element.dataset.mapItemKind = evidenceKind;
     if (isRouteDestination) element.dataset.mapRouteDestination = "true";
     else delete element.dataset.mapRouteDestination;
     return () => {
+      if (element.dataset.mapItemId === item.id) delete element.dataset.mapItemId;
       if (element.dataset.mapItemKind === evidenceKind) delete element.dataset.mapItemKind;
       if (element.dataset.mapRouteDestination === "true") delete element.dataset.mapRouteDestination;
     };
-  }, [isRouteDestination, item.kind, readyMarker]);
+  }, [isRouteDestination, item.id, item.kind, readyMarker]);
 
   useEffect(() => {
     if (hideTooltip) {

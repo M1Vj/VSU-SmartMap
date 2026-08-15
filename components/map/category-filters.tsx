@@ -49,11 +49,12 @@ export function CategoryFilters({
           variant="outline"
           size="sm"
           className={cn(
-            "h-8 shrink-0 rounded-full bg-background/95 px-3 text-xs shadow-lg ring-1 ring-black/5 backdrop-blur",
+            "h-11 min-w-11 md:h-8 md:min-w-0 shrink-0 rounded-full bg-background/95 px-3 text-xs shadow-lg ring-1 ring-black/5 backdrop-blur",
             triggerClassName,
           )}
           aria-label={`${ariaLabelPrefix}: ${selectedLabel}`}
           data-tour="map-filters"
+          data-map-control="map-filters"
         >
           <ListFilter className="h-3.5 w-3.5" />
           Filters

@@ -37,6 +37,25 @@ test("map controls are excluded from background gesture arbitration", async () =
   assert.match(locationButtonSource, /data-map-control="my-location"/);
 });
 
+test("mobile floating map controls expose 44px hit areas without changing desktop sizing", async () => {
+  const [wrapperSource, pageSource, filtersSource, locationSource] = await Promise.all([
+    readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./category-filters.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./my-location-button.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(
+    wrapperSource,
+    /@media \(max-width: 768px\)[\s\S]*?\.map-wrapper \.leaflet-control-zoom a[\s\S]*?min-width: 44px[\s\S]*?min-height: 44px/,
+  );
+  assert.match(filtersSource, /h-11 min-w-11 md:h-8 md:min-w-0/);
+  assert.match(pageSource, /h-11 min-w-11 md:h-9 md:min-w-0/);
+  assert.match(pageSource, /data-tour="map-submit"/);
+  assert.match(locationSource, /h-11 w-11 min-w-11/);
+  assert.match(pageSource, /data-map-action-dock[\s\S]{0,1500}h-11 min-w-11/);
+});
+
 test("selected mobile popups keep Submit Location out of the action surface", async () => {
   const pageSource = await readFile(
     new URL("../../app/(student)/page.tsx", import.meta.url),

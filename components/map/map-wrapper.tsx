@@ -159,6 +159,17 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
           .map-wrapper .leaflet-bottom.leaflet-right {
             margin-bottom: calc(var(--student-mobile-nav-height) + env(safe-area-inset-bottom, 0px));
           }
+
+          .map-wrapper .leaflet-control-zoom a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            min-width: 44px;
+            height: 44px;
+            min-height: 44px;
+            line-height: 44px;
+          }
         }
       `}</style>
       <MapContainer

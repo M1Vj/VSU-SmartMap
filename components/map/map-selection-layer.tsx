@@ -6,6 +6,7 @@ import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-vie
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
+import { focusConnectedMarker } from "@/lib/map/marker-focus";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
 import { shouldHandleMapSelectionEscape } from "@/lib/map/popup-lifecycle";
 import { markMapPerformance } from "@/lib/map/performance-marks";
@@ -142,6 +143,12 @@ export function MapSelectionLayer({
   const backgroundCancelledAtRef = useRef<number | null>(null);
   const acceptedMarkerActivationsRef = useRef<Set<string>>(new Set());
   const acceptedBackgroundActivationsRef = useRef<Set<string>>(new Set());
+  const keyboardSelectedMarkerIdRef = useRef<string | null>(null);
+  const escapeFocusFrameRef = useRef<number | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  const onClearSelectionRef = useRef(onClearSelection);
+  selectedIdRef.current = selectedId;
+  onClearSelectionRef.current = onClearSelection;
   const mapReadyStartedAtRef = useRef(
     typeof performance === "undefined" ? Date.now() : performance.now(),
   );
@@ -163,6 +170,11 @@ export function MapSelectionLayer({
   useEffect(() => () => {
     acceptedMarkerActivationsRef.current.clear();
     acceptedBackgroundActivationsRef.current.clear();
+    if (escapeFocusFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(escapeFocusFrameRef.current);
+    }
+    escapeFocusFrameRef.current = null;
+    keyboardSelectedMarkerIdRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -209,11 +221,17 @@ export function MapSelectionLayer({
   }), [map]);
 
   const handleMarkerActivate = useCallback((item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => {
+    keyboardSelectedMarkerIdRef.current = modality === "keyboard" ? item.id : null;
     interactionGateway.dispatch({ type: "marker", itemId: item.id, activationId, modality });
     if (rememberAcceptedActivation(acceptedMarkerActivationsRef.current, activationId)) {
       recordMapEvidenceEvent("marker-activation", activationId, modality);
     }
   }, [interactionGateway]);
+  useEffect(() => {
+    if (keyboardSelectedMarkerIdRef.current !== selectedId) {
+      keyboardSelectedMarkerIdRef.current = null;
+    }
+  }, [selectedId]);
   const handleMarkerSelect = useCallback((item: MapItem) => {
     interactionRegistry.marker(item.id);
   }, [interactionRegistry]);
@@ -389,17 +407,41 @@ export function MapSelectionLayer({
   }, [handlePlainMapInteraction, map]);
 
   useEffect(() => {
-    if (!selectedId) return;
-
     const handleKeyDown = (event: KeyboardEvent) => {
+      const currentSelectedId = selectedIdRef.current;
+      if (!currentSelectedId) return;
       if (shouldHandleMapSelectionEscape(event)) {
-        onClearSelection?.();
+        const keyboardMarkerId = keyboardSelectedMarkerIdRef.current;
+        const restoreMarkerId = keyboardMarkerId === currentSelectedId ? currentSelectedId : null;
+        onClearSelectionRef.current?.();
+
+        if (!restoreMarkerId) return;
+
+        const restoreFocus = () => {
+          escapeFocusFrameRef.current = null;
+          const markerElements = map
+            .getContainer()
+            .querySelectorAll<HTMLElement>(".leaflet-marker-icon");
+          focusConnectedMarker(markerElements, restoreMarkerId);
+        };
+
+        if (typeof requestAnimationFrame === "function") {
+          escapeFocusFrameRef.current = requestAnimationFrame(restoreFocus);
+        } else {
+          queueMicrotask(restoreFocus);
+        }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClearSelection, selectedId]);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (escapeFocusFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(escapeFocusFrameRef.current);
+      }
+      escapeFocusFrameRef.current = null;
+    };
+  }, [map]);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

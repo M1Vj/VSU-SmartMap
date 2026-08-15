@@ -383,12 +383,13 @@ function MapTab() {
             type="button"
             size="default"
             className={cn(
-              "gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
+              "h-11 min-w-11 md:h-9 md:min-w-0 gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
               (selectedFacility || selectedBoardingHouse) && "hidden md:inline-flex",
             )}
             onClick={() => setSuggestOpen(true)}
             title="Submit a location"
             data-tour="map-submit"
+            data-map-control="submit-location"
           >
             <Plus className="h-5 w-5" />
             <span className="hidden md:inline">Submit Location</span>
