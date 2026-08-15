@@ -65,7 +65,7 @@ The existing action buttons do not require two clicks by design. The exact first
 - For keyboard activation, focus moves to the first popup control; closing returns focus to the originating marker when it still exists.
 - Pointer activation does not force a disruptive focus jump.
 - Escape closes the popup without creating a navigation request or clearing an active route.
-- All button controls use explicit `type="button"` and preserve disabled/loading semantics. A Details action that navigates to a boarding-house route remains a semantic link.
+- All button controls use explicit `type="button"`. Popup actions do not invent timer-based loading; accepted navigation closes the popup and the existing route-status UI owns progress, while a rejected navigation intent leaves the enabled popup available for retry. A Details action that navigates to a boarding-house route remains a semantic link.
 
 ## Route spatial-integrity contract
 
@@ -236,7 +236,7 @@ Feature: Broad map spatial and interaction integrity
 
 - Pure declutter tests prove protected true coordinates below, at, and above the fan-out threshold and across integer zoom buckets.
 - Pointer/gateway tests cover touch compatibility clicks, mouse, pen, keyboard, cancellation, non-primary input, and exact-once action dispatch.
-- Popup component tests cover facility and boarding-house rendering, explicit button types or semantic links as appropriate, accessible labels, 44-pixel mobile targets, loading/disabled behavior, and title inertness.
+- Popup component tests cover facility and boarding-house rendering, explicit button types or semantic links as appropriate, accessible labels, 44-pixel mobile targets, absence of fake timer loading, and title inertness.
 - Map integration tests cover single-popup ownership, direct selection transfer, destination and non-destination close semantics, committed-route preservation, auto-pan configuration, bounded popup height/overflow, and removal of the mobile bottom card.
 - Zoom-controller tests prove that neither `SmoothWheelZoom` nor `SmoothZoomControl` is mounted in a map surface, native Leaflet wheel zoom is enabled, no basemap mode uses the private `_move` controller, and reduced-motion/native paths are bounded.
 - Route/runtime tests cover active, refreshing, replacement, failure, stale completion, clear, and basemap-switch presentation.

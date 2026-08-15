@@ -521,13 +521,17 @@ rtk git commit -m "fix(map): preserve honest committed route endpoints"
 
 ### Task 4: Build the shared accessible popup shell and close-reason rule
 
-**Dependencies:** Task 3 approved. **Owner/checkpoint:** one popup-primitives worker owns both cards, shell, scoped popup CSS, and pure close tests; commit, spec review, and code-quality review must pass before Task 5.
+**Dependencies:** Task 3 approved. **Owner/checkpoint:** one popup-primitives worker owns both cards, shell, scoped popup CSS, and pure close tests; commit, spec review, and code-quality review must pass before Task 5. This checkpoint approves only reusable primitives and card semantics; Task 5 owns the callback return-type migration, marker lifecycle, focus transfer, exact-once integration, and A-to-B ownership proof.
 
 **Files:**
 - Create: `lib/map/popup-close.ts`
 - Create: `lib/map/popup-close.test.ts`
+- Create: `lib/map/popup-action.ts`
+- Create: `lib/map/popup-action.test.ts`
 - Create: `components/map/map-marker-popup-shell.tsx`
 - Create: `components/map/map-marker-popup-shell.test.tsx`
+- Create: `components/map/map-popup-card.test.tsx`
+- Create: `components/map/boarding-house-map-popup-card.test.tsx`
 - Modify: `components/map/map-popup-card.tsx`
 - Modify: `components/map/boarding-house-map-popup-card.tsx`
 - Modify: `app/globals.css`
@@ -664,7 +668,6 @@ Remove both `layout` props and every bottom-sheet branch. Facility actions becom
     size="sm"
     className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
     onClick={handleDirections}
-    loading={loading}
   >
     <Route className="h-3 w-3" aria-hidden />
     Navigate
@@ -672,7 +675,7 @@ Remove both `layout` props and every bottom-sheet branch. Facility actions becom
 </div>
 ```
 
-Change both card contracts to `onDirections?: () => number | null`; a request ID means the parent accepted a navigation intent, while `null`/`undefined` means the popup must remain open. The card does not invent acceptance from a timer.
+Keep both card contracts as `onDirections?: () => void` in this primitives checkpoint so existing callers continue to typecheck. Task 5 atomically changes the complete `MapMarker` → registry → page callback chain to `() => number | null`; a request ID then means the parent accepted a navigation intent, while `null` means the popup remains open. The card does not invent acceptance or progress from a timer.
 
 Give the first header row in both cards `pr-10` so names, badges, and images cannot sit beneath the shell's absolute 44px close control. Keep the action row full width.
 
@@ -694,30 +697,36 @@ Reset Leaflet's default content margin only for this popup class so the shell's 
 
 Keep the global hidden `.leaflet-popup-close-button` rule because the shell supplies the single visible close control. Extend `map-option-a.test.ts` to assert these two scoped selectors and that no unscoped Leaflet popup width/margin override was added.
 
-Use this exact same-task guard in both cards so a second compatibility callback from one physical activation cannot invoke `onDirections`, without showing a fake timer-based loading state:
+Use a production-used pure helper in `lib/map/popup-action.ts` so the same-task guard can be executed under `node:test` without a DOM renderer:
 
-```tsx
-const directionsPendingRef = useRef(false);
+```ts
+export type MutableFlag = { current: boolean };
 
-const handleDirections = () => {
-  if (directionsPendingRef.current) return;
-  directionsPendingRef.current = true;
+export function runMapPopupActionOnce(
+  pending: MutableFlag,
+  action: () => void,
+) {
+  if (pending.current) return false;
+  pending.current = true;
   try {
-    onDirections?.();
+    action();
+    return true;
   } finally {
     queueMicrotask(() => {
-      directionsPendingRef.current = false;
+      pending.current = false;
     });
   }
-};
+}
 ```
 
-Import `useRef` and remove the obsolete fake `loading` state. Boarding-house Details remains `<Link href={`/boarding-houses/${listing.slug}`}>`; its Navigate button uses this same guard and 44px contract.
+Each card keeps one `useRef(false)` and calls `runMapPopupActionOnce(directionsPendingRef, () => onDirections?.())`. Remove the obsolete fake `loading` state. Boarding-house Details remains `<Link href={`/boarding-houses/${listing.slug}`}>`; its Navigate button uses this same guard and 44px contract.
+
+Add render tests for both cards. They must prove that facility Details/Navigate and boarding Navigate are explicit `type="button"` controls with `h-11 min-h-11`, boarding Details remains a semantic link with the same 44px minimum, both header rows reserve `pr-10`, and no `setTimeout` or fake loading state remains. In `popup-action.test.ts`, call the production helper twice synchronously and prove the callback runs once, then prove a later task can run it again. The real browser matrix in Task 7 owns computed-size and 200% text-scale bounds.
 
 - [ ] **Step 7: Run popup unit/source GREEN**
 
 ```bash
-rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/popup-close.test.ts components/map/map-marker-popup-shell.test.tsx lib/map/map-option-a.test.ts
+rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/popup-close.test.ts lib/map/popup-action.test.ts components/map/map-marker-popup-shell.test.tsx components/map/map-popup-card.test.tsx components/map/boarding-house-map-popup-card.test.tsx lib/map/map-option-a.test.ts
 ```
 
 Expected: all new pure/render tests PASS; title source has no action handler and boarding Details remains a link.
@@ -725,7 +734,7 @@ Expected: all new pure/render tests PASS; title source has no action handler and
 - [ ] **Step 8: Commit the popup primitives**
 
 ```bash
-rtk git add app/globals.css components/map/boarding-house-map-popup-card.tsx components/map/map-marker-popup-shell.test.tsx components/map/map-marker-popup-shell.tsx components/map/map-popup-card.tsx lib/map/map-option-a.test.ts lib/map/popup-close.test.ts lib/map/popup-close.ts
+rtk git add app/globals.css components/map/boarding-house-map-popup-card.test.tsx components/map/boarding-house-map-popup-card.tsx components/map/map-marker-popup-shell.test.tsx components/map/map-marker-popup-shell.tsx components/map/map-popup-card.test.tsx components/map/map-popup-card.tsx lib/map/map-option-a.test.ts lib/map/popup-action.test.ts lib/map/popup-action.ts lib/map/popup-close.test.ts lib/map/popup-close.ts
 rtk git commit -m "feat(map): add accessible anchored popup shell"
 ```
 
@@ -734,6 +743,8 @@ rtk git commit -m "feat(map): add accessible anchored popup shell"
 **Dependencies:** Task 4 approved. **Owner/checkpoint:** one popup-lifecycle worker owns `MapMarker`, selection/gateway integration, and selection-route reset behavior; commit, spec review, and code-quality review must pass before Task 6.
 
 **Files:**
+- Create: `lib/map/popup-lifecycle.ts`
+- Create: `lib/map/popup-lifecycle.test.ts`
 - Modify: `components/map/map-marker.tsx`
 - Modify: `components/map/map-markers.tsx`
 - Modify: `components/map/map-markers.test.ts`
@@ -761,6 +772,8 @@ assert.match(markerSource, /autoPanPaddingBottomRight/);
 
 Extend interaction tests with A-to-B marker activation followed by A popup close and assert the gateway emits marker B once and no background event.
 
+Create a production-used pure controller in `lib/map/popup-lifecycle.ts` and execute it in `popup-lifecycle.test.ts` with fake marker, focus, selection, and background callbacks. The controller owns an open-selection token and close guard; a token resets only after that marker is no longer selected and can therefore reject duplicate callbacks before React commits. Execute these invariants: keyboard open requests first-control focus while pointer open does not; Escape/custom Close delivered twice for the same token closes and dismisses once, returns focus once, and produces zero document/background events; a `defaultPrevented` Escape is ignored by the document-selection predicate; activating B while A is open closes A as `selection-transfer`, opens B once, and emits no deselect/background/route-clear action; Navigate returning `null` leaves the popup open with zero request/feedback/close, while a request ID closes once and forwards that same identity. Deliver a repeated compatibility callback for one physical activation and prove Details/Navigate still invoke once. Task 7 verifies the corresponding DOM focus and physical-input behavior in a real browser.
+
 Add a route-preservation regression to `lib/navigation/selection-route-reset.test.ts`:
 
 ```ts
@@ -779,32 +792,24 @@ test("dismissing a popup does not infer that an active route should clear", () =
 - [ ] **Step 2: Run lifecycle tests and capture RED**
 
 ```bash
-rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/map-option-a.test.ts lib/map/interaction-gateway.test.ts components/map/map-markers.test.ts
+rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/popup-lifecycle.test.ts lib/map/map-option-a.test.ts lib/map/interaction-gateway.test.ts components/map/map-markers.test.ts
 ```
 
 Expected: FAIL because mobile is gated, the shell is absent, and popup close captures stale `isSelected`.
 
-- [ ] **Step 3: Add close-reason and modality refs**
+- [ ] **Step 3: Add the production lifecycle controller and modality ref**
 
-In `MapMarker`, add:
+Implement `createMarkerPopupLifecycleController()` in `lib/map/popup-lifecycle.ts` and use that exact controller from `MapMarker`. Its public operations must cover `selectionChanged(isSelected)`, `opened(modality, focusFirstControl)`, `close(reason, effects)`, and `navigate(action, effects)`. `close` returns whether it accepted the close token. `navigate` must acquire its attempt guard before invoking `action: () => number | null`; a synchronous duplicate therefore never invokes the parent callback. A `null` result schedules release of only the attempt guard so a later genuine retry remains possible and does not close; a request ID permanently accepts that open token, forwards the exact ID to its feedback effect, and closes once. The controller, not a React render timing assumption, prevents a second Close/Escape/action callback for the same selected-open token. `selectionChanged(false)` retires that token so a later genuine selection can open and close normally.
+
+In `MapMarker`, keep the latest selection and modality available to the controller:
 
 ```ts
 const selectedRef = useRef(isSelected);
 selectedRef.current = isSelected;
 const lastActivationModalityRef = useRef<"mouse" | "touch" | "pen" | "keyboard">("mouse");
-
-const closePopup = useCallback((reason: MarkerPopupCloseReason) => {
-  const marker = markerRef.current;
-  marker?.closePopup();
-  if (!shouldDeselectAfterPopupClose(selectedRef.current, reason)) return;
-  if (lastActivationModalityRef.current === "keyboard") {
-    marker?.getElement()?.focus();
-  }
-  onDeselect?.();
-}, [onDeselect]);
 ```
 
-Record the modality in pointer, compatibility-click, and keyboard activation paths.
+Record the modality in pointer, compatibility-click, and keyboard activation paths. Route `closePopup(reason)` through the controller with explicit `closePopup`, `onDeselect`, and `restoreMarkerFocus` effects; do not call those effects before the controller accepts the token.
 
 - [ ] **Step 4: Replace the viewport-gated lifecycle**
 
@@ -830,7 +835,7 @@ useEffect(() => {
 }, [closePopup, isSelected, onMarkerTapOverride]);
 ```
 
-The custom close button calls `closePopup("dismiss")` and therefore emits one deselection. Details and Navigate call `closePopup("action")` and preserve selection/navigation ownership. On `popupopen`, close the tooltip and, only for keyboard modality, focus `[data-map-popup-first-control="true"]` in the popup element on the next animation frame:
+The custom close button calls `closePopup("dismiss")` and therefore emits one deselection per selected-open token. Details calls `closePopup("action")`; Navigate calls controller `navigate(() => onDirections?.(item) ?? null, effects)`, which gates the parent callback before invocation and closes only for a non-null accepted request ID. Both preserve selection/navigation ownership. On `popupopen`, close the tooltip and route focus through the controller; only keyboard modality schedules focus for `[data-map-popup-first-control="true"]`:
 
 ```ts
 popupopen: () => {
@@ -869,11 +874,10 @@ Remove `useIsMobile` and render one `Popup` unconditionally when `onMarkerTapOve
       <BoardingHouseMapPopupCard
         listing={item.summary}
         onDetails={() => closePopup("action")}
-        onDirections={() => {
-          const acceptedRequestId = onDirections?.(item) ?? null;
-          if (acceptedRequestId !== null) closePopup("action");
-          return acceptedRequestId;
-        }}
+        onDirections={() => popupLifecycle.navigate(
+          () => onDirections?.(item) ?? null,
+          navigationPopupEffects,
+        )}
       />
     ) : (
       <MapPopupCard
@@ -882,11 +886,10 @@ Remove `useIsMobile` and render one `Popup` unconditionally when `onMarkerTapOve
           setFacilitySheetOpen(true);
           closePopup("action");
         }}
-        onDirections={() => {
-          const acceptedRequestId = onDirections?.(item) ?? null;
-          if (acceptedRequestId !== null) closePopup("action");
-          return acceptedRequestId;
-        }}
+        onDirections={() => popupLifecycle.navigate(
+          () => onDirections?.(item) ?? null,
+          navigationPopupEffects,
+        )}
       />
     )}
   </MapMarkerPopupShell>
@@ -895,7 +898,7 @@ Remove `useIsMobile` and render one `Popup` unconditionally when `onMarkerTapOve
 
 Add `onDetails?: () => void` to the boarding card and call it from the Details link's `onClick` before navigation.
 
-Change `MapMarkerProps`, `MapMarkersProps`, `MapSelectionLayerProps`, and `InteractionCallbackRegistry.directions` to propagate `(item: MapItem) => number | null`; the registry returns `this.onDirections?.(item) ?? null`. In `beginNavigationToItem`, capture the dispatch result and reject mismatched state before mutating persistence/performance state:
+Change both popup-card contracts plus `MapMarkerProps`, `MapMarkersProps`, `MapSelectionLayerProps`, and `InteractionCallbackRegistry.directions` to propagate `(item: MapItem) => number | null`; the registry returns `this.onDirections?.(item) ?? null`. In `beginNavigationToItem`, capture the dispatch result and reject mismatched state before mutating persistence/performance state:
 
 ```ts
 const next = runtime.dispatch({
@@ -922,7 +925,7 @@ Only after that guard, set the new navigation session and begin performance/pers
 
 - [ ] **Step 6: Make Escape popup-aware**
 
-In `MapSelectionLayer`, keep Escape selection behavior but ignore already-handled events:
+Export a pure `shouldHandleMapSelectionEscape({ key, defaultPrevented })` from `popup-lifecycle.ts`, execute it in `popup-lifecycle.test.ts`, and use it from `MapSelectionLayer` so already-handled events are ignored:
 
 ```ts
 if (event.key === "Escape" && !event.defaultPrevented) {
@@ -935,7 +938,7 @@ The popup close handler calls `preventDefault()` and `stopPropagation()` when it
 - [ ] **Step 7: Run lifecycle GREEN**
 
 ```bash
-rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/popup-close.test.ts lib/map/interaction-gateway.test.ts lib/map/map-option-a.test.ts components/map/map-markers.test.ts lib/map/pointer-activation.test.ts lib/navigation/selection-route-reset.test.ts
+rtk proxy node --experimental-test-module-mocks --import tsx --test lib/map/popup-close.test.ts lib/map/popup-lifecycle.test.ts lib/map/interaction-gateway.test.ts lib/map/map-option-a.test.ts components/map/map-markers.test.ts lib/map/pointer-activation.test.ts lib/navigation/selection-route-reset.test.ts
 ```
 
 Expected: all tests PASS; mobile gate is absent, one popup owns selection, and A-to-B transfer emits no clear.
@@ -943,7 +946,7 @@ Expected: all tests PASS; mobile gate is absent, one popup owns selection, and A
 - [ ] **Step 8: Commit unified popup lifecycle**
 
 ```bash
-rtk git add 'app/(student)/page.tsx' components/map/boarding-house-map-popup-card.tsx components/map/map-marker.tsx components/map/map-markers.test.ts components/map/map-markers.tsx components/map/map-selection-layer.tsx lib/map/interaction-gateway.test.ts lib/map/map-option-a.test.ts lib/navigation/selection-route-reset.test.ts lib/navigation/selection-route-reset.ts
+rtk git add 'app/(student)/page.tsx' components/map/boarding-house-map-popup-card.tsx components/map/map-marker.tsx components/map/map-markers.test.ts components/map/map-markers.tsx components/map/map-popup-card.tsx components/map/map-selection-layer.tsx lib/map/interaction-gateway.test.ts lib/map/map-option-a.test.ts lib/map/popup-lifecycle.test.ts lib/map/popup-lifecycle.ts lib/navigation/selection-route-reset.test.ts lib/navigation/selection-route-reset.ts
 rtk git commit -m "fix(map): open marker actions on the first tap"
 ```
 
@@ -1226,6 +1229,8 @@ const VIEWPORTS = [
 ```
 
 Use `touchscreen.tap` in touch-enabled contexts for facility and `/?boarding=1` markers. Assert exactly one visible `.leaflet-popup`, no bottom card, all popup controls at least 44px on mobile, popup bounds within usable map bounds, Details opens once, Navigate creates one request and feedback event, close/Escape emits no route clear, and A-to-B transfer records no background event.
+
+For keyboard rows, assert `document.activeElement` becomes the shell's first control after Enter/Space and returns to the originating marker after Close/Escape. For pointer rows, assert activation does not force focus into the popup.
 
 For route tests, open the popup, Navigate, choose Main Gate, start the frame probe, then run wheel, CDP pinch, native plus/minus, double-click, keyboard, and probe `zoomTo`. Assert every sampled frame has `routeVisible === true` and every non-null error is `<= 2`. Set a 500ms route delay to verify committed A remains during B replacement.
 
