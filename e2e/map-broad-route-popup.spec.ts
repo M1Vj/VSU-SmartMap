@@ -276,7 +276,7 @@ async function assertVisibleMapControls(page: Page) {
   expect(undersized).toEqual([]);
 }
 
-async function assertFrameGate(page: Page, requireTransition = true) {
+async function assertFrameGate(page: Page, requireTransition = true, requireRendererTransition = false) {
   await expect.poll(
     async () => (await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().frames.length ?? 0)),
     { timeout: 8_000 },
@@ -300,6 +300,11 @@ async function assertFrameGate(page: Page, requireTransition = true) {
     .map((frame) => frame.visualRouteScale);
   expect(visualRouteSpans.length).toBeGreaterThan(0);
   expect(visualRouteScales.every((scale) => typeof scale === "number" && Number.isFinite(scale) && scale > 0)).toBe(true);
+  if (requireRendererTransition) {
+    const rendererFrameTokens = snapshot.frames.map((frame) => frame.rendererFrameToken);
+    expect(rendererFrameTokens.every((token) => typeof token === "number" && Number.isFinite(token))).toBe(true);
+    expect(new Set(rendererFrameTokens).size).toBeGreaterThan(1);
+  }
   if (requireTransition) {
     const before = visualRouteScales[0];
     const after = visualRouteScales.at(-1);
@@ -538,10 +543,11 @@ for (const viewport of VIEWPORTS) {
         await activateRoute(page, testInfo, marker);
         await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
         await page.waitForTimeout(120);
+        await page.evaluate(() => window.__VSU_MAP_E2E__?.markFrameProbeBoundary());
         const zoomState = await performZoomMethod(page, zoomMethod);
         expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
         await page.waitForTimeout(600);
-        await assertFrameGate(page);
+        await assertFrameGate(page, true, mode === "vector");
         assertNoConsoleErrors(errors);
       };
       if (zoomMethod === "pinch") {

@@ -42,6 +42,7 @@ export type MapFrameSampleFailure =
   | "missing-destination-element"
   | "missing-destination-geometry"
   | "missing-renderer-projection"
+  | "missing-renderer-frame"
   | "missing-renderer-registration";
 
 export type MapFrameSample = {
@@ -55,6 +56,7 @@ export type MapFrameSample = {
   renderedSampleCount: number;
   visualRouteSpanPx: number | null;
   visualRouteScale: number | null;
+  rendererFrameToken: number | null;
   probeCostMs: number;
   zoom: number | null;
   animatingZoom: boolean;
@@ -62,7 +64,7 @@ export type MapFrameSample = {
 };
 
 type ScreenPoint = { x: number; y: number };
-type AffineTransform = { a: number; b: number; c: number; d: number; e: number; f: number };
+export type AffineTransform = { a: number; b: number; c: number; d: number; e: number; f: number };
 
 export type MapEvidenceRect = {
   left: number;
@@ -95,6 +97,7 @@ export type MapEvidenceApi = {
   events: () => readonly MapEvidenceEvent[];
   reset: () => void;
   startFrameProbe: () => void;
+  markFrameProbeBoundary: () => void;
   stopFrameProbe: () => void;
   setRouteDelayMs: (delayMs: number) => void;
   failNextRoute: () => void;
@@ -176,6 +179,10 @@ type ProbeState = {
   frameProbeStoppedAt: number | null;
   frameProbeStopReason: MapEvidenceSnapshot["frameProbe"]["stopReason"];
   frameProbeCostMs: number;
+  mapLibreRenderToken: number | null;
+  mapLibreRenderMap: MapLibreMap | null;
+  mapLibreRenderListener: (() => void) | null;
+  frameTransitionRendererToken: number | null;
   visibilityDocument: Document | null;
   visibilityChangeHandler: (() => void) | null;
 };
@@ -628,11 +635,50 @@ function transformScreenPoint(
   x: number,
   y: number,
   transform: { a: number; b: number; c: number; d: number; e: number; f: number },
-  containerRect: DOMRect,
+  containerRect: MapEvidenceRect,
 ): ScreenPoint {
   return {
     x: transform.a * x + transform.c * y + transform.e - containerRect.left,
     y: transform.b * x + transform.d * y + transform.f - containerRect.top,
+  };
+}
+
+/**
+ * Samples an SVG path in rendered screen space. SVG `getTotalLength()` is in
+ * local path units, so the affine transform's Frobenius norm provides a safe
+ * upper bound for each transformed segment. The 256-point cap is explicit:
+ * callers receive a typed sampling failure rather than silently violating the
+ * 16 CSS-pixel spacing budget.
+ */
+export function sampleRenderedPolylineScreenSpace(
+  totalLength: number,
+  getPointAtLength: (length: number) => ScreenPoint | null | undefined,
+  transform: AffineTransform,
+  containerRect: MapEvidenceRect,
+  maxSamples = 256,
+): SampledScreenPolyline {
+  const limit = Math.min(256, Math.max(2, Math.floor(Number.isFinite(maxSamples) ? maxSamples : 256)));
+  const screenScaleBound = Math.hypot(transform.a, transform.b, transform.c, transform.d);
+  if (
+    !Number.isFinite(totalLength) ||
+    totalLength <= 0 ||
+    !Number.isFinite(screenScaleBound) ||
+    screenScaleBound <= 0
+  ) return { points: [], failure: null };
+  const localInterval = 16 / screenScaleBound;
+  const requestedSampleCount = Math.max(2, Math.ceil(totalLength / localInterval) + 1);
+  const sampleCount = Math.min(limit, requestedSampleCount);
+  const result: ScreenPoint[] = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const point = getPointAtLength((totalLength * index) / (sampleCount - 1));
+    if (!point || !isFiniteScreenPoint(point)) return { points: [], failure: null };
+    const transformed = transformScreenPoint(point.x, point.y, transform, containerRect);
+    if (!isFiniteScreenPoint(transformed)) return { points: [], failure: null };
+    result.push(transformed);
+  }
+  return {
+    points: result,
+    failure: requestedSampleCount > limit ? "sampling-capped" : null,
   };
 }
 
@@ -665,27 +711,21 @@ function readRenderedPolyline(
       .every((value) => Number.isFinite(value))
   ) return { points: [], visualRouteScale: null, failure: "missing-route-geometry" };
   if (visualRouteScale === null) return { points: [], visualRouteScale: null, failure: "missing-route-geometry" };
-  const requestedSampleCount = Math.max(2, Math.ceil(totalLength / 16) + 1);
-  const sampleCount = Math.min(256, requestedSampleCount);
-  const samplingCapped = requestedSampleCount > 256;
-  const result: ScreenPoint[] = [];
-  for (let index = 0; index < sampleCount; index += 1) {
-    const point = element.getPointAtLength?.(
-      (totalLength * index) / (sampleCount - 1),
-    );
-    if (!point) return { points: [], visualRouteScale, failure: "missing-route-geometry" };
-    const transformed = transformScreenPoint(point.x, point.y, transform, containerRect);
-    if (!isFiniteScreenPoint(transformed)) return { points: [], visualRouteScale, failure: "missing-route-geometry" };
-    result.push(transformed);
-  }
-  const clipped = clipScreenPolylineToRect(result, {
+  const sampled = sampleRenderedPolylineScreenSpace(
+    totalLength,
+    (length) => element.getPointAtLength?.(length),
+    transform,
+    containerRect,
+  );
+  if (sampled.points.length === 0) return { points: [], visualRouteScale, failure: "missing-route-geometry" };
+  const clipped = clipScreenPolylineToRect(sampled.points, {
     left: 0,
     top: 0,
     width: containerRect.width,
     height: containerRect.height,
   });
   return clipped.length > 0
-    ? { points: clipped, visualRouteScale, failure: samplingCapped ? "sampling-capped" : null }
+    ? { points: clipped, visualRouteScale, failure: sampled.failure }
     : { points: [], visualRouteScale, failure: "missing-route-geometry" };
 }
 
@@ -767,6 +807,78 @@ function routeMatchesAuthoritativePath(route: RegisteredRoute) {
   );
 }
 
+function getMapLibreRenderedFrameFailure(state: ProbeState): MapFrameSampleFailure | null {
+  if (!state.mapLibreMap) return null;
+  const canvas = state.mapLibreMap.getCanvas?.();
+  const rendererContainer = state.mapLibreMap.getContainer?.();
+  if (!canvas || !rendererContainer || typeof state.mapLibreMap.project !== "function") {
+    return "missing-renderer-projection";
+  }
+  const rect = canvas.getBoundingClientRect?.();
+  const clientWidth = rendererContainer.clientWidth || canvas.clientWidth || canvas.width || 0;
+  const clientHeight = rendererContainer.clientHeight || canvas.clientHeight || canvas.height || 0;
+  if (
+    !rect ||
+    ![rect.left, rect.top].every(Number.isFinite) ||
+    ![rect.width, rect.height, clientWidth, clientHeight]
+      .every((value) => Number.isFinite(value) && value > 0)
+  ) return "missing-route-baseline";
+  if (state.mapLibreRenderToken === null || state.mapLibreRenderToken <= 0) return "missing-renderer-frame";
+  return null;
+}
+
+function getRouteBaselineFailure(
+  state: ProbeState,
+  route: RegisteredRoute,
+  mapRect: DOMRect,
+): MapFrameSampleFailure | null {
+  const rendererFailure = getMapLibreRenderedFrameFailure(state);
+  if (rendererFailure) return rendererFailure;
+  const rasterProjectionResult = state.mapLibreMap
+    ? { projection: null, failure: null }
+    : buildLeafletRasterProjection(route.map, mapRect);
+  if (rasterProjectionResult.failure) return rasterProjectionResult.failure;
+  const projectedPath: ScreenPoint[] = [];
+  let projectionFailure: MapFrameSampleFailure | null = null;
+  for (const coordinate of route.path) {
+    const projected = projectCoordinate(
+      state,
+      route.map,
+      mapRect,
+      coordinate,
+      rasterProjectionResult.projection,
+    );
+    projectionFailure ??= projected.failure;
+    projectedPath.push(projected.point);
+  }
+  if (projectionFailure) return projectionFailure;
+  const expectedDetailed = sampleScreenPolylineDetailed(
+    clipScreenPolylineToRect(projectedPath, {
+      left: 0,
+      top: 0,
+      width: mapRect.width,
+      height: mapRect.height,
+    }),
+    256,
+  );
+  const rendered = readRenderedPolyline(route.polyline, mapRect);
+  if (expectedDetailed.failure || rendered.failure) {
+    return expectedDetailed.failure ?? rendered.failure;
+  }
+  if (expectedDetailed.points.length < 2 || rendered.points.length < 2) {
+    return "missing-route-baseline";
+  }
+  const comparisonCount = Math.min(
+    256,
+    Math.max(expectedDetailed.points.length, rendered.points.length),
+  );
+  if (comparisonCount < 2) return "missing-route-baseline";
+  const expected = resamplePolylineByNormalizedLength(expectedDetailed.points, comparisonCount);
+  const actual = resamplePolylineByNormalizedLength(rendered.points, comparisonCount);
+  const error = getOrderedPolylineError(expected, actual);
+  return Number.isFinite(error) && error <= 2 ? null : "missing-route-baseline";
+}
+
 function hasFiniteAffineTransform(transform: AffineTransform | null | undefined) {
   return Boolean(transform) && [
     transform!.a,
@@ -798,16 +910,8 @@ function routeReadinessFailure(state: ProbeState, route: RegisteredRoute): MapFr
     return "missing-route-baseline";
   }
 
-  if (state.mapLibreMap) {
-    const canvas = state.mapLibreMap.getCanvas?.();
-    const rendererContainer = state.mapLibreMap.getContainer?.();
-    if (!canvas || !rendererContainer || typeof state.mapLibreMap.project !== "function") {
-      return "missing-renderer-projection";
-    }
-  } else {
-    const baseline = getLeafletRasterTilePoint(route.map, mapRect as DOMRect, route.path[0]);
-    if (baseline.failure) return baseline.failure;
-  }
+  const baselineFailure = getRouteBaselineFailure(state, route, mapRect as DOMRect);
+  if (baselineFailure) return baselineFailure;
 
   const destination = state.destination;
   if (!destination) return "missing-destination";
@@ -844,8 +948,8 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
 function appendFrame(
   state: ProbeState,
   startedAt: number,
-  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale"> &
-    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale">>,
+  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken"> &
+    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken">>,
 ) {
   const at = typeof performance === "undefined" ? Date.now() : performance.now();
   const measurementCostMs = Math.max(0, at - startedAt);
@@ -862,6 +966,7 @@ function appendFrame(
     ...sample,
     visualRouteSpanPx: sample.visualRouteSpanPx ?? null,
     visualRouteScale: sample.visualRouteScale ?? null,
+    rendererFrameToken: sample.rendererFrameToken ?? (state.mapLibreMap ? state.mapLibreRenderToken : null),
   });
 }
 
@@ -880,6 +985,18 @@ function recordFrame(state: ProbeState) {
   const vectorCanvasExists = typeof document !== "undefined" && Boolean(document.querySelector(".maplibregl-canvas"));
   if (vectorCanvasExists && !state.mapLibreMap) {
     appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-renderer-registration" });
+    return;
+  }
+  if (state.mapLibreMap && state.mapLibreRenderToken === null) {
+    appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-renderer-frame" });
+    return;
+  }
+  if (
+    state.mapLibreMap &&
+    state.frameTransitionRendererToken !== null &&
+    state.mapLibreRenderToken === state.frameTransitionRendererToken
+  ) {
+    appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-renderer-frame" });
     return;
   }
   if (!route.ready) {
@@ -1063,6 +1180,18 @@ function stopFrameProbeForState(
   }
 }
 
+function detachMapLibreRenderListener(state: ProbeState) {
+  if (state.mapLibreRenderMap && state.mapLibreRenderListener) {
+    const mapWithEvents = state.mapLibreRenderMap as MapLibreMap & {
+      off?: (type: string, listener: () => void) => void;
+    };
+    mapWithEvents.off?.("render", state.mapLibreRenderListener);
+  }
+  state.mapLibreRenderMap = null;
+  state.mapLibreRenderListener = null;
+  state.mapLibreRenderToken = null;
+}
+
 function cancelPendingDelays(state: ProbeState, error = new DOMException("Route request was cancelled", "AbortError")) {
   for (const pending of [...state.pendingDelays]) pending.onAbort(error);
 }
@@ -1115,6 +1244,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameProbeStoppedAt = null;
       state.frameProbeStopReason = null;
       state.frameProbeCostMs = 0;
+      state.frameTransitionRendererToken = null;
     },
     startFrameProbe: () => {
       if (!isActive()) return;
@@ -1124,11 +1254,21 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameProbeStopReason = null;
       state.frameProbeCostMs = 0;
       state.frameCount = 0;
+      state.frameTransitionRendererToken = null;
       state.wallClockTimeout = setTimeout(() => {
         if (!isStateActive(state)) return;
         stopFrameProbeForState(state, "wall-clock-timeout");
       }, 10_000);
       scheduleFrame(state);
+    },
+    markFrameProbeBoundary: () => {
+      if (!isActive()) return;
+      state.frames = [];
+      state.frameCount = 0;
+      state.frameProbeCostMs = 0;
+      state.frameProbeStoppedAt = null;
+      state.frameProbeStopReason = null;
+      state.frameTransitionRendererToken = state.mapLibreMap ? state.mapLibreRenderToken : null;
     },
     stopFrameProbe: () => {
       if (!isActive()) return;
@@ -1157,6 +1297,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
 
 function disposeState(state: ProbeState) {
   stopFrameProbeForState(state, "cleanup");
+  detachMapLibreRenderListener(state);
   if (state.visibilityChangeHandler) {
     state.visibilityDocument?.removeEventListener("visibilitychange", state.visibilityChangeHandler);
     state.visibilityChangeHandler = null;
@@ -1242,6 +1383,10 @@ export function initializeMapEvidence(url: string): () => void {
     frameProbeStoppedAt: null,
     frameProbeStopReason: null,
     frameProbeCostMs: 0,
+    mapLibreRenderToken: null,
+    mapLibreRenderMap: null,
+    mapLibreRenderListener: null,
+    frameTransitionRendererToken: null,
     visibilityDocument: null,
     visibilityChangeHandler: null,
   } as ProbeState;
@@ -1278,9 +1423,34 @@ export function registerLeafletMapForEvidence(map: LeafletMap): () => void {
 export function registerMapLibreForEvidence(map: MapLibreMap): () => void {
   const state = activeState;
   if (!isStateActive(state)) return () => undefined;
+  detachMapLibreRenderListener(state);
   state.mapLibreMap = map;
+  const mapWithEvents = map as MapLibreMap & {
+    on?: (type: string, listener: () => void) => void;
+    off?: (type: string, listener: () => void) => void;
+  };
+  if (typeof mapWithEvents.on !== "function") {
+    state.mapLibreRenderToken = null;
+    return () => {
+      if (isStateActive(state) && state.mapLibreMap === map) {
+        state.mapLibreMap = null;
+        state.mapLibreRenderToken = null;
+      }
+    };
+  }
+  state.mapLibreRenderToken = 0;
+  const onRender = () => {
+    if (!isStateActive(state) || state.mapLibreMap !== map) return;
+    state.mapLibreRenderToken = (state.mapLibreRenderToken ?? 0) + 1;
+  };
+  mapWithEvents.on("render", onRender);
+  state.mapLibreRenderMap = map;
+  state.mapLibreRenderListener = onRender;
   return () => {
-    if (isStateActive(state) && state.mapLibreMap === map) state.mapLibreMap = null;
+    if (isStateActive(state) && state.mapLibreMap === map) {
+      detachMapLibreRenderListener(state);
+      state.mapLibreMap = null;
+    }
   };
 }
 

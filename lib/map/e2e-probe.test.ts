@@ -21,6 +21,7 @@ import {
   recordMapEvidenceEvent,
   sampleScreenPolyline,
   sampleScreenPolylineDetailed,
+  sampleRenderedPolylineScreenSpace,
   parseLeafletRasterTileUrl,
   throwIfMapEvidenceRouteFailureRequested,
   waitForMapEvidenceRouteDelay,
@@ -231,6 +232,9 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(probeSource, /visualRouteSpanPx/);
   assert.match(probeSource, /visualRouteScale/);
   assert.match(probeSource, /getAffineTransformScale/);
+  assert.match(probeSource, /sampleRenderedPolylineScreenSpace/);
+  assert.match(probeSource, /rendererFrameToken/);
+  assert.match(probeSource, /markFrameProbeBoundary/);
   assert.doesNotMatch(probeSource, /rendererTransform[\s\S]*getScreenCTM/);
   const browserSpec = readFileSync(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8");
   assert.match(browserSpec, /await expect\(mainGate\)\.toBeVisible/);
@@ -249,6 +253,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
   assert.match(browserSpec, /hasInFlightVisualScale\)\.toBe\(true\)/);
   assert.match(browserSpec, /visualRouteScales/);
+  assert.match(browserSpec, /markFrameProbeBoundary/);
+  assert.match(browserSpec, /rendererFrameTokens/);
   assert.match(browserSpec, /getComputedStyle/);
   assert.match(browserSpec, /getScreenCTM/);
   assert.match(browserSpec, /transform:\s*computed\.transform/);
@@ -459,6 +465,30 @@ test("sampling reports a typed cap failure instead of silently exceeding the spa
   );
   assert.equal(detailed.points.length, 4);
   assert.equal(detailed.failure, "sampling-capped");
+});
+
+test("rendered SVG sampling adapts to transformed screen space for a high-scale bent route", () => {
+  const sampled = sampleRenderedPolylineScreenSpace(
+    200,
+    (length) => length <= 100
+      ? { x: length, y: 0 }
+      : { x: 100, y: length - 100 },
+    { a: 4, b: 0, c: 0, d: 4, e: 0, f: 0 },
+    { left: 0, top: 0, width: 1_000, height: 1_000 },
+  );
+  assert.equal(sampled.failure, null);
+  assert.ok(sampled.points.length > Math.ceil(200 / 16) + 1);
+  const maxSpacing = sampled.points.slice(1).reduce((maximum, point, index) =>
+    Math.max(maximum, Math.hypot(point.x - sampled.points[index].x, point.y - sampled.points[index].y)), 0);
+  assert.ok(maxSpacing <= 16 + 1e-9);
+  const capped = sampleRenderedPolylineScreenSpace(
+    5_000,
+    (length) => ({ x: length, y: length / 2 }),
+    { a: 4, b: 0, c: 0, d: 4, e: 0, f: 0 },
+    { left: 0, top: 0, width: 30_000, height: 30_000 },
+  );
+  assert.equal(capped.points.length, 256);
+  assert.equal(capped.failure, "sampling-capped");
 });
 
 test("destination evidence uses the configured icon anchor rather than a generic bottom center", () => {
@@ -826,6 +856,42 @@ test("frame probe uses authoritative route and destination geometry with bounded
   cleanup();
 });
 
+test("route readiness rejects a rendered SVG that does not match the authoritative projection", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(mapRect);
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length + 20, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-route-baseline");
+  assert.equal(api.snapshot().frames[0]?.routeVisible, false);
+  cleanup();
+});
+
 test("frame probe records independent SVG scale when a clipped full-width route keeps constant span", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
@@ -1074,9 +1140,9 @@ test("satellite oracle rejects a route and marker shifted from the independent t
   rafCallbacks.delete(frame[0]);
   frame[1](16);
   const sample = api.snapshot().frames[0];
-  assert.equal(sample?.failure, null);
-  assert.ok((sample?.routeErrorPx ?? 0) > 2);
-  assert.ok((sample?.destinationErrorPx ?? 0) > 2);
+  assert.equal(sample?.failure, "missing-route-baseline");
+  assert.equal(sample?.routeErrorPx, null);
+  assert.equal(sample?.destinationErrorPx, null);
   cleanup();
 });
 
@@ -1245,16 +1311,22 @@ test("frame probe projects through the live MapLibre canvas offset and scale", (
     height: 200,
     getBoundingClientRect: () => ({ left: 12, top: 8, width: 220, height: 110 }),
   };
+  let renderListener: (() => void) | undefined;
   const mapLibre = {
     getCanvas: () => canvas,
     getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
     getPadding: () => {
       throw new Error("MapLibre padding is already included in project coordinates");
     },
+    on: (type: string, listener: () => void) => {
+      if (type === "render") renderListener = listener;
+    },
+    off: () => undefined,
     project: ([lng]: [number, number]) => ({ x: 20 + lng * 10, y: 40 }),
   };
   registerLeafletMapForEvidence(map as never);
   registerMapLibreForEvidence(mapLibre as never);
+  renderListener?.();
   registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
   registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
   const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
@@ -1270,6 +1342,158 @@ test("frame probe projects through the live MapLibre canvas offset and scale", (
   assert.equal(sample.failure, null);
   assert.ok((sample.routeErrorPx ?? Infinity) < 1e-9);
   assert.ok((sample.destinationErrorPx ?? Infinity) < 1e-9);
+  cleanup();
+});
+
+test("route readiness fails closed when the live MapLibre canvas dimensions are invalid", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const map = { getContainer: () => ({ getBoundingClientRect: () => mapRect }) };
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+  };
+  let renderListener: (() => void) | undefined;
+  const mapLibre = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: (type: string, listener: () => void) => {
+      if (type === "render") renderListener = listener;
+    },
+    off: () => undefined,
+    project: ([lng]: [number, number]) => ({ x: 20 + lng * 10, y: 40 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 40 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 20, f: 0 }),
+    }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerMapLibreForEvidence(mapLibre as never);
+  renderListener?.();
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-route-baseline");
+  cleanup();
+});
+
+test("route readiness requires a rendered MapLibre frame token before arming", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const map = { getContainer: () => ({ getBoundingClientRect: () => mapRect }) };
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => mapRect,
+  };
+  const mapLibre = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: () => undefined,
+    off: () => undefined,
+    project: ([lng]: [number]) => ({ x: 20 + lng * 10, y: 40 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 40 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 20, f: 0 }),
+    }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerMapLibreForEvidence(mapLibre as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
+  cleanup();
+});
+
+test("MapLibre frame token rejects logical project and SVG advances while the canvas render lags", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+  };
+  let logicalOffset = 0;
+  let renderListener: (() => void) | undefined;
+  const map = { getContainer: () => ({ getBoundingClientRect: () => mapRect }) };
+  const mapLibre = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: (type: string, listener: () => void) => {
+      if (type === "render") renderListener = listener;
+    },
+    off: () => undefined,
+    project: ([lng]: [number]) => ({ x: 20 + lng * 10 + logicalOffset, y: 40 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 40 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 20 + logicalOffset, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 115 + logicalOffset, top: 30, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerMapLibreForEvidence(mapLibre as never);
+  renderListener?.();
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    markFrameProbeBoundary: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null; rendererFrameToken: number | null }> };
+  };
+  api.startFrameProbe();
+  api.markFrameProbeBoundary();
+  logicalOffset = 20;
+  const staleFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(staleFrame[0]);
+  staleFrame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frames[0]?.rendererFrameToken, 1);
+  renderListener?.();
+  const liveFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(liveFrame[0]);
+  liveFrame[1](32);
+  assert.equal(api.snapshot().frames[1]?.failure, null);
   cleanup();
 });
 
