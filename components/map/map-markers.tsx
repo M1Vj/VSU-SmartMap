@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { getMapMarkerRenderItems } from "@/lib/map/marker-clusters";
+import { spreadCoLocatedItems } from "@/lib/map/declutter";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarker } from "./map-marker";
-import { MapMarkerCluster } from "./map-marker-cluster";
 
 type MapMarkersProps = {
   items: readonly MapItem[];
@@ -40,32 +39,28 @@ export function MapMarkers({
     if (routeDestinationId != null) ids.add(routeDestinationId);
     return ids;
   }, [items, minimizeNonDestinationMarkers, onMarkerTapOverride, routeDestinationId, selectedId]);
-  const renderItems = useMemo(
-    () => getMapMarkerRenderItems(items, zoomBucket, { protectedIds }),
+  const spreadItems = useMemo(
+    () => spreadCoLocatedItems(items, zoomBucket, { protectedIds }),
     [items, protectedIds, zoomBucket],
   );
 
   return (
     <>
-      {renderItems.map((entry) =>
-        entry.renderType === "cluster" ? (
-          <MapMarkerCluster key={entry.id} cluster={entry} />
-        ) : (
-          <MapMarker
-            key={entry.id}
-            item={entry.item}
-            displayCoordinates={entry.displayCoordinates}
-            onSelect={onSelect}
-            onMarkerTapOverride={onMarkerTapOverride}
-            onDeselect={onDeselect}
-            onDirections={onDirections}
-            isSelected={entry.item.id === selectedId}
-            isRouteDestination={entry.item.id === routeDestinationId}
-            forceMinimized={minimizeNonDestinationMarkers && entry.item.id !== routeDestinationId}
-            zoom={zoom}
-          />
-        ),
-      )}
+      {spreadItems.map(({ item, displayCoordinates }) => (
+        <MapMarker
+          key={item.id}
+          item={item}
+          displayCoordinates={displayCoordinates}
+          onSelect={onSelect}
+          onMarkerTapOverride={onMarkerTapOverride}
+          onDeselect={onDeselect}
+          onDirections={onDirections}
+          isSelected={item.id === selectedId}
+          isRouteDestination={item.id === routeDestinationId}
+          forceMinimized={minimizeNonDestinationMarkers && item.id !== routeDestinationId}
+          zoom={zoom}
+        />
+      ))}
     </>
   );
 }

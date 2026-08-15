@@ -165,6 +165,68 @@ test("dot zoom keeps merging nearby buildings into one centroid dot", () => {
   assert.deepEqual(atPinZoom[2].displayCoordinates, source[2].coordinates);
 });
 
+test("overview rendering keeps one stable marker entry per source item", () => {
+  const source = [
+    item("library", 10.7468, 124.7955),
+    item("admin", 10.7471, 124.7956),
+    item("gate", 10.7445, 124.7923),
+  ];
+  const sourceCoordinates = source.map(({ coordinates }) => ({ ...coordinates }));
+
+  const rendered = spreadCoLocatedItems(source, 15);
+
+  assert.equal(rendered.length, source.length);
+  assert.deepEqual(
+    rendered.map(({ item: renderedItem }) => renderedItem.id),
+    source.map(({ id }) => id),
+  );
+  assert.deepEqual(
+    rendered.map(({ trueCoordinates }) => trueCoordinates),
+    sourceCoordinates,
+  );
+  assert.deepEqual(
+    source.map(({ coordinates }) => coordinates),
+    sourceCoordinates,
+  );
+});
+
+test("protected overview markers keep true coordinates while nearby entries remain individual", () => {
+  const source = [
+    item("selected", 10.7468, 124.7955),
+    item("destination", 10.7468001, 124.7955001),
+    item("nearby-a", 10.7468002, 124.7955002),
+    item("nearby-b", 10.7468003, 124.7955003),
+  ];
+
+  const rendered = spreadCoLocatedItems(source, 15, {
+    protectedIds: new Set(["selected", "destination"]),
+  });
+
+  assert.equal(rendered.length, source.length);
+  for (const entry of rendered) {
+    if (entry.item.id === "selected" || entry.item.id === "destination") {
+      assert.deepEqual(entry.displayCoordinates, entry.item.coordinates);
+    }
+  }
+});
+
+test("all protected overview markers stay at their true coordinates for route and manual modes", () => {
+  const source = [
+    item("facility-a", 10.7468, 124.7955),
+    item("facility-b", 10.7468001, 124.7955001),
+    item("facility-c", 10.7468002, 124.7955002),
+  ];
+
+  const rendered = spreadCoLocatedItems(source, 15, {
+    protectedIds: new Set(source.map(({ id }) => id)),
+  });
+
+  assert.deepEqual(
+    rendered.map(({ displayCoordinates }) => displayCoordinates),
+    source.map(({ coordinates }) => coordinates),
+  );
+});
+
 test("large groups scale the fan-out ring so pins stay separated", () => {
   const source = Array.from({ length: 8 }, (_, index) =>
     item(`facility-${index}`, 10.745, 124.792),
