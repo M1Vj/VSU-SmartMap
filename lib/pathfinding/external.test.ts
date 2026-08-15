@@ -8,6 +8,7 @@ import {
   getExternalPath,
   resolveExternalRouteProviders,
 } from "./external.ts";
+import type { MapNode } from "@/lib/types/graph";
 
 test("external routing URL requests one definitive foot route (keyless OSRM)", () => {
   const url = new URL(
@@ -87,7 +88,14 @@ test("provider resolver falls back after a keyed provider returns no route", asy
       },
       async () => {
         calls.push("public");
-        return { path: [], totalDistance: 1, estimatedTime: 1 };
+        return {
+          path: [
+            { id: "public-start", lat: 10, lng: 20, type: "node" as const },
+            { id: "public-end", lat: 10.001, lng: 20.001, type: "node" as const },
+          ],
+          totalDistance: 1,
+          estimatedTime: 1,
+        };
       },
     ],
     new AbortController().signal,
@@ -96,6 +104,77 @@ test("provider resolver falls back after a keyed provider returns no route", asy
   assert.deepEqual(calls, ["keyed", "public"]);
   assert.equal(result?.totalDistance, 1);
 });
+
+test("provider resolver rejects an empty geometry before it can replace a valid fallback", async () => {
+  const calls: string[] = [];
+  const result = await resolveExternalRouteProviders(
+    [
+      async () => {
+        calls.push("invalid");
+        return { path: [], totalDistance: 1, estimatedTime: 1 };
+      },
+      async () => {
+        calls.push("fallback");
+        return {
+          path: [
+            { id: "fallback-start", lat: 10, lng: 20, type: "node" as const },
+            { id: "fallback-end", lat: 10.001, lng: 20.001, type: "node" as const },
+          ],
+          totalDistance: 10,
+          estimatedTime: 1,
+        };
+      },
+    ],
+    new AbortController().signal,
+  );
+
+  assert.deepEqual(calls, ["invalid", "fallback"]);
+  assert.equal(result?.path.length, 2);
+  assert.equal(result?.path[0]?.id, "fallback-start");
+});
+
+const invalidProviderGeometries: Array<[string, MapNode[]]> = [
+  ["one point", [{ id: "invalid", lat: 10, lng: 20, type: "node" as const }]],
+  [
+    "NaN latitude",
+    [
+      { id: "invalid-start", lat: Number.NaN, lng: 20, type: "node" as const },
+      { id: "invalid-end", lat: 10.001, lng: 20.001, type: "node" as const },
+    ],
+  ],
+  [
+    "Infinity longitude",
+    [
+      { id: "invalid-start", lat: 10, lng: Number.POSITIVE_INFINITY, type: "node" as const },
+      { id: "invalid-end", lat: 10.001, lng: 20.001, type: "node" as const },
+    ],
+  ],
+  [
+    "out-of-range coordinates",
+    [
+      { id: "invalid-start", lat: 91, lng: 20, type: "node" as const },
+      { id: "invalid-end", lat: 10.001, lng: 181, type: "node" as const },
+    ],
+  ],
+];
+
+for (const [label, invalidPath] of invalidProviderGeometries) {
+  test(`provider resolver skips ${label} geometry`, async () => {
+    const result = await resolveExternalRouteProviders([
+      async () => ({ path: invalidPath, totalDistance: 1, estimatedTime: 1 }),
+      async () => ({
+        path: [
+          { id: "fallback-start", lat: 10, lng: 20, type: "node" as const },
+          { id: "fallback-end", lat: 10.001, lng: 20.001, type: "node" as const },
+        ],
+        totalDistance: 10,
+        estimatedTime: 1,
+      }),
+    ], new AbortController().signal);
+
+    assert.equal(result?.path[0]?.id, "fallback-start");
+  });
+}
 
 test("mid-flight abort prevents provider fallback", async () => {
   const controller = new AbortController();

@@ -1,4 +1,5 @@
 import type { PathResult, TransportMode } from "@/lib/types/graph";
+import { isValidPathResult } from "./route-validation";
 
 type Point = { lat: number; lng: number };
 
@@ -30,7 +31,7 @@ export async function resolveExternalRouteProviders(
     if (signal?.aborted) return null;
     const route = await provider();
     if (signal?.aborted) return null;
-    if (route) return route;
+    if (isValidPathResult(route)) return route;
   }
   return null;
 }

@@ -1,4 +1,5 @@
 import type { MapNode, PathResult, TransportMode } from "@/lib/types/graph";
+import { isValidPathResult } from "@/lib/pathfinding/route-validation";
 
 type Point = { lat: number; lng: number };
 type ExternalPath = (
@@ -12,6 +13,13 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw new DOMException("Route request was cancelled", "AbortError");
   }
+}
+
+function requireExternalRoute(route: PathResult | null): PathResult {
+  if (!isValidPathResult(route)) {
+    throw new Error("External routing provider could not resolve this route.");
+  }
+  return route;
 }
 
 interface NavigationRouteDependencies {
@@ -57,8 +65,9 @@ export async function resolveNavigationRoute({
     result = await dependencies.buildInternalRoute(start, end, destinationId, signal);
     throwIfAborted(signal);
     if (!result) {
-      result = await dependencies.externalPath(start, end, mode, signal);
+      const externalRoute = await dependencies.externalPath(start, end, mode, signal);
       throwIfAborted(signal);
+      result = requireExternalRoute(externalRoute);
     }
   } else if (!startInside && endInside) {
     const gate = dependencies.findGate(start, end);
@@ -66,34 +75,34 @@ export async function resolveNavigationRoute({
     throwIfAborted(signal);
     const externalRoute = await dependencies.externalPath(start, gate, mode, signal);
     throwIfAborted(signal);
-    if (!externalRoute || !internalRoute) {
+    if (!internalRoute) {
       throw new Error("External routing provider could not resolve this route.");
     }
-    result = dependencies.mergeAtGate(externalRoute.path, gate, internalRoute.path, mode);
+    result = dependencies.mergeAtGate(requireExternalRoute(externalRoute).path, gate, internalRoute.path, mode);
   } else if (startInside && !endInside) {
     const gate = dependencies.findGate(end, start);
     const internalRoute = await dependencies.buildInternalRoute(start, gate, undefined, signal);
     throwIfAborted(signal);
     const externalRoute = await dependencies.externalPath(gate, end, mode, signal);
     throwIfAborted(signal);
-    if (!externalRoute || !internalRoute) {
+    if (!internalRoute) {
       throw new Error("External routing provider could not resolve this route.");
     }
-    result = dependencies.mergeAtGate(internalRoute.path, gate, externalRoute.path, mode);
+    result = dependencies.mergeAtGate(internalRoute.path, gate, requireExternalRoute(externalRoute).path, mode);
   } else {
     const externalRoute = await dependencies.externalPath(start, end, mode, signal);
     throwIfAborted(signal);
-    if (!externalRoute) {
-      throw new Error("External routing provider could not resolve this route.");
-    }
+    const validExternalRoute = requireExternalRoute(externalRoute);
     result = {
-      ...externalRoute,
+      ...validExternalRoute,
       estimatedTime:
-        externalRoute.estimatedTime ??
-        dependencies.calculateTime(externalRoute.totalDistance, mode),
+        validExternalRoute.estimatedTime ??
+        dependencies.calculateTime(validExternalRoute.totalDistance, mode),
     };
   }
 
-  if (!result) throw new Error("External routing provider could not resolve this route.");
+  if (!isValidPathResult(result)) {
+    throw new Error("External routing provider could not resolve this route.");
+  }
   return result;
 }

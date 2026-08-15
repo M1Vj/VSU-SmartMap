@@ -3,10 +3,17 @@ import test from "node:test";
 
 import { resolveNavigationRoute } from "./navigation-route-resolver.ts";
 import { createRouteRequestCoordinator } from "./route-request-coordinator.ts";
+import {
+  createInitialMapRuntimeState,
+  mapRuntimeReducer,
+} from "@/lib/map/map-runtime";
 import type { PathResult } from "@/lib/types/graph";
 
 const route = (id: string): PathResult => ({
-  path: [{ id, lat: 1, lng: 1, type: "node" }],
+  path: [
+    { id, lat: 1, lng: 1, type: "node" },
+    { id: `${id}-end`, lat: 1.001, lng: 1.001, type: "node" },
+  ],
   totalDistance: 10,
   estimatedTime: 1,
 });
@@ -152,6 +159,91 @@ test("an internal graph miss reports failure when no real route provider succeed
     }),
     /could not resolve/i,
   );
+});
+
+test("invalid external geometry fails the replacement without returning a publishable route", async () => {
+  const { dependencies: deps } = dependencies(true, true);
+  deps.buildInternalRoute = () => null;
+  deps.externalPath = async () => ({ path: [], totalDistance: 0, estimatedTime: 0 });
+
+  await assert.rejects(
+    resolveNavigationRoute({
+      start: { lat: 1, lng: 1 },
+      end: { lat: 2, lng: 2 },
+      mode: "walking",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    }),
+    /could not resolve/i,
+  );
+});
+
+test("cancellation remains authoritative when an external provider returns invalid geometry", async () => {
+  const { dependencies: deps } = dependencies(true, true);
+  deps.buildInternalRoute = () => null;
+  const controller = new AbortController();
+  deps.externalPath = async () => {
+    controller.abort();
+    return { path: [], totalDistance: 0, estimatedTime: 0 };
+  };
+
+  await assert.rejects(
+    resolveNavigationRoute({
+      start: { lat: 1, lng: 1 },
+      end: { lat: 2, lng: 2 },
+      mode: "walking",
+      signal: controller.signal,
+      dependencies: deps,
+    }),
+    (error: unknown) => error instanceof DOMException && error.name === "AbortError",
+  );
+});
+
+test("a failed invalid replacement keeps the committed route destination-owned and reportable", async () => {
+  const committedRoute = route("committed");
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 2, lng: 2 },
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 1,
+    route: committedRoute,
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 2,
+    destinationId: "facility-b",
+    origin: "manual",
+    end: { lat: 3, lng: 3 },
+  });
+
+  const { dependencies: deps } = dependencies(true, true);
+  deps.buildInternalRoute = () => null;
+  deps.externalPath = async () => ({ path: [], totalDistance: 0, estimatedTime: 0 });
+  const failure = await resolveNavigationRoute({
+    start: { lat: 1, lng: 1 },
+    end: { lat: 2, lng: 2 },
+    mode: "walking",
+    signal: new AbortController().signal,
+    dependencies: deps,
+  }).catch((error: unknown) => error);
+
+  assert.match(failure instanceof Error ? failure.message : "", /could not resolve/i);
+  state = mapRuntimeReducer(state, {
+    type: "navigation/failed",
+    requestId: 2,
+    message: failure instanceof Error ? failure.message : "provider unavailable",
+  });
+
+  assert.strictEqual(state.navigation.committedRoute, committedRoute);
+  assert.equal(state.navigation.committed?.destinationId, "facility-a");
+  assert.equal(state.presentation.controls.primaryAction, "clear");
+  assert.equal(state.presentation.controls.canReportRoute, true);
 });
 
 test("a geolocation update supersedes a delayed schedule handoff route", async () => {
