@@ -231,6 +231,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /synthetic.*pinch/i);
   assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
   assert.match(browserSpec, /hasStrictlyIntermediateVisualSpan\)\.toBe\(true\)/);
+  assert.match(browserSpec, /case "programmatic"[\s\S]*zoomTo\(18\)/);
+  assert.doesNotMatch(browserSpec, /zoomTo\(12\)[\s\S]*zoomTo\(19\)/);
   assert.match(browserSpec, /naturalWidth\s*>\s*0/);
   assert.match(browserSpec, /basemaps\.cartocdn\.com/);
   const mapWrapperSource = readFileSync(new URL("../../components/map/map-wrapper.tsx", import.meta.url), "utf8");

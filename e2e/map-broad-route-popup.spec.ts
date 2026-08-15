@@ -386,10 +386,9 @@ async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[numbe
       await page.keyboard.press("+");
       break;
     case "programmatic":
-      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(12));
-      await page.waitForTimeout(250);
-      intermediate = await cameraSignature(page);
-      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(19));
+      // The selected route camera is 19; move one nearby zoom level so the
+      // renderer samples a real transition instead of threshold-jumping 12↔19.
+      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(18));
       break;
   }
   await page.waitForTimeout(350);
