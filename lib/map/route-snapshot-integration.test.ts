@@ -45,6 +45,20 @@ test("map page hydrates valid persisted navigation and restores committed metada
   assert.match(source, /runtimeState\.navigation\.phase === "failed"[\s\S]{0,260}runtimeState\.navigation\.error[\s\S]{0,320}role="alert"/);
 });
 
+test("map page wires one memoized runtime-owned marker protection set through selection", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+  const selectionSource = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
+
+  assert.match(pageSource, /const protectedMarkerIds = useMemo\(\(\) => \{/);
+  assert.match(pageSource, /if \(runtimeState\.selectedItemId != null\) ids\.add\(runtimeState\.selectedItemId\);/);
+  assert.match(pageSource, /if \(committedNavigation\?\.destinationId != null\) ids\.add\(committedNavigation\.destinationId\);/);
+  assert.match(pageSource, /if \(pendingNavigation\?\.destinationId != null\) ids\.add\(pendingNavigation\.destinationId\);/);
+  assert.match(pageSource, /if \(isManualStartPending\) \{[\s\S]{0,220}filtered\.forEach\(\(item\) => ids\.add\(item\.id\)\);/);
+  assert.match(pageSource, /protectedMarkerIds=\{protectedMarkerIds\}/);
+  assert.match(selectionSource, /protectedMarkerIds\?: ReadonlySet<string>;/);
+  assert.match(selectionSource, /protectedMarkerIds=\{protectedMarkerIds\}/);
+});
+
 test("terminal graph-load failure retires only the exact pending route request", async () => {
   const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
   assert.match(source, /navigationGraphError/);

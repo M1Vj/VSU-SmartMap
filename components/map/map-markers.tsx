@@ -10,6 +10,7 @@ type MapMarkersProps = {
   selectedId?: string | null;
   routeDestinationId?: string | null;
   minimizeNonDestinationMarkers?: boolean;
+  protectedMarkerIds?: ReadonlySet<string>;
   zoom: number;
   onSelect?: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
@@ -23,6 +24,7 @@ export const MapMarkers = memo(function MapMarkers({
   selectedId,
   routeDestinationId,
   minimizeNonDestinationMarkers = false,
+  protectedMarkerIds,
   zoom,
   onSelect,
   onMarkerTapOverride,
@@ -32,7 +34,7 @@ export const MapMarkers = memo(function MapMarkers({
 }: MapMarkersProps) {
   const zoomBucket = Math.min(20, Math.max(15, Math.floor(zoom)));
   const protectedIds = useMemo(() => {
-    const ids = new Set<string>();
+    const ids = new Set<string>(protectedMarkerIds ?? []);
     if (minimizeNonDestinationMarkers || onMarkerTapOverride) {
       items.forEach((item) => ids.add(item.id));
       return ids;
@@ -40,7 +42,7 @@ export const MapMarkers = memo(function MapMarkers({
     if (selectedId != null) ids.add(selectedId);
     if (routeDestinationId != null) ids.add(routeDestinationId);
     return ids;
-  }, [items, minimizeNonDestinationMarkers, onMarkerTapOverride, routeDestinationId, selectedId]);
+  }, [items, minimizeNonDestinationMarkers, onMarkerTapOverride, protectedMarkerIds, routeDestinationId, selectedId]);
   const spreadItems = useMemo(
     () => spreadCoLocatedItems(items, zoomBucket, { protectedIds }),
     [items, protectedIds, zoomBucket],

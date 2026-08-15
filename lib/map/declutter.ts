@@ -71,8 +71,9 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
   const groups = groupOverlappingItems(items, toleranceDegrees);
 
   for (const group of groups) {
+    const declutterableMembers = group.filter(({ item }) => !protectedIds.has(item.id));
+
     if (zoomBucket < FAN_OUT_MIN_ZOOM) {
-      const declutterableMembers = group.filter(({ item }) => !protectedIds.has(item.id));
       if (declutterableMembers.length < 2) {
         continue;
       }
@@ -87,13 +88,13 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
       continue;
     }
 
-    if (group.length < 2) {
+    if (declutterableMembers.length < 2) {
       continue;
     }
 
-    const centroid = getCentroid(group.map(({ item }) => item.coordinates));
+    const centroid = getCentroid(declutterableMembers.map(({ item }) => item.coordinates));
 
-    const orderedGroup = [...group].sort((a, b) => a.item.id.localeCompare(b.item.id));
+    const orderedGroup = [...declutterableMembers].sort((a, b) => a.item.id.localeCompare(b.item.id));
     const radiusPixels = Math.max(
       Math.min(42, BASE_RADIUS_PIXELS + (zoomBucket - FAN_OUT_MIN_ZOOM) * 6),
       (orderedGroup.length * PIN_SPACING_PIXELS) / (2 * Math.PI),

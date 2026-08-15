@@ -32,3 +32,12 @@ test("passes protected marker IDs into declutter", () => {
   assert.match(source, /if \(routeDestinationId != null\) ids\.add\(routeDestinationId\);/);
   assert.match(source, /spreadCoLocatedItems\(items, zoomBucket, \{\s*protectedIds\s*\}\)/);
 });
+
+test("seeds declutter protections from the page-owned runtime marker set", () => {
+  assert.match(source, /protectedMarkerIds\?: ReadonlySet<string>;/);
+  assert.match(
+    source,
+    /const protectedIds = useMemo\(\(\) => \{\s*const ids = new Set<string>\(protectedMarkerIds \?\? \[\]\);/,
+  );
+  assert.match(source, /protectedMarkerIds,/);
+});

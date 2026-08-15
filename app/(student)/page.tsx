@@ -529,6 +529,22 @@ function MapView({
   const routeFacingEnd = getRouteFacingEndpoint(runtimeState, navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null);
   const navigationOrigin = pendingNavigation?.origin ?? committedNavigation?.origin ?? runtimeState.navigation.origin;
   const isManualStartPending = runtimeState.navigation.phase === "acquiring";
+  const protectedMarkerIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (runtimeState.selectedItemId != null) ids.add(runtimeState.selectedItemId);
+    if (committedNavigation?.destinationId != null) ids.add(committedNavigation.destinationId);
+    if (pendingNavigation?.destinationId != null) ids.add(pendingNavigation.destinationId);
+    if (isManualStartPending) {
+      filtered.forEach((item) => ids.add(item.id));
+    }
+    return ids;
+  }, [
+    committedNavigation?.destinationId,
+    filtered,
+    isManualStartPending,
+    pendingNavigation?.destinationId,
+    runtimeState.selectedItemId,
+  ]);
   const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
   const hasCommittedOverlay = Boolean(committedRoute);
   const shouldReuseCommittedRoute =
@@ -1018,6 +1034,7 @@ function MapView({
           <MapSelectionLayer
             items={filtered}
             selectedId={runtimeState.selectedItemId}
+            protectedMarkerIds={protectedMarkerIds}
             navigationOwnsViewport={doesNavigationOwnViewport({
               hasDestination: Boolean(routeFacingEnd),
               manualStartPending: isManualStartPending,

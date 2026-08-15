@@ -237,3 +237,51 @@ test("large groups scale the fan-out ring so pins stay separated", () => {
 
   assert.equal(distinct.size, 8);
 });
+
+test("keeps runtime-owned markers at source coordinates at every zoom boundary", () => {
+  const source = [
+    item("selected", 10.745, 124.792),
+    item("committed", 10.745, 124.792),
+    item("pending", 10.745, 124.792),
+    item("nearby-a", 10.745, 124.792),
+    item("nearby-b", 10.745, 124.792),
+  ];
+  const protectedIds = new Set(["selected", "committed", "pending"]);
+
+  for (const zoom of [15, 15.99, 16, 16.01, 19, 20]) {
+    const spread = spreadCoLocatedItems(source, zoom, { protectedIds });
+
+    for (const protectedId of protectedIds) {
+      const rendered = spread.find(({ item: renderedItem }) => renderedItem.id === protectedId);
+      const original = source.find(({ id }) => id === protectedId);
+      assert.ok(rendered);
+      assert.ok(original);
+      assert.deepEqual(rendered.displayCoordinates, original.coordinates, `zoom ${zoom}: ${protectedId}`);
+    }
+
+    if (zoom >= 19) {
+      const unprotected = spread.filter(({ item: renderedItem }) => renderedItem.id.startsWith("nearby-"));
+      assert.equal(unprotected.length, 2);
+      assert.notDeepEqual(unprotected[0].displayCoordinates, unprotected[1].displayCoordinates);
+      assert.notDeepEqual(unprotected[0].displayCoordinates, source[3].coordinates);
+      assert.notDeepEqual(unprotected[1].displayCoordinates, source[4].coordinates);
+    }
+  }
+});
+
+test("leaves an all-protected overlap group unchanged at high zoom", () => {
+  const source = [
+    item("selected", 10.745, 124.792),
+    item("committed", 10.745, 124.792),
+    item("pending", 10.745, 124.792),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 19, {
+    protectedIds: new Set(source.map(({ id }) => id)),
+  });
+
+  assert.deepEqual(
+    spread.map(({ displayCoordinates }) => displayCoordinates),
+    source.map(({ coordinates }) => coordinates),
+  );
+});
