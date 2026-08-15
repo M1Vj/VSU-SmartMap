@@ -237,6 +237,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /MAP_E2E_ROUTE_B_LABEL/);
   assert.match(browserSpec, /data-map-route-destination/);
   assert.match(browserSpec, /rapid repeated native zoom/);
+  assert.match(browserSpec, /LATE_TAIL_OBSERVATION_MS\s*=\s*10_500/);
+  assert.match(browserSpec, /tailSignatures/);
   assert.match(browserSpec, /settledFrameCount/);
   assert.match(browserSpec, /postTail/);
   assert.match(browserSpec, /synthetic.*pinch/i);
@@ -254,6 +256,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(markerSource, /dataset\.mapRouteDestination/);
   const runnerSource = readFileSync(new URL("../../tools/run-map-e2e.mjs", import.meta.url), "utf8");
   assert.match(runnerSource, /selectionFlags/);
+  assert.match(runnerSource, /extraArgs\.length\s*>\s*0/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {

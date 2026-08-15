@@ -14,6 +14,9 @@ const EDGE_POSITIONS = ["center", "north", "east", "south", "west"] as const;
 const TOUCH_WIDTHS = new Set([320, 390, 412, 768]);
 const MARKER_KINDS = ["facility", "boarding"] as const;
 const KEYBOARD_KEYS = ["Enter", "Space"] as const;
+// Native Leaflet transitions can leave a delayed transform tail under throttling;
+// observe beyond the probe's 10s wall-clock budget before declaring stability.
+const LATE_TAIL_OBSERVATION_MS = 10_500;
 type MarkerKind = (typeof MARKER_KINDS)[number];
 type EdgePosition = (typeof EDGE_POSITIONS)[number];
 
@@ -997,7 +1000,13 @@ test("rapid repeated native zoom keeps committed route within frame gate", async
   const settledCamera = await cameraSignature(page);
   const settledFrameCount = snapshot.frameProbe.frameCount;
   const settledSampleCount = snapshot.frames.length;
-  await page.waitForTimeout(1_100);
+  const tailSignatures = [settledCamera];
+  const tailDeadline = Date.now() + LATE_TAIL_OBSERVATION_MS;
+  while (Date.now() < tailDeadline) {
+    await page.waitForTimeout(500);
+    tailSignatures.push(await cameraSignature(page));
+  }
+  expect(new Set(tailSignatures).size).toBe(1);
   const postTail = await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot());
   expect(postTail?.frameProbeRunning).toBe(false);
   expect(postTail?.frameProbe.frameCount).toBe(settledFrameCount);

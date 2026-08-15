@@ -28,6 +28,10 @@ if (hasSelectionFlag) {
   console.error("The map E2E release runner requires the full matrix; selection flags are not allowed.");
   process.exit(1);
 }
+if (extraArgs.length > 0) {
+  console.error("The map E2E release runner accepts no extra arguments; the full matrix is required.");
+  process.exit(1);
+}
 const child = spawn(
   process.execPath,
   [
