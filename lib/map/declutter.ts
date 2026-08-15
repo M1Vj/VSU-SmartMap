@@ -68,7 +68,7 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
           lat: Math.min(overlapDegrees.lat, buildingDegrees.lat),
           lng: Math.min(overlapDegrees.lng, buildingDegrees.lng),
         };
-  const groups = groupOverlappingItems(items, toleranceDegrees);
+  const groups = groupOverlappingItems(items, toleranceDegrees, protectedIds);
 
   for (const group of groups) {
     const declutterableMembers = group.filter(({ item }) => !protectedIds.has(item.id));
@@ -122,9 +122,11 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
 function groupOverlappingItems<T extends DeclutterableItem>(
   items: readonly T[],
   tolerance: LatLng,
+  protectedIds: ReadonlySet<string>,
 ): IndexedItem<T>[][] {
   const indexed = items
     .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !protectedIds.has(item.id))
     .sort((a, b) => a.item.id.localeCompare(b.item.id));
   const groups: IndexedItem<T>[][] = [];
 

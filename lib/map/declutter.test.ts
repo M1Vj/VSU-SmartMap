@@ -285,3 +285,35 @@ test("leaves an all-protected overlap group unchanged at high zoom", () => {
     source.map(({ coordinates }) => coordinates),
   );
 });
+
+test("protected overview markers cannot bridge beyond-tolerance neighbors", () => {
+  const source = [
+    item("a", 10.745, 124.792),
+    item("m-protected", 10.745, 124.7925),
+    item("z", 10.745, 124.793),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 15, {
+    protectedIds: new Set(["m-protected"]),
+  });
+
+  assert.deepEqual(spread[0].displayCoordinates, source[0].coordinates);
+  assert.deepEqual(spread[1].displayCoordinates, source[1].coordinates);
+  assert.deepEqual(spread[2].displayCoordinates, source[2].coordinates);
+});
+
+test("protected fan-out markers cannot bridge beyond-tolerance neighbors", () => {
+  const source = [
+    item("a", 10.745, 124.792),
+    item("m-protected", 10.745, 124.79207),
+    item("z", 10.745, 124.79214),
+  ];
+
+  const spread = spreadCoLocatedItems(source, 19, {
+    protectedIds: new Set(["m-protected"]),
+  });
+
+  assert.deepEqual(spread[0].displayCoordinates, source[0].coordinates);
+  assert.deepEqual(spread[1].displayCoordinates, source[1].coordinates);
+  assert.deepEqual(spread[2].displayCoordinates, source[2].coordinates);
+});
