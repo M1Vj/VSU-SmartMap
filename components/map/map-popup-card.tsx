@@ -9,10 +9,7 @@ import Image from "next/image";
 interface MapPopupCardProps {
   facility: Facility;
   onViewDetails: () => void;
-  /** The marker lifecycle owns exact-once dispatch; void keeps Task 6 callers source-compatible. */
-  onDirections?: () => number | null | void;
-  /** @deprecated Removed with MapBottomCard in Task 6. */
-  layout?: "popup" | "bottom-sheet";
+  onDirections?: () => number | null;
 }
 
 export function MapPopupCard({
@@ -49,12 +46,12 @@ export function MapPopupCard({
         </div>
       </div>
 
-      <div className="flex w-full gap-2">
+      <div className="flex w-full flex-wrap gap-2">
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="h-11 min-h-11 flex-1 gap-2 text-xs"
+          className="h-11 min-h-11 min-w-[6.5rem] flex-1 gap-2 text-xs"
           onClick={onViewDetails}
         >
           <Info className="h-3 w-3" aria-hidden />
@@ -63,7 +60,7 @@ export function MapPopupCard({
         <Button
           type="button"
           size="sm"
-          className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+          className="h-11 min-h-11 min-w-[6.5rem] flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
           onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />

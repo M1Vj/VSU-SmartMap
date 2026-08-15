@@ -53,16 +53,19 @@ const listing = {
 
 test("boarding popup keeps Details as a semantic link and Navigate as a 44px button", () => {
   const markup = renderToStaticMarkup(
-    <BoardingHouseMapPopupCard listing={listing} onDirections={() => undefined} />,
+    <BoardingHouseMapPopupCard listing={listing} onDirections={() => null} />,
   );
 
   const buttons = markup.match(/<button\b[^>]*>/g) ?? [];
+  const links = markup.match(/<a\b[^>]*>/g) ?? [];
   assert.equal(buttons.length, 1);
   assert.match(buttons[0], /type="button"/);
   assert.match(buttons[0], /h-11/);
   assert.match(buttons[0], /min-h-11/);
+  assert.match(buttons[0], /min-w-\[6\.5rem\]/);
   assert.match(markup, /<a\b[^>]*href="\/boarding-houses\/boarding-1"/);
   assert.match(markup, /<a\b[^>]*class="[^"\n]*h-11[^"\n]*min-h-11/);
+  assert.equal(links.every((link) => /min-w-\[6\.5rem\]/.test(link)), true);
   assert.match(markup, /pr-10/);
 });
 
@@ -71,7 +74,11 @@ test("boarding popup has no bottom-sheet or timer-based action behavior", async 
     new URL("./boarding-house-map-popup-card.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /layout\?: "popup" \| "bottom-sheet"/);
+  assert.match(source, /onDirections\?: \(\) => number \| null;/);
+  assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
+  assert.match(source, /className="flex w-full flex-wrap gap-2"/);
+  assert.match(source, /<Link[^>]*className="min-w-\[6\.5rem\] flex-1"/);
+  assert.match(source, /min-w-\[6\.5rem\] flex-1 gap-2 bg-blue-600/);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

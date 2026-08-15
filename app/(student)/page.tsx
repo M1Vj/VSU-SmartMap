@@ -2,10 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapContainerClient } from "@/components/map/map-container";
-import { MapBottomCard } from "@/components/map/map-bottom-card";
 import { MapSearchPanel } from "@/components/map/map-search-panel";
 import type { Facility } from "@/lib/types/facility";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
@@ -480,7 +478,6 @@ function MapView({
     selectedCategories,
     debouncedQuery,
     defaultTransportMode,
-    setFacilitySheetOpen,
   } = useApp();
   const hasResults = filtered.length > 0;
   const hasActiveFilters = selectedCategories.length > 0 || debouncedQuery.trim().length > 0;
@@ -510,7 +507,6 @@ function MapView({
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
   const [routeReportOpen, setRouteReportOpen] = useState(false);
-  const [mapBottomCardHeight, setMapBottomCardHeight] = useState(0);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
   const [reuseCommittedRouteAfterRestore, setReuseCommittedRouteAfterRestore] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -569,8 +565,6 @@ function MapView({
     canReportRoute: runtimeState.presentation.controls.canReportRoute,
     statusText: runtimeState.presentation.controls.statusText,
   };
-  const selectedMapItem: MapItem | null =
-    selectedBoardingHouse ?? (selectedFacility?.id === runtimeState.selectedItemId ? selectedFacility : null);
   const reportContext = useMemo(() => {
     const destination = [...filtered, ...(selectedBoardingHouse ? [selectedBoardingHouse] : [])]
       .find((item) => item.id === committedNavigation?.destinationId);
@@ -1024,10 +1018,7 @@ function MapView({
   }, [isManualStartPending, resolveManualStart]);
 
   return (
-    <div
-      className="relative h-full w-full"
-      style={{ "--map-mini-card-height": `${mapBottomCardHeight}px` } as CSSProperties}
-    >
+    <div className="relative h-full w-full">
       <div className="relative h-full w-full overflow-hidden">
         <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
@@ -1072,7 +1063,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              className="left-[12px] bottom-[calc(10rem+var(--map-mini-card-height,0px)+env(safe-area-inset-bottom))] md:bottom-[80px]"
+              className="left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-[80px]"
               destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 
@@ -1169,8 +1160,7 @@ function MapView({
         {hasHydrated && routeFacingEnd && (
           <div
             data-map-action-dock
-            style={{ "--map-mini-card-height": `${mapBottomCardHeight}px` } as CSSProperties}
-            className="pointer-events-none fixed inset-x-0 bottom-[calc(6.5rem+var(--map-mini-card-height,0px)+1rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
           >
             {runtimeState.presentation.controls.primaryAction !== "none" && (
               <Button
@@ -1201,14 +1191,6 @@ function MapView({
           open={routeReportOpen}
           onOpenChange={setRouteReportOpen}
           context={reportContext}
-        />
-
-        <MapBottomCard
-          item={selectedMapItem}
-          onHeightChange={setMapBottomCardHeight}
-          onClose={onClearSelection}
-          onViewDetails={() => setFacilitySheetOpen(true)}
-          onDirections={beginNavigationToItem}
         />
 
         {!hasResults && !error && !isLoading && hasActiveFilters && (

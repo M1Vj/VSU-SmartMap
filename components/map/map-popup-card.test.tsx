@@ -21,7 +21,7 @@ test("facility popup actions use explicit 44px button semantics", () => {
     <MapPopupCard
       facility={facility}
       onViewDetails={() => undefined}
-      onDirections={() => undefined}
+      onDirections={() => null}
     />,
   );
 
@@ -29,6 +29,7 @@ test("facility popup actions use explicit 44px button semantics", () => {
   assert.equal(buttons.length, 2);
   assert.equal(buttons.every((button) => /type="button"/.test(button)), true);
   assert.equal(buttons.every((button) => /h-11/.test(button) && /min-h-11/.test(button)), true);
+  assert.equal(buttons.every((button) => /min-w-\[6\.5rem\]/.test(button)), true);
   assert.match(markup, /Details/);
   assert.match(markup, /Navigate/);
   assert.match(markup, /pr-10/);
@@ -36,7 +37,10 @@ test("facility popup actions use explicit 44px button semantics", () => {
 
 test("facility popup no longer contains bottom-sheet or fake loading behavior", async () => {
   const source = await readFile(new URL("./map-popup-card.tsx", import.meta.url), "utf8");
-  assert.match(source, /layout\?: "popup" \| "bottom-sheet"/);
+  assert.match(source, /onDirections\?: \(\) => number \| null;/);
+  assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
+  assert.match(source, /className="flex w-full flex-wrap gap-2"/);
+  assert.equal((source.match(/min-w-\[6\.5rem\] flex-1/g) ?? []).length, 2);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

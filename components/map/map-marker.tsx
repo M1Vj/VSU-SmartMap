@@ -475,8 +475,8 @@ export const MapMarker = memo(function MapMarker({
           closeButton={false}
           closeOnEscapeKey={false}
           autoPan
-          autoPanPaddingTopLeft={[12, 96]}
-          autoPanPaddingBottomRight={[12, 168]}
+          autoPanPaddingTopLeft={[12, 128]}
+          autoPanPaddingBottomRight={[12, 248]}
         >
           <MapMarkerPopupShell
             label={accessibleName}

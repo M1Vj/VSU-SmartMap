@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("Option A splits status from a safe-area action dock and lifts both facility and boarding cards", async () => {
+test("Option A keeps status and actions clear of the anchored popup surface", async () => {
   const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
-  const cardSource = await readFile(new URL("../../components/map/map-bottom-card.tsx", import.meta.url), "utf8");
   const facilityPopupSource = await readFile(new URL("../../components/map/map-popup-card.tsx", import.meta.url), "utf8");
   const boardingPopupSource = await readFile(new URL("../../components/map/boarding-house-map-popup-card.tsx", import.meta.url), "utf8");
 
   assert.match(pageSource, /data-map-status-hud/);
   assert.match(pageSource, /data-map-action-dock/);
-  assert.match(pageSource, /pointer-events-none fixed inset-x-0 bottom-\[calc\(6\.5rem\+var\(--map-mini-card-height,0px\)\+1rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
-  assert.match(pageSource, /--map-mini-card-height/);
+  assert.doesNotMatch(pageSource, /MapBottomCard|mapBottomCardHeight|--map-mini-card-height/);
+  assert.doesNotMatch(pageSource, /onHeightChange=\{setMapBottomCardHeight\}/);
+  assert.match(pageSource, /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(pageSource, /pointer-events-none fixed inset-x-0 bottom-\[calc\(7\.5rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
   const statusStart = pageSource.indexOf("data-map-status-hud");
   const actionStart = pageSource.indexOf("data-map-action-dock");
   assert.ok(statusStart >= 0 && actionStart > statusStart);
@@ -25,21 +26,18 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   const dockSource = pageSource.slice(actionStart);
   assert.equal((dockSource.match(/h-11/g) ?? []).length >= 2, true);
   assert.match(dockSource, /pointer-events-auto h-11/);
-  assert.match(cardSource, /bottom-\[calc\(7\.25rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
-  assert.match(cardSource, /ResizeObserver/);
-  assert.match(cardSource, /onHeightChange/);
-  assert.match(cardSource, /observer\.disconnect\(\)/);
-  assert.match(cardSource, /onHeightChange\?\.\(0\)/);
-  assert.match(cardSource, /observeMapCardHeight/);
-  assert.match(cardSource, /useLayoutEffect/);
-  assert.match(cardSource, /role="dialog"/);
+  assert.doesNotMatch(pageSource, /ResizeObserver|observeMapCardHeight|layout="bottom-sheet"/);
   const selectionSource = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
   assert.match(selectionSource, /markMapPerformance\(/);
   assert.match(selectionSource, /"map-ready"/);
   assert.match(selectionSource, /map\.whenReady\(/);
   assert.match(selectionSource, /requestAnimationFrame\(/);
-  assert.match(facilityPopupSource, /h-11 min-h-11 flex-1/);
-  assert.match(boardingPopupSource, /h-11 min-h-11 flex-1/);
+  assert.match(facilityPopupSource, /h-11 min-h-11 min-w-\[6\.5rem\] flex-1/);
+  assert.match(boardingPopupSource, /h-11 min-h-11 min-w-\[6\.5rem\] flex-1/);
+  assert.match(facilityPopupSource, /onDirections\?: \(\) => number \| null;/);
+  assert.match(boardingPopupSource, /onDirections\?: \(\) => number \| null;/);
+  assert.doesNotMatch(facilityPopupSource, /layout\?:|bottom-sheet/);
+  assert.doesNotMatch(boardingPopupSource, /layout\?:|bottom-sheet/);
   assert.doesNotMatch(facilityPopupSource, /<h3[^>]*onClick/);
   assert.doesNotMatch(boardingPopupSource, /<h3[^>]*onClick/);
 });
@@ -143,8 +141,23 @@ test("popup width and margin overrides remain scoped to the popup card", async (
   );
   assert.doesNotMatch(css, /(?:^|\n)\s*\.leaflet-popup-content-wrapper\s*\{/);
   assert.doesNotMatch(css, /(?:^|\n)\s*\.leaflet-popup-content\s*\{/);
-  assert.match(facilitySource, /layout\?: "popup" \| "bottom-sheet"/);
-  assert.match(boardingSource, /layout\?: "popup" \| "bottom-sheet"/);
-  assert.doesNotMatch(facilitySource, /isBottomSheet|layout\s*===/);
-  assert.doesNotMatch(boardingSource, /isBottomSheet|layout\s*===/);
+  assert.match(facilitySource, /onDirections\?: \(\) => number \| null;/);
+  assert.match(boardingSource, /onDirections\?: \(\) => number \| null;/);
+  assert.doesNotMatch(facilitySource, /layout\?:|bottom-sheet|isBottomSheet|layout\s*===/);
+  assert.doesNotMatch(boardingSource, /layout\?:|bottom-sheet|isBottomSheet|layout\s*===/);
+});
+
+test("anchored popup auto-pan and height contracts protect compact mobile viewports", async () => {
+  const [markerSource, shellSource] = await Promise.all([
+    readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../components/map/map-marker-popup-shell.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, 128\]\}/);
+  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, 248\]\}/);
+  assert.match(
+    shellSource,
+    /max-h-\[min\(60dvh,calc\(100dvh-23\.5rem\),22rem\)\]/,
+  );
+  assert.match(shellSource, /min-h-0 overflow-y-auto/);
 });

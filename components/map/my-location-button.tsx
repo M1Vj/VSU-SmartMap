@@ -25,10 +25,10 @@ export function MyLocationButton({
       size="icon"
       onClick={onLocate}
       className={cn(
-        "absolute bottom-[calc(10rem+var(--map-mini-card-height,0px)+env(safe-area-inset-bottom))] z-[1000] bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm",
+        "absolute left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] z-[1000] bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm",
         "hover:bg-accent hover:text-accent-foreground",
         "transition-colors duration-200",
-        "h-[30px] w-[30px] min-w-[30px] rounded-sm md:bottom-[80px]",
+        "h-11 w-11 min-w-11 rounded-full md:bottom-[80px]",
         isTracking && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background",
         className
       )}

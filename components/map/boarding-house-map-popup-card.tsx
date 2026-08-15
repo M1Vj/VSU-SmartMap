@@ -13,10 +13,7 @@ import { useWalkEstimate } from "@/components/boarding-houses/use-walk-estimate"
 type BoardingHouseMapPopupCardProps = {
   listing: BoardingHouseSummary;
   onDetails?: () => void;
-  /** The marker lifecycle owns exact-once dispatch; void keeps Task 6 callers source-compatible. */
-  onDirections?: () => number | null | void;
-  /** @deprecated Removed with MapBottomCard in Task 6. */
-  layout?: "popup" | "bottom-sheet";
+  onDirections?: () => number | null;
 };
 
 export function BoardingHouseMapPopupCard({
@@ -85,14 +82,18 @@ export function BoardingHouseMapPopupCard({
         </p>
       </div>
 
-      <div className="flex w-full gap-2">
+      <div className="flex w-full flex-wrap gap-2">
         <Button
           asChild
           size="sm"
           variant="outline"
-          className="h-11 min-h-11 flex-1 gap-2 text-xs"
+          className="h-11 min-h-11 min-w-[6.5rem] flex-1 gap-2 text-xs"
         >
-          <Link href={`/boarding-houses/${listing.slug}`} onClick={() => onDetails?.()}>
+          <Link
+            href={`/boarding-houses/${listing.slug}`}
+            className="min-w-[6.5rem] flex-1"
+            onClick={() => onDetails?.()}
+          >
             <Info className="h-3 w-3" aria-hidden />
             Details
           </Link>
@@ -100,7 +101,7 @@ export function BoardingHouseMapPopupCard({
         <Button
           type="button"
           size="sm"
-          className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+          className="h-11 min-h-11 min-w-[6.5rem] flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
           onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />
