@@ -4,11 +4,13 @@
 
 **Goal:** Keep routes, destination markers, and the basemap spatially synchronized during every zoom frame while replacing the mobile bottom card with a one-tap, marker-anchored, accessible popup.
 
-**Architecture:** Remove every private Leaflet camera driver and use one native Leaflet zoom contract plus a bottom-left native control across all map surfaces. Keep the committed Leaflet route overlay stable, protect runtime-owned marker coordinates at every zoom, and use one Leaflet popup shell for facility and boarding-house quick actions on every viewport. Add an opt-in preview-only evidence probe and Playwright harness for the frame-level and genuine-touch gates that source tests cannot prove.
+**Architecture:** Remove every private Leaflet camera driver and use one native Leaflet zoom contract plus a bottom-left native control across all map surfaces. Keep the committed Leaflet route overlay stable with its normal/default Leaflet smoothing behavior, protect runtime-owned marker coordinates at every zoom, and use one Leaflet popup shell for facility and boarding-house quick actions on every viewport. Add a tiny exact-origin lazy bridge to the opt-in preview-only evidence probe and Playwright harness for the frame-level and genuine-touch gates that source tests cannot prove.
 
 **Tech Stack:** Next.js 16.2.12, React 19, TypeScript, Leaflet 1.9, MapLibre GL Leaflet adapter, Node test runner with `tsx`, Tailwind CSS, Playwright 1.62.1 using the installed Chrome channel, Vercel preview deployments.
 
 **Approved design:** `docs/superpowers/specs/2026-08-15-broad-map-route-popup-hardening-design.md`
+
+**Verification status:** Local unit/source/type/lint gates document the harness contract only. The deployed preview matrix, fixture/capability classification, served-SHA check, and Task 7B two-run trigger decision remain pending; no Task 7B pass or release pass is claimed here.
 
 ---
 
@@ -34,6 +36,7 @@
 - `components/map/map-popup-card.tsx` — compact facility content and 44px actions only.
 - `components/map/boarding-house-map-popup-card.tsx` — compact boarding content, semantic Details link, and 44px Navigate action.
 - `components/map/map-bottom-card.tsx`, `lib/map/map-card-height.ts`, `lib/map/map-card-height.test.ts`, `components/map/use-is-mobile.ts` — delete after consumer search proves they are unused.
+- `lib/map/e2e-probe-bridge.ts` — tiny exact-origin gate and lazy importer; default map loads must not fetch the heavy evidence core.
 - `lib/map/e2e-probe.ts` — opt-in, preview/local-only spatial and event evidence API; absent without `?mapEvidence=1`.
 - `e2e/map-broad-route-popup.spec.ts`, `playwright.config.ts` — repeatable viewport/touch/frame verification.
 
@@ -1029,7 +1032,7 @@ Expected: no application source hit.
 rtk proxy node --experimental-test-module-mocks --import tsx --test components/map/mobile-map-control-layout.test.ts lib/map/map-option-a.test.ts components/map/map-markers.test.ts
 ```
 
-Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency. Pixel-stable 160px/120px offsets do not move when the root font grows. Popup tests also prove `autoPanPaddingTopLeft={[12, 128]}`, `autoPanPaddingBottomRight={[12, 248]}`, `max-h-[min(60dvh,calc(100dvh-376px),22rem)]`, wrapped/growable action rows, and 44px controls with a `6.5rem` minimum width for 200% text scaling.
+Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency. Popup clearance reads measured visible obstacle rectangles and coalesces updates through one settled frame rather than timer/observer thrash. Pixel-stable 160px/120px offsets do not move when the root font grows. Popup tests also prove `autoPanPaddingTopLeft={[12, 128]}`, `autoPanPaddingBottomRight={[12, 248]}`, `max-h-[min(60dvh,calc(100dvh-376px),22rem)]`, wrapped/growable action rows, and 44px controls with a `6.5rem` minimum width for 200% text scaling.
 
 - [ ] **Step 6: Commit bottom-card removal**
 
@@ -1054,6 +1057,7 @@ rtk git commit -m "refactor(map): replace mobile card with anchored popup"
 - Modify: `components/map/map-marker.tsx`
 - Modify: `components/map/map-selection-layer.tsx`
 - Create: `e2e/map-broad-route-popup.spec.ts`
+- Create: `lib/map/e2e-probe-bridge.ts`
 
 - [ ] **Step 1: Verify and install the pinned browser harness dependency**
 
@@ -1179,7 +1183,7 @@ export function getSymmetricPolylineError(
 
 The module stores registered Leaflet map, MapLibre map, route polyline/path, authoritative destination coordinates/icon geometry, a maximum 100-event buffer, frame samples, and E2E-only route delay/fail-next controls. It maps every raw activation/request correlation to a session-local increasing integer before storage; both the public event buffer and private correlation map are bounded to 100 and cleared by `reset()`. The public event record exposes only `{ sequence, name, correlationOrdinal, modality }`; snapshots are detached copies and never expose item IDs, raw request IDs, coordinates, paths, URLs, names, error text, or user data. Reject invalid runtime enum values rather than retaining them.
 
-`initializeMapEvidence` is the sole global-lifecycle owner. It installs `window.__VSU_MAP_E2E__` only when `isMapEvidenceEnabled(url)` is true, never overwrites a foreign global, and uses captured state plus an owner count so React Strict Mode, two owners, stale disposers, and foreign-global replacement cannot dispose the wrong probe. Final cleanup makes stale API methods inert, cancels RAF/timers, removes listeners, clears every layer/map reference, correlation map, and buffer, and deletes the global only when it still points to that exact API object. Registration cleanups clear only the exact matching object they installed. Its public methods are `snapshot()`, `events()`, `reset()`, `startFrameProbe()`, `stopFrameProbe()`, `setRouteDelayMs(number)`, `failNextRoute()`, and `zoomTo(number)`. `reset()` also clears delay/failure state. Delay input rejects non-finite/negative values and is capped; delay/failure consumption is abort-aware, removes listeners on settle, and is inert when the probe is disabled.
+`e2e-probe-bridge.ts` is the tiny production lifecycle boundary. It exact-origin-checks the URL and dynamically imports the heavy `e2e-probe.ts` core only for the trusted origins with exactly one `?mapEvidence=1`; components must not statically import the core. The bridge queues bounded early registrations/events, never overwrites a foreign global, and uses captured state plus an owner count so React Strict Mode, two owners, stale disposers, and foreign-global replacement cannot dispose the wrong probe. The core's `initializeMapEvidence` owns the opt-in API after attachment. Final cleanup makes stale API methods inert, cancels RAF/timers, removes listeners, clears every layer/map reference, correlation map, and buffer, and deletes the global only when it still points to that exact API object. Registration cleanups clear only the exact matching object they installed. Its public methods are `snapshot()`, `events()`, `reset()`, `startFrameProbe()`, `stopFrameProbe()`, `setRouteDelayMs(number)`, `failNextRoute()`, and `zoomTo(number)`. `reset()` also clears delay/failure state. Delay input rejects non-finite/negative values and is capped; delay/failure consumption is abort-aware, removes listeners on settle, and is inert when the probe is disabled.
 
 Add lifecycle tests which install against an isolated fake `window`, start a fake RAF and delayed route, then call cleanup and assert the global, RAF, timer, map/layer references, and listeners are gone. Cover two owners, Strict Mode setup/cleanup, a foreign pre-existing global, stale disposer after reinitialization, stale API calls, reset semantics, invalid delay values, bounded private/public retention, detached return values, and raw-data leakage negatives. Restore `window`, `globalThis`, RAF, cancelRAF, timers, and `matchMedia` in `test.afterEach`, even when an assertion fails.
 
@@ -1227,14 +1231,14 @@ This makes delayed and failed replacement scenarios deterministic only when the 
 
 For each animation frame, compare authoritative geometry in one live screen coordinate space:
 
-- in vector mode, project committed coordinates with MapLibre and transform the canvas-local points through the rendered canvas rectangle/client dimensions into the outer Leaflet map-container coordinate space; this includes the adapter's current CSS offset/scale during `zoomanim`;
+- in vector mode, project committed coordinates with MapLibre and transform its already-padded local points through the live rendered canvas (`getBoundingClientRect()` plus client dimensions) into the outer Leaflet map-container coordinate space; do not add `getPadding()` a second time, and include the adapter's current CSS offset/scale during `zoomanim`;
 - in satellite mode, project committed coordinates through the current rendered Leaflet overlay/map-pane affine transform, not an untransformed target-camera `latLngToContainerPoint`;
 - clip expected segments to the visible map rectangle while retaining route order and every visible vertex; subdivide to at most 16 CSS pixels between samples, cap at 256, and emit typed `sampling-capped` failure if both guarantees cannot hold;
-- sample the rendered SVG path in route order through `getPointAtLength()` and `getScreenCTM()`, normalize it to the same map rectangle, resample expected/rendered visible polylines by normalized cumulative arc length to the same count, and use the maximum pointwise Euclidean distance as `routeErrorPx`; keep `getSymmetricPolylineError` only as a pure secondary shape regression, not as the runtime oracle that can match the wrong nearby segment;
+- sample the rendered SVG path in route order through `getPointAtLength()` and `getScreenCTM()`, normalize it to the same map rectangle, resample expected/rendered visible polylines by normalized cumulative arc length to exactly one bounded comparison count, and use the maximum pointwise Euclidean distance as `routeErrorPx`; keep `getSymmetricPolylineError` only as a pure secondary shape regression, not as the runtime oracle that can match the wrong nearby segment;
 - project the independently registered authoritative destination coordinate, then compare it with the configured `iconAnchor` transformed through the marker element rectangle and declared icon size; never use `marker.getLatLng()` as the expected coordinate and never assume DOM bottom-center;
 - expose renderer alignment only after MapLibre local points are normalized through the rendered canvas transform; include synthetic offset, scale, padding, and 3–5px translation tests.
 
-Set the Leaflet `Polyline` to `smoothFactor={0}` so committed route vertices are not discarded before measurement. Arm the probe only after a ready baseline proves map/path/CTM/marker/projection availability and rendered-vs-authoritative Leaflet geometry equality. Store frame index/time, zoom, zoom-animation state, expected/rendered counts, typed failure, and probe cost. A missing/invalid/incompatible sequence records `routeVisible: false` and fails the row. Stop after 600 frames, explicit `stopFrameProbe()`, or a 10-second wall-clock timeout; visibility changes and every exit path must cancel RAF/timers/listeners. Keep per-frame work bounded and report probe cost so instrumentation-induced stalls cannot masquerade as application drift.
+Preserve the production Leaflet `Polyline` normal/default `smoothFactor`; do not force a probe-only simplification setting. Arm the probe only after a ready baseline proves map/path/CTM/marker/projection availability and rendered-vs-authoritative Leaflet geometry equality, and measure the actual rendered path within the honest threshold. Store frame index/time, zoom, zoom-animation state, expected/rendered counts, typed failure, and probe cost. A missing/invalid/incompatible sequence records `routeVisible: false` and fails the row. Stop after 600 frames, explicit `stopFrameProbe()`, or a 10-second wall-clock timeout; visibility changes and every exit path must cancel RAF/timers/listeners. Keep per-frame work bounded and report probe cost so instrumentation-induced stalls cannot masquerade as application drift.
 
 - [ ] **Step 6: Add Playwright configuration and exact matrix tests**
 
@@ -1257,6 +1261,8 @@ const VIEWPORTS = [
 ];
 ```
 
+The bridge allowlist is exact: `http://localhost:3000`, `http://127.0.0.1:3000`, and `https://vsu-smartmap-git-perf-map-broad-rewrite-vjs-projects-def7d06b.vercel.app`; credentials, duplicate `mapEvidence` values, other ports, and deployment-specific URLs remain inert. Components may import only the bridge, so the heavy geometry core is absent from the normal initial map chunk.
+
 Use `touchscreen.tap` in touch-enabled contexts for facility and `/?boarding=1` markers. Assert exactly one visible `.leaflet-popup`, no bottom card, all popup controls at least 44px on mobile, popup bounds within usable map bounds, Details opens once, Navigate creates one request and feedback event, close/Escape emits no route clear, and A-to-B transfer records no background event.
 
 For keyboard rows, assert `document.activeElement` becomes the shell's first control after Enter/Space and returns to the originating marker after Close/Escape. For pointer rows, assert activation does not force focus into the popup.
@@ -1278,19 +1284,19 @@ Before Details, Navigate, Close, Escape, and A-to-B transfer, call `window.__VSU
 
 - [ ] **Step 7: Prove the probe is absent by default and run local browser RED/GREEN**
 
-Run the Node probe test, build normally, serve it, and verify a default page evaluates `window.__VSU_MAP_E2E__ === undefined`. Then run the instrumented query against the broad preview:
+Run the Node probe test, build normally, serve it, and compare two fresh browser contexts on the same route. The opt-in context must wait for `window.__VSU_MAP_E2E__`, collect its `/_next/static/chunks/` request URLs, and produce a non-empty opt-in-only chunk set. The default context must collect the same route's chunk URLs, evaluate `window.__VSU_MAP_E2E__ === undefined`, and request none of those evidence-only chunks. Close both pages and contexts in `finally`. Then run the instrumented query against the broad preview:
 
 ```bash
 rtk proxy node --import tsx --test lib/map/e2e-probe.test.ts
 MAP_E2E_BASE_URL="https://vsu-smartmap-git-perf-map-broad-rewrite-vjs-projects-def7d06b.vercel.app/?mapEvidence=1" rtk npm run test:map-e2e
 ```
 
-Expected: probe unit tests PASS; the normal page exposes no global; every browser matrix row passes or is explicitly reported BLOCKED with the missing fixture/browser capability.
+Expected: probe unit tests PASS; the normal page exposes no global or evidence-only core chunk; every browser matrix row passes or is explicitly reported BLOCKED with the missing fixture/browser capability. This local/default transport proof does not substitute for the deployed matrix or decide Task 7B.
 
 - [ ] **Step 8: Commit the evidence harness**
 
 ```bash
-rtk git add package.json package-lock.json playwright.config.ts e2e/map-broad-route-popup.spec.ts lib/map/e2e-probe.test.ts lib/map/e2e-probe.ts components/map/leaflet-react.tsx components/map/map-wrapper.tsx components/map/navigation-layer.tsx components/map/map-marker.tsx components/map/map-selection-layer.tsx
+rtk git add package.json package-lock.json playwright.config.ts e2e/map-broad-route-popup.spec.ts lib/map/e2e-probe-bridge.ts lib/map/e2e-probe.test.ts lib/map/e2e-probe.ts components/map/leaflet-react.tsx components/map/map-wrapper.tsx components/map/navigation-layer.tsx components/map/map-marker.tsx components/map/map-selection-layer.tsx
 rtk git commit -m "test(map): add route and popup browser evidence"
 ```
 
@@ -1299,6 +1305,8 @@ rtk git commit -m "test(map): add route and popup browser evidence"
 **Dependencies:** Task 7 approved and trigger reproduced. **Owner/checkpoint:** one renderer worker owns the MapLibre context/layer plus `NavigationLayer` renderer split; commit, spec review, adversarial architecture review, and code-quality review must pass before Task 8.
 
 **Trigger:** Any clean vector row with `routeVisible === false`, a typed missing-sample failure, or `routeErrorPx`/`rendererErrorPx` above `2.0` immediately BLOCKS release. Rerun that exact method and viewport at the same SHA after clearing cache and restarting the context. Two consecutive failures of the same row trigger this task. A pass after a failure does not erase the block until the same row produces two consecutive passes at that SHA. If the complete native matrix produces two consecutive passes, mark this task **not triggered** with both run artifacts; do not add a second renderer speculatively.
+
+**Current status:** Pending. No deployed native matrix or same-SHA two-run trigger decision is recorded in this plan, so Task 7B must not be labeled passed or not triggered yet.
 
 **Files when triggered:**
 - Create: `components/map/maplibre-map-context.tsx`
@@ -1370,7 +1378,7 @@ layout: { "line-join": "round", "line-cap": "round" },
 paint: { "line-color": "#3b82f6", "line-width": 5, "line-opacity": 0.9 },
 ```
 
-Start/end circle layers use radius `6` with green/red fill and stroke. In `NavigationLayer`, first import `Polyline as LeafletPolyline` from `leaflet` and extract the existing committed Leaflet fragment into a module-local `LeafletCommittedRoute({ route }: { route: PathResult })` that owns its declared `useRef<LeafletPolyline | null>`, registers that ref for evidence, renders `smoothFactor={0}`, and retains the `.map-route-line`, `.map-route-start`, and `.map-route-end` classes from Task 3. Then obtain `mapLibreMap = useMapLibreMap()` and render exactly one owner:
+Start/end circle layers use radius `6` with green/red fill and stroke. In `NavigationLayer`, first import `Polyline as LeafletPolyline` from `leaflet` and extract the existing committed Leaflet fragment into a module-local `LeafletCommittedRoute({ route }: { route: PathResult })` that owns its declared `useRef<LeafletPolyline | null>`, registers that ref for evidence, preserves the normal/default Leaflet smoothing behavior, and retains the `.map-route-line`, `.map-route-start`, and `.map-route-end` classes from Task 3. Then obtain `mapLibreMap = useMapLibreMap()` and render exactly one owner:
 
 ```tsx
 return mapLibreMap ? (

@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved product direction for the broad map rewrite. This design is additive to `2026-08-14-broad-map-rewrite-design.md` and supersedes its mobile mini-card presentation for selected facilities and boarding houses.
+Approved product direction for the broad map rewrite. This design is additive to `2026-08-14-broad-map-rewrite-design.md` and supersedes its mobile mini-card presentation for selected facilities and boarding houses. The deployed browser matrix and the Task 7B renderer-trigger decision remain pending; this document does not claim a release pass.
 
 ## Goal
 
@@ -54,6 +54,7 @@ The existing action buttons do not require two clicks by design. The exact first
 - `Close`, `Details`, and `Navigate` provide at least 44 by 44 CSS pixels on touch viewports.
 - Actions remain side by side when their labels fit without truncation; they may stack only for localization, extreme text scaling, or a viewport too narrow to preserve the target size.
 - Leaflet auto-pan keeps the popup within the usable map viewport, accounting for the header/search area, bottom navigation, route action dock, and safe-area insets.
+- Popup clearance uses measured visible obstacle rectangles (including safe-area-aware controls) and coalesces updates through one settled frame; it must not depend on stale card-height state, timers, or per-observer thrash.
 - The popup arrow remains visually anchored to its marker after auto-pan.
 - Popup content must not cover or disable the Clear/Cancel and Report controls once navigation is active.
 
@@ -75,6 +76,8 @@ The implementation removes both private camera controllers, `SmoothWheelZoom` an
 
 The route remains mounted from the committed runtime snapshot during zoom, refresh, replacement, and recoverable failure. Zoom never recalculates route geometry, clears the committed path, restores full-size markers, or swaps in an uncommitted path.
 
+The production Leaflet route keeps its normal/default `smoothFactor` behavior. The evidence probe measures the rendered path as it exists in production and must not force a probe-only simplification setting or otherwise change the happy path.
+
 If the native synchronization implementation cannot keep intermediate-frame route drift within the acceptance threshold, the final broad implementation must render the vector-mode route from a MapLibre GeoJSON source/layer so the vector basemap and route share one renderer. Leaflet remains the raster/satellite fallback. This is an acceptance-controlled escalation, not permission to ship a partially synchronized route.
 
 ### Coordinate ownership
@@ -95,6 +98,13 @@ During wheel, pinch, plus/minus, double-click, keyboard, and programmatic zoom:
 - the destination marker stays on its projected true coordinate within the same tolerance;
 - the MapLibre camera, Leaflet camera, route overlay, and protected marker settle without a visible post-zoom snap;
 - rapid consecutive zoom intents retire or coalesce correctly without a delayed 10-15 second animation tail on a throttled or hidden tab.
+
+### Evidence oracle and harness boundary
+
+- The opt-in evidence surface is behind a tiny exact-origin bridge. Only `http://localhost:3000`, `http://127.0.0.1:3000`, and the exact stable Broad preview alias `https://vsu-smartmap-git-perf-map-broad-rewrite-vjs-projects-def7d06b.vercel.app` with exactly one `?mapEvidence=1` value may load the heavy probe core; credentials, duplicate query values, other ports, and deployment-specific or attacker origins remain inert.
+- Production map components statically import only the bridge. The geometry/event core is dynamically imported after opt-in, and default-page evidence uses two fresh browser contexts on the same route: the opted-in page waits for `window.__VSU_MAP_E2E__` and records its hashed `/_next/static/chunks/` requests; the default page records the same requests without evidence. The opt-in-only chunk set must be non-empty, none may appear in the default set, and the default global must remain absent.
+- Frame expectations use the live rendered frame: MapLibre `project()` local (already-padded) coordinates are normalized through the current canvas client dimensions and `getBoundingClientRect()` into the Leaflet map-container space; satellite expectations include the live Leaflet pane affine transform. Destination expectations use independently registered runtime coordinates and the configured icon anchor, never marker `getLatLng()`.
+- Visible route segments retain order and every visible vertex, are clipped to the map rectangle, and are bounded to at most 16 CSS pixels between samples and 256 samples. Expected and rendered polylines are resampled by normalized cumulative arc length to one bounded count and compared pointwise. Missing, invalid, stale, unready, incompatible, or uncapped geometry records a typed failure rather than passing with a nullable sample.
 
 ## State and event ownership
 
@@ -123,6 +133,8 @@ This is the smallest architecture change that removes the unsupported private zo
 ### Conditional escalation: MapLibre GeoJSON route in vector mode
 
 This gives the strongest same-renderer guarantee but adds dual-renderer route ownership, source/layer lifecycle management, styling duplication, and basemap-switch integration. It is required only if the chosen native synchronization path fails the frame-level acceptance gate.
+
+Task 7B is therefore a pending conditional gate, not a completed or passed renderer change. It may be marked not triggered only after two consecutive same-SHA native vector runs pass the complete required matrix and their artifacts are retained.
 
 ### Rejected: keep the bottom card and patch hit testing
 
@@ -257,6 +269,8 @@ Run on the deployed broad preview using genuine mobile emulation where touch beh
 Record per-frame route/projection samples, callback/request counts, popup and control bounding boxes, console errors, long tasks, and relevant screenshots or recordings. A source-pattern test or final-frame screenshot is not sufficient evidence for the route synchronization or first-tap requirements.
 
 Frame evidence must use an independent authoritative oracle in the same rendered screen coordinate space as the current animation frame. Vector expectations are normalized through the rendered MapLibre canvas transform; satellite expectations include the rendered Leaflet pane transform. Destination expectations come from the runtime item's true coordinates and configured icon anchor, never from the marker's own possibly displaced `getLatLng()`. Visible route segments remain ordered and bounded to 16-pixel sampling; missing, clipped-incompatibly, undersampled, stale, or unready geometry is a typed failed row rather than a nullable pass.
+
+Report native and synthetic evidence separately. Native evidence includes the installed Chrome channel's real mouse/touch/keyboard paths and native Leaflet controls. CDP pinch/pen, safe-area overrides, root-font scaling, forced tile failures, and lifecycle throttling are synthetic controls; they cannot be presented as hardware or native browser proof. Missing deployed fixtures or unavailable capabilities are explicit **blocked** rows. The deployed matrix, served-SHA check, and the two-run Task 7B trigger decision remain pending until Task 8 records them.
 
 ## Completion and release gates
 
