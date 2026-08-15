@@ -326,10 +326,33 @@ export const MapMarker = memo(function MapMarker({
       const obstacles = Array.from(
         document.querySelectorAll<HTMLElement>(obstacleSelector),
       ).flatMap((element): PopupObstacleRect[] => {
+        if (!element.isConnected) return [];
+        const computedStyle = window.getComputedStyle(element);
+        if (computedStyle.display === "none" || computedStyle.visibility === "hidden") return [];
         const side = element.dataset.mapPopupObstacle;
         if (side !== "top" && side !== "bottom") return [];
         const rect = element.getBoundingClientRect();
-        return [{ side, top: rect.top, bottom: rect.bottom }];
+        if (
+          !(rect.width > 0) ||
+          !(rect.height > 0) ||
+          rect.bottom <= mapRect.top ||
+          rect.top >= mapRect.bottom ||
+          rect.right <= mapRect.left ||
+          rect.left >= mapRect.right
+        ) {
+          return [];
+        }
+        return [{
+          side,
+          top: rect.top,
+          bottom: rect.bottom,
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          height: rect.height,
+          connected: true,
+          visible: true,
+        }];
       });
       setPopupAutoPanPadding(
         computePopupAutoPanPadding({
@@ -364,6 +387,7 @@ export const MapMarker = memo(function MapMarker({
     if (!popup) return;
     popup.options.autoPanPaddingTopLeft = [12, popupAutoPanPadding.top];
     popup.options.autoPanPaddingBottomRight = [12, popupAutoPanPadding.bottom];
+    popup.update();
   }, [popupAutoPanPadding, readyMarker]);
 
   useEffect(() => {

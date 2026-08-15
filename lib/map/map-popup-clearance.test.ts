@@ -58,3 +58,40 @@ test("popup clearance uses the largest edge clearance when several obstacles ove
     { top: 200, bottom: 292 },
   );
 });
+
+test("popup clearance ignores disconnected, hidden, zero-size, and out-of-map obstacles", () => {
+  const mapRect = { top: 0, bottom: 568, left: 0, right: 320 };
+  const baseline = {
+    top: DEFAULT_POPUP_TOP_PADDING,
+    bottom: DEFAULT_POPUP_BOTTOM_PADDING,
+  };
+  const obstacle = {
+    side: "bottom" as const,
+    top: 260,
+    bottom: 448,
+    left: 0,
+    right: 320,
+    width: 320,
+    height: 188,
+  };
+
+  assert.deepEqual(
+    computePopupAutoPanPadding({
+      mapRect,
+      obstacles: [
+        { ...obstacle, connected: false },
+        { ...obstacle, visible: false },
+        { ...obstacle, width: 0 },
+        { ...obstacle, left: 320, right: 360 },
+      ],
+    }),
+    baseline,
+  );
+  assert.deepEqual(
+    computePopupAutoPanPadding({
+      mapRect,
+      obstacles: [{ ...obstacle, connected: true, visible: true }],
+    }),
+    { top: DEFAULT_POPUP_TOP_PADDING, bottom: 320 },
+  );
+});

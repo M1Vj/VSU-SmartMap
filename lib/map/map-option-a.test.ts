@@ -175,6 +175,11 @@ test("selected popup clearance measures tagged obstacles and cleans up its singl
   assert.match(markerSource, /resizeObserver\.disconnect\(\)/);
   assert.match(markerSource, /window\.removeEventListener\("resize"/);
   assert.match(markerSource, /map\.off\("resize"/);
+  assert.match(markerSource, /popup\.update\(\)/);
+  assert.match(markerSource, /element\.isConnected/);
+  assert.match(markerSource, /getComputedStyle/);
+  assert.match(markerSource, /rect\.width > 0/);
+  assert.match(markerSource, /rect\.height > 0/);
   assert.match(markerSource, /isRouteDestination/);
   assert.match(helperSource, /top = Math\.max\(top,/);
   assert.match(helperSource, /bottom = Math\.max\(bottom,/);

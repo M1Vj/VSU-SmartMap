@@ -79,6 +79,13 @@ test("selected marker clearance observes only the selected marker and cleans up 
   assert.match(markerSource, /window\.removeEventListener\("resize"/);
   assert.match(markerSource, /map\.on\("resize"/);
   assert.match(markerSource, /map\.off\("resize"/);
+  assert.match(markerSource, /popup\.options\.autoPanPaddingBottomRight[\s\S]{0,220}popup\.update\(\)/);
+  assert.match(markerSource, /element\.isConnected/);
+  assert.match(markerSource, /getComputedStyle/);
+  assert.match(markerSource, /rect\.width > 0/);
+  assert.match(markerSource, /rect\.height > 0/);
+  assert.match(markerSource, /rect\.right <= mapRect\.left/);
+  assert.match(markerSource, /rect\.left >= mapRect\.right/);
   assert.match(markerSource, /\[isSelected, isRouteDestination/);
 });
 
