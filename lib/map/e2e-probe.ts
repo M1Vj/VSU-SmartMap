@@ -37,7 +37,8 @@ export type MapFrameSampleFailure =
   | "missing-destination"
   | "missing-destination-element"
   | "missing-destination-geometry"
-  | "missing-renderer-projection";
+  | "missing-renderer-projection"
+  | "missing-renderer-registration";
 
 export type MapFrameSample = {
   frameIndex: number;
@@ -122,6 +123,8 @@ type RegisteredRoute = {
   polyline: LeafletPolyline;
   path: readonly { lat: number; lng: number }[];
   ready: boolean;
+  readinessSettled: boolean;
+  readinessFailure: MapFrameSampleFailure | null;
   settleFrameId: number | null;
   settleTimeout: ReturnType<typeof setTimeout> | null;
 };
@@ -136,7 +139,7 @@ type RegisteredDestination = {
 type PendingDelay = {
   timer: ReturnType<typeof setTimeout>;
   signal: AbortSignal;
-  onAbort: () => void;
+  onAbort: (error?: unknown) => void;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
@@ -252,21 +255,24 @@ function buildScreenPolylineSamples(points: readonly ScreenPoint[], interval: nu
   return sampled;
 }
 
-function resamplePolylineByNormalizedLength(
+export function resamplePolylineByNormalizedLength(
   points: readonly ScreenPoint[],
   sampleCount: number,
 ) {
-  if (points.length <= 1 || sampleCount >= points.length) {
-    return points.map((point) => ({ x: point.x, y: point.y }));
+  const count = Math.min(256, Math.max(0, Math.floor(Number.isFinite(sampleCount) ? sampleCount : 0)));
+  if (count === 0 || points.length === 0) return [];
+  const first = { x: points[0].x, y: points[0].y };
+  if (count === 1 || points.length === 1) {
+    return Array.from({ length: count }, () => ({ ...first }));
   }
   const lengths = points.slice(1).map((point, index) => distance(points[index], point));
   const cumulative = [0];
   for (const length of lengths) cumulative.push(cumulative.at(-1)! + length);
   const total = cumulative.at(-1)!;
-  if (total === 0) return [{ x: points[0].x, y: points[0].y }];
+  if (total === 0) return Array.from({ length: count }, () => ({ ...first }));
   const result: ScreenPoint[] = [];
-  for (let index = 0; index < sampleCount; index += 1) {
-    const target = (total * index) / (sampleCount - 1);
+  for (let index = 0; index < count; index += 1) {
+    const target = (total * index) / (count - 1);
     let segment = 0;
     while (segment < lengths.length - 1 && cumulative[segment + 1] < target) segment += 1;
     const segmentStart = cumulative[segment];
@@ -495,15 +501,16 @@ function projectCoordinate(
 ): { point: ScreenPoint; failure: MapFrameSampleFailure | null } {
   if (state.mapLibreMap) {
     const mapLibre = state.mapLibreMap;
+    const canvas = mapLibre.getCanvas?.();
     const mapLibreContainer = mapLibre.getContainer?.();
-    if (!mapLibreContainer || typeof mapLibre.project !== "function") {
+    if (!canvas || !mapLibreContainer || typeof mapLibre.project !== "function") {
       return { point: { x: 0, y: 0 }, failure: "missing-renderer-projection" };
     }
-    const mapLibreRect = mapLibreContainer.getBoundingClientRect();
+    const mapLibreRect = canvas.getBoundingClientRect();
     const projected = mapLibre.project([coordinate.lng, coordinate.lat]);
     const clientSize = {
-      width: mapLibreContainer.clientWidth || mapLibreRect.width,
-      height: mapLibreContainer.clientHeight || mapLibreRect.height,
+      width: canvas.clientWidth || canvas.width || mapLibreContainer.clientWidth || mapLibreRect.width,
+      height: canvas.clientHeight || canvas.height || mapLibreContainer.clientHeight || mapLibreRect.height,
     };
     const padding = typeof mapLibre.getPadding === "function" ? mapLibre.getPadding() : { left: 0, top: 0 };
     return {
@@ -593,8 +600,10 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
   const settle = () => {
     route.settleFrameId = null;
     route.settleTimeout = null;
-    if (activeState !== state || state.route !== route) return;
-    route.ready = routeMatchesAuthoritativePath(route);
+    if (!isStateActive(state) || state.route !== route) return;
+    route.readinessSettled = true;
+    route.ready = route.readinessFailure === null && routeMatchesAuthoritativePath(route);
+    if (!route.ready && route.readinessFailure === null) route.readinessFailure = "route-not-synced";
   };
   if (typeof requestAnimationFrame === "function") route.settleFrameId = requestAnimationFrame(settle);
   else route.settleTimeout = setTimeout(settle, 0);
@@ -634,8 +643,13 @@ function recordFrame(state: ProbeState) {
     appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-route" });
     return;
   }
+  const vectorCanvasExists = typeof document !== "undefined" && Boolean(document.querySelector(".maplibregl-canvas"));
+  if (vectorCanvasExists && !state.mapLibreMap) {
+    appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-renderer-registration" });
+    return;
+  }
   if (!route.ready) {
-    appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "route-not-synced" });
+    appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: route.readinessFailure ?? "route-not-synced" });
     return;
   }
   if (route.path.length < 2) {
@@ -751,7 +765,7 @@ function scheduleFrame(state: ProbeState) {
   const callback = () => {
     state.frameId = null;
     state.frameTimeout = null;
-    if (activeState !== state) return;
+    if (!isStateActive(state)) return;
     if (
       state.frameProbeStartedAt !== null &&
       (typeof performance === "undefined" ? Date.now() : performance.now()) - state.frameProbeStartedAt >= 10_000
@@ -762,7 +776,7 @@ function scheduleFrame(state: ProbeState) {
     // Route registration settles on its own animation frame. Do not spend a
     // sample on that transient state; the first stored frame must be a
     // comparison against a committed, authoritative path.
-    if (state.route && !state.route.ready) {
+    if (state.route && !state.route.readinessSettled) {
       scheduleFrame(state);
       return;
     }
@@ -793,6 +807,10 @@ function stopFrameProbeForState(
     state.frameProbeStoppedAt = typeof performance === "undefined" ? Date.now() : performance.now();
     state.frameProbeStopReason = reason;
   }
+}
+
+function cancelPendingDelays(state: ProbeState, error = new DOMException("Route request was cancelled", "AbortError")) {
+  for (const pending of [...state.pendingDelays]) pending.onAbort(error);
 }
 
 function createApi(state: ProbeState): MapEvidenceApi {
@@ -829,6 +847,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
     reset: () => {
       if (!isActive()) return;
       stopFrameProbeForState(state, "explicit");
+      cancelPendingDelays(state);
       state.events = [];
       state.frames = [];
       state.nextEventSequence = 1;
@@ -851,7 +870,10 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameProbeStopReason = null;
       state.frameProbeCostMs = 0;
       state.frameCount = 0;
-      state.wallClockTimeout = setTimeout(() => stopFrameProbeForState(state, "wall-clock-timeout"), 10_000);
+      state.wallClockTimeout = setTimeout(() => {
+        if (!isStateActive(state)) return;
+        stopFrameProbeForState(state, "wall-clock-timeout");
+      }, 10_000);
       scheduleFrame(state);
     },
     stopFrameProbe: () => {
@@ -881,12 +903,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
 
 function disposeState(state: ProbeState) {
   stopFrameProbeForState(state, "cleanup");
-  for (const pending of state.pendingDelays) {
-    clearTimeout(pending.timer);
-    pending.signal.removeEventListener("abort", pending.onAbort);
-    pending.reject(new DOMException("Map evidence probe was disposed", "AbortError"));
-  }
-  state.pendingDelays.clear();
+  cancelPendingDelays(state, new DOMException("Map evidence probe was disposed", "AbortError"));
   if (state.route) cancelRouteReadiness(state.route);
   state.leafletMap = null;
   state.mapLibreMap = null;
@@ -986,7 +1003,7 @@ export function registerLeafletMapForEvidence(map: LeafletMap): () => void {
   if (!isStateActive(state)) return () => undefined;
   state.leafletMap = map;
   return () => {
-    if (activeState === state && state.leafletMap === map) state.leafletMap = null;
+    if (isStateActive(state) && state.leafletMap === map) state.leafletMap = null;
   };
 }
 
@@ -995,7 +1012,7 @@ export function registerMapLibreForEvidence(map: MapLibreMap): () => void {
   if (!isStateActive(state)) return () => undefined;
   state.mapLibreMap = map;
   return () => {
-    if (activeState === state && state.mapLibreMap === map) state.mapLibreMap = null;
+    if (isStateActive(state) && state.mapLibreMap === map) state.mapLibreMap = null;
   };
 }
 
@@ -1006,16 +1023,20 @@ export function registerRouteForEvidence(input: {
 }): () => void {
   const state = activeState;
   if (!isStateActive(state)) return () => undefined;
+  const inputFailure: MapFrameSampleFailure | null = input.path.length > 256 ? "sampling-capped" : null;
   const route: RegisteredRoute = {
     ...input,
+    path: inputFailure ? input.path.slice(0, 256) : input.path.slice(),
     ready: false,
+    readinessSettled: false,
+    readinessFailure: inputFailure,
     settleFrameId: null,
     settleTimeout: null,
   };
   state.route = route;
   scheduleRouteReadiness(state, route);
   return () => {
-    if (activeState === state && state.route === route) {
+    if (isStateActive(state) && state.route === route) {
       cancelRouteReadiness(route);
       state.route = null;
     }
@@ -1038,7 +1059,7 @@ export function registerDestinationMarkerForEvidence(input: {
   };
   state.destination = destination;
   return () => {
-    if (activeState === state && state.destination === destination) state.destination = null;
+    if (isStateActive(state) && state.destination === destination) state.destination = null;
   };
 }
 
@@ -1104,7 +1125,11 @@ export async function waitForMapEvidenceRouteDelay(signal: AbortSignal): Promise
     pending = {
       timer: setTimeout(() => settle(), state.routeDelayMs),
       signal,
-      onAbort: () => settle(new DOMException("Route request was cancelled", "AbortError")),
+      onAbort: (error = new DOMException("Route request was cancelled", "AbortError")) => {
+        state.failNextRoute = false;
+        const candidate = error as { name?: unknown } | null;
+        settle(candidate?.name === "AbortError" ? error : new DOMException("Route request was cancelled", "AbortError"));
+      },
       resolve,
       reject,
     };

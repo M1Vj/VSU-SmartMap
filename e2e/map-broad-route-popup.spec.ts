@@ -42,6 +42,20 @@ async function getEvents(page: Page) {
   return page.evaluate(() => window.__VSU_MAP_E2E__?.events() ?? []);
 }
 
+function assertSanitizedEvents(events: readonly { sequence: number; name: string; correlationOrdinal: number | null; modality: string | null }[]) {
+  const forbiddenValues = /(lat|lng|https?:|private|requestId|itemId|facility|boarding|raw-id)/i;
+  for (const event of events) {
+    expect(Object.keys(event).sort()).toEqual(["correlationOrdinal", "modality", "name", "sequence"]);
+    expect(typeof event.sequence).toBe("number");
+    expect(typeof event.name).toBe("string");
+    expect(event.modality === null || typeof event.modality === "string").toBe(true);
+    expect(event.correlationOrdinal === null || typeof event.correlationOrdinal === "number").toBe(true);
+    for (const value of Object.values(event)) {
+      if (typeof value === "string") expect(value).not.toMatch(forbiddenValues);
+    }
+  }
+}
+
 function collectConsoleErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -178,7 +192,7 @@ async function assertPopupBounds(page: Page) {
     return {
       withinMap: popupRect.left >= mapRect.left && popupRect.right <= mapRect.right && popupRect.top >= mapRect.top && popupRect.bottom <= mapRect.bottom,
       overlapsObstacle,
-      scrollable: popup.scrollHeight >= popup.clientHeight,
+      scrollable: popup.scrollHeight > popup.clientHeight || ["auto", "scroll"].includes(getComputedStyle(popup).overflowY),
       controls,
     };
   });
@@ -208,31 +222,50 @@ async function assertFrameGate(page: Page) {
   expect(snapshot.frameProbe.totalCostMs).toBeGreaterThanOrEqual(0);
 }
 
+async function assertPointerPopupGeometry(page: Page, marker: ReturnType<Page["locator"]>) {
+  const markerBox = await marker.boundingBox();
+  const tipBox = await page.locator(".leaflet-popup-tip").boundingBox();
+  if (!markerBox || !tipBox) throw new Error("marker/popup anchor geometry is unavailable");
+  const markerAnchor = { x: markerBox.x + markerBox.width / 2, y: markerBox.y + markerBox.height / 2 };
+  const popupTip = { x: tipBox.x + tipBox.width / 2, y: tipBox.y + tipBox.height / 2 };
+  expect(Math.hypot(markerAnchor.x - popupTip.x, markerAnchor.y - popupTip.y)).toBeLessThanOrEqual(120);
+  expect(await page.locator(".leaflet-popup").evaluate((popup) => popup.contains(document.activeElement))).toBe(false);
+}
+
 async function waitForCommittedRoute(page: Page) {
   await expect.poll(() => page.locator(".map-route-line").count(), { timeout: 8_000 }).toBeGreaterThan(0);
   await expect.poll(async () => page.locator(".map-route-line").first().getAttribute("d"), { timeout: 8_000 }).not.toBeNull();
+  await expect.poll(() => page.locator(".map-route-end").count(), { timeout: 8_000 }).toBeGreaterThan(0);
   await expect.poll(() => page.locator('[data-map-item-kind="facility"]').count(), { timeout: 8_000 }).toBeGreaterThan(0);
   await page.waitForTimeout(120);
 }
 
 async function chooseMainGate(page: Page, testInfo: TestInfo) {
-  const mainGate = page.getByRole("button", { name: "Start route from main gate" });
+  const mainGate = page.locator("button").filter({ hasText: /^Start from main gate$/ }).first();
   if (await mainGate.count() === 0) blockFixture(testInfo, "manual-start Main Gate control is unavailable");
   await mainGate.click();
 }
 
-async function chooseSatellite(page: Page) {
+async function chooseMapStyle(page: Page, style: "Vector" | "Satellite") {
   const settings = page.getByRole("button", { name: "Settings" });
   if (await settings.count() === 0) throw new Error("Settings control is unavailable");
   await settings.click();
   const mapStyle = page.getByRole("menuitem", { name: "Map Style" });
   await expect(mapStyle).toBeVisible();
   await mapStyle.hover();
-  const satellite = page.getByRole("menuitemradio", { name: "Satellite", exact: true });
-  await expect(satellite).toBeVisible();
-  await satellite.click();
-  await expect(page.locator(".maplibregl-canvas")).toHaveCount(0, { timeout: 5_000 });
-  await expect(page.locator(".leaflet-tile").first()).toBeVisible({ timeout: 5_000 });
+  const choice = page.getByRole("menuitemradio", { name: style, exact: true });
+  await expect(choice).toBeVisible();
+  await choice.click();
+  if (style === "Satellite") {
+    await expect(page.locator(".maplibregl-canvas")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".leaflet-tile").first()).toBeVisible({ timeout: 5_000 });
+  } else {
+    await expect(page.locator(".maplibregl-canvas")).toHaveCount(1, { timeout: 5_000 });
+  }
+}
+
+async function chooseSatellite(page: Page) {
+  await chooseMapStyle(page, "Satellite");
 }
 
 async function chooseTheme(page: Page, theme: "Light" | "Dark") {
@@ -243,7 +276,17 @@ async function chooseTheme(page: Page, theme: "Light" | "Dark") {
   await page.getByRole("menuitemradio", { name: theme, exact: true }).click();
 }
 
+async function cameraSignature(page: Page) {
+  return page.evaluate(() => {
+    const pane = document.querySelector<HTMLElement>(".leaflet-map-pane");
+    const zoomPane = document.querySelector<HTMLElement>(".leaflet-zoom-animated");
+    return `${pane?.getAttribute("style") ?? ""}|${zoomPane?.getAttribute("style") ?? ""}`;
+  });
+}
+
 async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[number]) {
+  const before = await cameraSignature(page);
+  let intermediate: string | undefined;
   const map = page.locator(".leaflet-container");
   switch (method) {
     case "wheel":
@@ -265,6 +308,8 @@ async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[numbe
     }
     case "control":
       await page.locator(".leaflet-control-zoom-in").click();
+      await page.waitForTimeout(250);
+      intermediate = await cameraSignature(page);
       await page.locator(".leaflet-control-zoom-out").click();
       break;
     case "double-click":
@@ -273,12 +318,20 @@ async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[numbe
     case "keyboard":
       await map.focus();
       await page.keyboard.press("+");
+      await page.waitForTimeout(250);
+      intermediate = await cameraSignature(page);
       await page.keyboard.press("-");
       break;
     case "programmatic":
-      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(18));
+      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(12));
+      await page.waitForTimeout(250);
+      intermediate = await cameraSignature(page);
+      await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(19));
       break;
   }
+  await page.waitForTimeout(350);
+  const after = await cameraSignature(page);
+  return { before, intermediate: intermediate ?? after, after };
 }
 
 async function activateRoute(page: Page, testInfo: TestInfo, marker: ReturnType<Page["locator"]>) {
@@ -301,7 +354,7 @@ test("default page does not install the evidence probe", async ({ page }) => {
 for (const viewport of VIEWPORTS) {
   for (const mode of BASEMAPS) {
     for (const zoomMethod of ZOOM_METHODS) {
-      test(`route frame alignment: ${viewport.width}x${viewport.height} ${mode} ${zoomMethod}`, async ({ page }, testInfo) => {
+      const runRouteAlignment = async ({ page }: { page: Page }, testInfo: TestInfo) => {
         test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
         const errors = collectConsoleErrors(page);
         await page.setViewportSize(viewport);
@@ -311,11 +364,20 @@ for (const viewport of VIEWPORTS) {
         await positionMarkerAtEdge(page, marker, "center");
         await activateRoute(page, testInfo, marker);
         await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
-        await performZoomMethod(page, zoomMethod);
+        const zoomState = await performZoomMethod(page, zoomMethod);
+        expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
         await page.waitForTimeout(600);
         await assertFrameGate(page);
         assertNoConsoleErrors(errors);
-      });
+      };
+      if (zoomMethod === "pinch") {
+        test.describe(`touch-enabled route frame alignment: ${viewport.width}x${viewport.height} ${mode} ${zoomMethod}`, () => {
+          test.use({ hasTouch: true });
+          test("camera changes during pinch and route remains aligned", runRouteAlignment);
+        });
+      } else {
+        test(`route frame alignment: ${viewport.width}x${viewport.height} ${mode} ${zoomMethod}`, runRouteAlignment);
+      }
     }
   }
 }
@@ -329,8 +391,10 @@ for (const kind of MARKER_KINDS) {
         await page.setViewportSize(viewport);
         await openEvidencePage(page, kind === "boarding" ? { boarding: "1" } : {});
         await resetProbe(page);
-        await openMarkerAtEdge(page, testInfo, kind, edge);
+        const marker = await openMarkerAtEdge(page, testInfo, kind, edge);
         await assertPopupBounds(page);
+        await assertPointerPopupGeometry(page, marker);
+        expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
         const popup = page.locator(".leaflet-popup");
         expect(await popup.locator("[data-map-control='marker-popup']").count()).toBe(1);
         expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
@@ -361,6 +425,8 @@ for (const kind of MARKER_KINDS) {
           if (!box) throw new Error("touch marker bounds are unavailable");
           await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
           await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+          await assertPointerPopupGeometry(page, marker);
+          expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
           expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
           assertNoConsoleErrors(errors);
         });
@@ -412,6 +478,8 @@ test("CDP pen activation is accepted once without background activation", async 
   await client.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1, pointerType: "pen" });
   await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1, pointerType: "pen" });
   await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+  await assertPointerPopupGeometry(page, marker);
+  expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
   expect(events.some((event) => event.name === "background-activation")).toBe(false);
@@ -433,11 +501,17 @@ for (const kind of MARKER_KINDS) {
     if (kind === "boarding") {
       const details = page.getByRole("link", { name: "Details", exact: true });
       await expect(details).toHaveAttribute("href", /boarding-houses\//);
-      await page.route("**/boarding-houses/**", (route) => route.abort());
-      await details.click({ noWaitAfter: true });
-      await page.unroute("**/boarding-houses/**");
+      await details.evaluate((link) => link.setAttribute("target", "_blank"));
+      const [destinationPage] = await Promise.all([
+        page.context().waitForEvent("page"),
+        details.click(),
+      ]);
+      await destinationPage.waitForLoadState("domcontentloaded").catch(() => undefined);
+      expect(destinationPage.url()).toMatch(/boarding-houses\//);
+      await destinationPage.close();
     } else {
       await page.getByRole("button", { name: "Details", exact: true }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
     }
     await expect.poll(async () => (await getEvents(page)).map((event) => event.name), { timeout: 2_000 }).toEqual(["details"]);
 
@@ -458,7 +532,7 @@ for (const kind of MARKER_KINDS) {
     const routeEvents = (await getEvents(page)).filter((event) => ["navigate", "route-request", "navigation-feedback"].includes(event.name));
     expect(new Set(routeEvents.map((event) => event.correlationOrdinal)).size).toBe(1);
     expect(routeEvents.every((event) => typeof event.correlationOrdinal === "number")).toBe(true);
-    expect(JSON.stringify(await getEvents(page))).not.toMatch(/(lat|lng|https?:|private|facility|requestId|itemId|name)/i);
+    assertSanitizedEvents(await getEvents(page));
     assertNoConsoleErrors(errors);
   });
 }
@@ -486,6 +560,8 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   await page.getByRole("button", { name: "Navigate", exact: true }).click();
   await chooseMainGate(page, testInfo);
 
+  const zoomState = await performZoomMethod(page, "wheel");
+  expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
   await page.waitForTimeout(120);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedA);
   await page.waitForTimeout(600);
@@ -500,61 +576,137 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   assertNoConsoleErrors(errors, [/^NavigationLayer: Process error/]);
 });
 
-test("active-route popup survives safe-area and synthetic 200% root-font stress", async ({ page }, testInfo) => {
+test("committed route survives popup Close and Escape without a bottom card", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
-  const errors = collectConsoleErrors(page);
-  await page.setViewportSize({ width: 320, height: 568 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await openEvidencePage(page);
   const marker = await requireMarker(page, testInfo, "facility");
   await positionMarkerAtEdge(page, marker, "center");
   await activateRoute(page, testInfo, marker);
+  const committedPath = await page.locator(".map-route-line").getAttribute("d");
+  if (!committedPath) throw new Error("committed route has no rendered geometry");
+
+  await resetProbe(page);
   await marker.click();
-  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
-  const client = await page.context().newCDPSession(page);
-  try {
-    await client.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 12, right: 0, bottom: 34, left: 0 } });
-    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
-    await expect.poll(async () => page.locator(".leaflet-popup").evaluate((popup) => {
-      const map = popup.closest(".leaflet-container");
-      if (!map) return false;
-      const popupRect = popup.getBoundingClientRect();
-      const mapRect = map.getBoundingClientRect();
-      const obstacles = [...document.querySelectorAll<HTMLElement>("header, nav, [data-map-action-dock], [data-map-status-hud], [data-map-popup-obstacle]")]
-        .filter((element) => element !== popup && getComputedStyle(element).display !== "none")
-        .map((element) => element.getBoundingClientRect())
-        .filter((rect) => rect.width > 0 && rect.height > 0);
-      const controls = [...popup.querySelectorAll<HTMLElement>("button, a")].map((control) => {
-        const rect = control.getBoundingClientRect();
-        return rect.width >= 44 && rect.height >= 44 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
-      });
-      const overlaps = obstacles.some((obstacle) => popupRect.left < obstacle.right && popupRect.right > obstacle.left && popupRect.top < obstacle.bottom && popupRect.bottom > obstacle.top);
-      return popupRect.left >= mapRect.left && popupRect.right <= mapRect.right && popupRect.top >= mapRect.top && popupRect.bottom <= mapRect.bottom && !overlaps && controls.every(Boolean);
-    }).catch(() => false), { timeout: 5_000 }).toBe(true);
-    await assertPopupBounds(page);
-    const scrollState = await page.evaluate(() => ({
-      popupScrollable: (() => {
-        const scrollArea = document.querySelector<HTMLElement>("[data-map-control='marker-popup'] > div");
-        if (!scrollArea) return false;
-        const style = getComputedStyle(scrollArea);
-        return scrollArea.scrollHeight > scrollArea.clientHeight || style.overflowY === "auto" || style.overflowY === "scroll";
-      })(),
-      controls: [...document.querySelectorAll<HTMLElement>(".leaflet-popup button, .leaflet-popup a")].map((element) => {
-        const rect = element.getBoundingClientRect();
-        return { width: rect.width, height: rect.height, reachable: rect.bottom > 0 && rect.top < window.innerHeight };
-      }),
-    }));
-    expect(scrollState.popupScrollable).toBe(true);
-    expect(scrollState.controls.every((control) => control.reachable && control.width >= 44 && control.height >= 44)).toBe(true);
-  } catch (error) {
-    if (String(error).includes("Emulation.setSafeAreaInsetsOverride")) blockFixture(testInfo, "CDP safe-area override is unavailable");
-    throw error;
-  } finally {
-    await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
-    await client.send("Emulation.setSafeAreaInsetsOverride", { insets: {} }).catch(() => undefined);
-  }
-  testInfo.annotations.push({ type: "synthetic", description: "CDP safe-area and 200% root-font evidence are synthetic; physical zoom is separately blocked." });
-  assertNoConsoleErrors(errors);
+  const popup = page.locator(".leaflet-popup");
+  await expect(popup).toHaveCount(1);
+  await popup.getByRole("button", { name: /^Close/ }).click();
+  await expect(popup).toHaveCount(0);
+  expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
+  expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+  expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
+
+  await resetProbe(page);
+  await marker.click();
+  await expect(popup).toHaveCount(1);
+  await popup.locator("[data-map-control='marker-popup']").press("Escape");
+  await expect(popup).toHaveCount(0);
+  expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
+  expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
 });
+
+test("successful A-to-B replacement commits the new route and preserves correlation", async ({ page }, testInfo) => {
+  test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openEvidencePage(page);
+  const markers = await requireFacilityPair(page, testInfo);
+  const markerA = markers.nth(0);
+  const markerB = markers.nth(1);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
+  const pathA = await page.locator(".map-route-line").getAttribute("d");
+  if (!pathA) throw new Error("route A has no rendered geometry");
+  await positionMarkerAtEdge(page, markerB, "east");
+  await markerB.click();
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+  await resetProbe(page);
+  await page.getByRole("button", { name: "Navigate", exact: true }).click();
+  await chooseMainGate(page, testInfo);
+  await waitForCommittedRoute(page);
+  const pathB = await page.locator(".map-route-line").getAttribute("d");
+  expect(pathB).not.toBeNull();
+  expect(pathB).not.toBe(pathA);
+  const events = await getEvents(page);
+  expect(events.map((event) => event.name)).toEqual(["navigate", "route-request", "navigation-feedback"]);
+  expect(new Set(events.map((event) => event.correlationOrdinal)).size).toBe(1);
+  expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
+});
+
+test("basemap switching keeps an active committed route", async ({ page }, testInfo) => {
+  test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openEvidencePage(page);
+  const marker = await requireMarker(page, testInfo, "facility");
+  await positionMarkerAtEdge(page, marker, "center");
+  await activateRoute(page, testInfo, marker);
+  const before = await page.locator(".map-route-line").getAttribute("d");
+  await chooseSatellite(page);
+  expect(await page.locator(".map-route-line").getAttribute("d")).toBe(before);
+  await chooseMapStyle(page, "Vector");
+  expect(await page.locator(".map-route-line").getAttribute("d")).toBe(before);
+});
+
+for (const kind of MARKER_KINDS) {
+  test(`active-route ${kind} popup survives safe-area and synthetic 200% root-font stress`, async ({ page }, testInfo) => {
+    test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 320, height: 568 });
+    await openEvidencePage(page, kind === "boarding" ? { boarding: "1" } : {});
+    const marker = await requireMarker(page, testInfo, kind);
+    await positionMarkerAtEdge(page, marker, "center");
+    await activateRoute(page, testInfo, marker);
+    await marker.click();
+    await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+    const client = await page.context().newCDPSession(page);
+    try {
+      await client.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 12, right: 0, bottom: 34, left: 0 } });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await expect.poll(async () => page.locator(".leaflet-popup").evaluate((popup) => {
+        const map = popup.closest(".leaflet-container");
+        if (!map) return false;
+        const popupRect = popup.getBoundingClientRect();
+        const mapRect = map.getBoundingClientRect();
+        const obstacles = [...document.querySelectorAll<HTMLElement>("header, nav, [data-map-action-dock], [data-map-status-hud], [data-map-popup-obstacle]")]
+          .filter((element) => element !== popup && getComputedStyle(element).display !== "none")
+          .map((element) => element.getBoundingClientRect())
+          .filter((rect) => rect.width > 0 && rect.height > 0);
+        const controls = [...popup.querySelectorAll<HTMLElement>("button, a")].map((control) => {
+          const rect = control.getBoundingClientRect();
+          return rect.width >= 44 && rect.height >= 44 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
+        });
+        const overlaps = obstacles.some((obstacle) => popupRect.left < obstacle.right && popupRect.right > obstacle.left && popupRect.top < obstacle.bottom && popupRect.bottom > obstacle.top);
+        return popupRect.left >= mapRect.left && popupRect.right <= mapRect.right && popupRect.top >= mapRect.top && popupRect.bottom <= mapRect.bottom && !overlaps && controls.every(Boolean);
+      }).catch(() => false), { timeout: 5_000 }).toBe(true);
+      await assertPopupBounds(page);
+      const scrollState = await page.evaluate(() => ({
+        popupScrollable: (() => {
+          const popup = document.querySelector<HTMLElement>("[data-map-control='marker-popup']");
+          if (!popup) return false;
+          const scrollArea = popup.querySelector<HTMLElement>(":scope > div");
+          if (!scrollArea) return false;
+          const style = getComputedStyle(scrollArea);
+          return scrollArea.scrollHeight > scrollArea.clientHeight && ["auto", "scroll"].includes(style.overflowY);
+        })(),
+        controls: [...document.querySelectorAll<HTMLElement>(".leaflet-popup button, .leaflet-popup a")].map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { width: rect.width, height: rect.height, reachable: rect.bottom > 0 && rect.top < window.innerHeight };
+        }),
+        horizontalOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth,
+      }));
+      expect(scrollState.popupScrollable).toBe(true);
+      expect(scrollState.horizontalOverflow).toBe(true);
+      expect(scrollState.controls.every((control) => control.reachable && control.width >= 44 && control.height >= 44)).toBe(true);
+    } catch (error) {
+      if (String(error).includes("Emulation.setSafeAreaInsetsOverride")) blockFixture(testInfo, "CDP safe-area override is unavailable");
+      throw error;
+    } finally {
+      await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
+      await client.send("Emulation.setSafeAreaInsetsOverride", { insets: {} }).catch(() => undefined);
+    }
+    testInfo.annotations.push({ type: "synthetic", description: "CDP safe-area and 200% root-font evidence are synthetic; physical zoom is separately blocked." });
+    assertNoConsoleErrors(errors);
+  });
+}
 
 test("reduced motion and light/dark appearance retain one accepted activation", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");

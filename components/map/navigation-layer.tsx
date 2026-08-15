@@ -365,7 +365,6 @@ export function NavigationLayer({
         ref={routePolylineRef}
         onReady={handleRoutePolylineReady}
         positions={committedRoute.path.map((node) => [node.lat, node.lng])}
-        smoothFactor={0}
         pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9, className: "map-route-line" }}
       />
       <CircleMarker

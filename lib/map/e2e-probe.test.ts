@@ -8,11 +8,13 @@ import {
   clipScreenPolylineToRect,
   getConfiguredMarkerAnchorPoint,
   initializeMapEvidence,
+  resamplePolylineByNormalizedLength,
   isMapEvidenceEnabled,
   normalizeMapLibreProjection,
   normalizeLeafletPaneProjection,
   registerDestinationMarkerForEvidence,
   registerLeafletMapForEvidence,
+  registerMapLibreForEvidence,
   registerRouteForEvidence,
   recordMapEvidenceEvent,
   sampleScreenPolyline,
@@ -20,6 +22,10 @@ import {
   throwIfMapEvidenceRouteFailureRequested,
   waitForMapEvidenceRouteDelay,
 } from "./e2e-probe.ts";
+import {
+  initializeMapEvidence as initializeBridgeMapEvidence,
+  recordMapEvidenceEvent as recordBridgeMapEvidenceEvent,
+} from "./e2e-probe-bridge.ts";
 
 type FakeWindow = {
   __VSU_MAP_E2E__?: unknown;
@@ -30,6 +36,7 @@ type FakeWindow = {
 };
 
 const originalWindow = (globalThis as { window?: unknown }).window;
+const originalDocument = (globalThis as { document?: unknown }).document;
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 const originalSetTimeout = globalThis.setTimeout;
@@ -105,6 +112,11 @@ function installFakeBrowser() {
   }) as unknown as typeof clearTimeout;
 }
 
+async function flushBridgeImport() {
+  await new Promise<void>((resolve) => originalSetTimeout(resolve, 0));
+  await Promise.resolve();
+}
+
 test.afterEach(() => {
   (globalThis as { window?: unknown }).window = originalWindow;
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
@@ -162,6 +174,8 @@ test("production map components cross the lazy bridge instead of statically load
     const source = readFileSync(new URL(component, import.meta.url), "utf8");
     assert.doesNotMatch(source, /from\s+["'][^"']*e2e-probe["']/);
   }
+  const navigationLayer = readFileSync(new URL("../../components/map/navigation-layer.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(navigationLayer, /smoothFactor=\{0\}/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {
@@ -242,6 +256,20 @@ test("symmetric polyline error catches a middle bow even when endpoints match", 
   const expected = sampleScreenPolyline([{ x: 0, y: 0 }, { x: 10, y: 0 }]);
   const bowed = [{ x: 0, y: 0 }, { x: 5, y: 5 }, { x: 10, y: 0 }];
   assert.ok(getSymmetricPolylineError(expected, bowed) >= 5);
+});
+
+test("normalized resampling always returns the requested bounded comparison count", () => {
+  const expected = resamplePolylineByNormalizedLength(
+    [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+    5,
+  );
+  const rendered = resamplePolylineByNormalizedLength(
+    [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }],
+    5,
+  );
+  assert.equal(expected.length, 5);
+  assert.equal(rendered.length, 5);
+  assert.deepEqual(expected, rendered);
 });
 
 test("MapLibre projection normalization applies source offset, scale, and target padding", () => {
@@ -404,6 +432,53 @@ test("foreign global replacement makes retained registrations and events inert",
   cleanup();
 });
 
+test("foreign global replacement stops scheduled readiness and frame callbacks", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: unknown[]; frameProbe: { frameCount: number } };
+  };
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const map = { getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }) };
+  const polyline = { getLatLngs: () => path };
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readinessEntry = rafCallbacks.entries().next().value as [number, FrameRequestCallback] | undefined;
+  assert.ok(readinessEntry);
+  rafCallbacks.delete(readinessEntry[0]);
+  const foreign = { foreign: true };
+  fakeWindow.__VSU_MAP_E2E__ = foreign;
+  readinessEntry[1](0);
+  fakeWindow.__VSU_MAP_E2E__ = api;
+
+  api.startFrameProbe();
+  const frameEntry = rafCallbacks.entries().next().value as [number, FrameRequestCallback] | undefined;
+  assert.ok(frameEntry);
+  rafCallbacks.delete(frameEntry[0]);
+  fakeWindow.__VSU_MAP_E2E__ = foreign;
+  frameEntry[1](16);
+  fakeWindow.__VSU_MAP_E2E__ = api;
+  assert.deepEqual(api.snapshot().frames, []);
+  assert.equal(api.snapshot().frameProbe.frameCount, 0);
+  cleanup();
+
+  const secondCleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const secondApi = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: unknown[]; frameProbe: { frameCount: number } };
+  };
+  secondApi.startFrameProbe();
+  const deletedEntry = rafCallbacks.entries().next().value as [number, FrameRequestCallback] | undefined;
+  assert.ok(deletedEntry);
+  rafCallbacks.delete(deletedEntry[0]);
+  delete fakeWindow.__VSU_MAP_E2E__;
+  deletedEntry[1](32);
+  fakeWindow.__VSU_MAP_E2E__ = secondApi;
+  assert.deepEqual(secondApi.snapshot().frames, []);
+  assert.equal(secondApi.snapshot().frameProbe.frameCount, 0);
+  secondCleanup();
+});
+
 test("stale disposer and stale API cannot affect a replacement probe", () => {
   installFakeBrowser();
   const firstCleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
@@ -463,6 +538,54 @@ test("reset clears correlation ordinals, delay, failure control, and bounded buf
   assert.equal(api.snapshot().routeDelayMs, 0);
   recordMapEvidenceEvent("navigate", "after-reset");
   assert.equal(api.events()[0].correlationOrdinal, 1);
+  cleanup();
+});
+
+test("reset cancels pending route delays, removes abort work, and clears armed failure", async () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    reset: () => void;
+    setRouteDelayMs: (delay: number) => void;
+    failNextRoute: () => void;
+  };
+  api.setRouteDelayMs(500);
+  api.failNextRoute();
+  const controller = new AbortController();
+  let abortListenerRemovals = 0;
+  const signal = controller.signal as AbortSignal & {
+    removeEventListener: AbortSignal["removeEventListener"];
+  };
+  const removeAbortListener = signal.removeEventListener.bind(signal);
+  signal.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+    if (type === "abort") abortListenerRemovals += 1;
+    return removeAbortListener(type, listener, options);
+  }) as AbortSignal["removeEventListener"];
+  const delayed = waitForMapEvidenceRouteDelay(signal);
+  assert.equal(timerCallbacks.size, 1);
+  api.reset();
+  assert.equal(timerCallbacks.size, 0);
+  assert.equal(abortListenerRemovals, 1);
+  await assert.rejects(delayed, /Route request was cancelled/);
+  assert.doesNotThrow(() => throwIfMapEvidenceRouteFailureRequested(new AbortController().signal));
+  cleanup();
+});
+
+test("aborting a delayed route consumes the armed one-shot failure", async () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    setRouteDelayMs: (delay: number) => void;
+    failNextRoute: () => void;
+  };
+  api.setRouteDelayMs(500);
+  api.failNextRoute();
+  const controller = new AbortController();
+  const delayed = waitForMapEvidenceRouteDelay(controller.signal);
+  controller.abort();
+  await assert.rejects(delayed, /Route request was cancelled/);
+  api.setRouteDelayMs(0);
+  assert.doesNotThrow(() => throwIfMapEvidenceRouteFailureRequested(new AbortController().signal));
   cleanup();
 });
 
@@ -550,6 +673,126 @@ test("frame probe uses authoritative route and destination geometry with bounded
   cleanup();
 });
 
+test("frame probe projects through the live MapLibre canvas offset and scale", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    setZoom: () => undefined,
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 110,
+      getPointAtLength: (length: number) => ({ x: length, y: 48 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 34, f: 4 }),
+    }),
+  };
+  const marker = {
+    getElement: () => ({ getBoundingClientRect: () => ({ left: 139, top: 32, width: 10, height: 20 }) }),
+  };
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => ({ left: 12, top: 8, width: 220, height: 110 }),
+  };
+  const mapLibre = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    getPadding: () => ({ left: 0, top: 0 }),
+    project: ([lng]: [number, number]) => ({ x: 20 + lng * 10, y: 40 }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerMapLibreForEvidence(mapLibre as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; failure: string | null; routeErrorPx: number | null; destinationErrorPx: number | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  const sample = api.snapshot().frames[0];
+  assert.equal(sample.routeVisible, true);
+  assert.equal(sample.failure, null);
+  assert.ok((sample.routeErrorPx ?? Infinity) < 1e-9);
+  assert.ok((sample.destinationErrorPx ?? Infinity) < 1e-9);
+  cleanup();
+});
+
+test("route readiness reports typed sampling-capped failure before frame projection", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = Array.from({ length: 300 }, (_, index) => ({ lat: 0, lng: index }));
+  const map = { getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }), setZoom: () => undefined };
+  const polyline = { getLatLngs: () => path };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null; expectedSampleCount: number }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "sampling-capped");
+  assert.equal(api.snapshot().frames[0]?.expectedSampleCount, 0);
+  cleanup();
+});
+
+test("settled but mismatched route reports route-not-synced instead of generic timeout", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const expectedPath = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const renderedPath = [{ lat: 0, lng: 0 }, { lat: 0, lng: 9 }];
+  const map = { getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }), setZoom: () => undefined };
+  const polyline = { getLatLngs: () => renderedPath };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path: expectedPath });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "route-not-synced");
+  cleanup();
+});
+
+test("vector canvas without a registered renderer fails with a typed registration error", () => {
+  installFakeBrowser();
+  (globalThis as { document?: unknown }).document = { querySelector: () => ({}) };
+  try {
+    const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+    const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+    const map = { getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }), setZoom: () => undefined };
+    const polyline = { getLatLngs: () => path };
+    registerLeafletMapForEvidence(map as never);
+    registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+    const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+    rafCallbacks.delete(readiness[0]);
+    readiness[1](0);
+    const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+    api.startFrameProbe();
+    const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+    rafCallbacks.delete(frame[0]);
+    frame[1](16);
+    assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-registration");
+    cleanup();
+  } finally {
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
+});
+
 test("one-shot route failure is opt-in, abort-safe, and consumed once", async () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
@@ -569,4 +812,42 @@ test("one-shot route failure is opt-in, abort-safe, and consumed once", async ()
   controller.abort();
   await assert.rejects(delayed, /Route request was cancelled/);
   cleanup();
+});
+
+test("the lazy bridge gates exact trusted URLs and cleans up owners without touching foreign globals", async () => {
+  installFakeBrowser();
+  const invalidUrls = [
+    "http://localhost:3000/",
+    "http://localhost:3000/?mapEvidence=0",
+    "http://localhost:3000/?mapEvidence=1&mapEvidence=1",
+    "http://user:pass@localhost:3000/?mapEvidence=1",
+    "https://attacker.example/?mapEvidence=1",
+  ];
+  for (const url of invalidUrls) {
+    const dispose = initializeBridgeMapEvidence(url);
+    await flushBridgeImport();
+    assert.equal(fakeWindow.__VSU_MAP_E2E__, undefined);
+    dispose();
+  }
+
+  const trusted = "http://localhost:3000/?mapEvidence=1";
+  const firstDispose = initializeBridgeMapEvidence(trusted);
+  const secondDispose = initializeBridgeMapEvidence(trusted);
+  await flushBridgeImport();
+  assert.ok(fakeWindow.__VSU_MAP_E2E__);
+  recordBridgeMapEvidenceEvent("popup-open", "raw-private-id", "mouse");
+  firstDispose();
+  assert.ok(fakeWindow.__VSU_MAP_E2E__);
+  secondDispose();
+  await flushBridgeImport();
+  assert.equal(fakeWindow.__VSU_MAP_E2E__, undefined);
+
+  const foreign = { foreign: true };
+  fakeWindow.__VSU_MAP_E2E__ = foreign;
+  const blockedDispose = initializeBridgeMapEvidence(trusted);
+  await flushBridgeImport();
+  assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
+  blockedDispose();
+  assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
+  delete fakeWindow.__VSU_MAP_E2E__;
 });
