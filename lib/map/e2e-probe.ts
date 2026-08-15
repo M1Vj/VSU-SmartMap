@@ -498,9 +498,9 @@ function getLeafletRasterTilePoint(
     return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
   }
   const projectedPoints: ScreenPoint[] = [];
-  const project = (map as LeafletMap & {
+  const mapWithProject = map as LeafletMap & {
     project: (latLng: [number, number], zoom: number) => ScreenPoint;
-  }).project;
+  };
   for (const tile of tiles) {
     const source = tile.src ?? tile.getAttribute?.("src") ?? "";
     const address = parseLeafletRasterTileUrl(source);
@@ -521,7 +521,7 @@ function getLeafletRasterTilePoint(
       naturalWidth <= 0 ||
       naturalHeight <= 0
     ) continue;
-    const projected = project([coordinate.lat, coordinate.lng], address.zoom);
+    const projected = mapWithProject.project([coordinate.lat, coordinate.lng], address.zoom);
     if (!isFiniteScreenPoint(projected)) continue;
     const localX = projected.x - address.x * LEAFLET_TILE_SIZE;
     const localY = projected.y - address.y * LEAFLET_TILE_SIZE;

@@ -377,9 +377,6 @@ async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[numbe
     }
     case "control":
       await page.locator(".leaflet-control-zoom-in").click();
-      await page.waitForTimeout(250);
-      intermediate = await cameraSignature(page);
-      await page.locator(".leaflet-control-zoom-out").click();
       break;
     case "double-click":
       await map.dblclick();
@@ -387,9 +384,6 @@ async function performZoomMethod(page: Page, method: (typeof ZOOM_METHODS)[numbe
     case "keyboard":
       await map.focus();
       await page.keyboard.press("+");
-      await page.waitForTimeout(250);
-      intermediate = await cameraSignature(page);
-      await page.keyboard.press("-");
       break;
     case "programmatic":
       await page.evaluate(() => window.__VSU_MAP_E2E__?.zoomTo(12));

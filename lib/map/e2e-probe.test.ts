@@ -214,6 +214,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(probeSource, /\.leaflet-tile/);
   assert.match(probeSource, /parseLeafletRasterTileUrl/);
   assert.match(probeSource, /map as LeafletMap & \{[\s\S]*project/);
+  assert.match(probeSource, /mapWithProject\.project\(/);
   assert.match(probeSource, /naturalWidth/);
   assert.match(probeSource, /inconsistent-raster-projection/);
   assert.match(probeSource, /visualRouteSpanPx/);
@@ -732,12 +733,17 @@ test("frame probe uses authoritative route and destination geometry with bounded
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
   const mapRect = { left: 0, top: 0, width: 200, height: 100 };
   const tile = rasterTileFixture(mapRect);
-  const map = {
+  const mapPrototype = {
+    project(this: { options: { scale: number } }, [lat, lng]: [number, number]) {
+      return { x: lng * this.options.scale, y: lat * this.options.scale };
+    },
+  };
+  const map = Object.assign(Object.create(mapPrototype), {
+    options: { scale: 10 },
     getContainer: () => ({ getBoundingClientRect: () => mapRect }),
     getPanes: () => rasterPanes(tile),
-    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
     setZoom: () => undefined,
-  };
+  });
   const polyline = {
     getLatLngs: () => path,
     getElement: () => ({
