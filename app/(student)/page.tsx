@@ -356,6 +356,14 @@ function MapTab() {
       className="relative flex h-full w-full flex-col overflow-hidden bg-background"
       tabIndex={0}
     >
+      <style>{`
+        @media (pointer: coarse), (any-pointer: coarse) {
+          [data-map-control="submit-location"] {
+            min-height: 44px;
+            min-width: 44px;
+          }
+        }
+      `}</style>
       <div className="relative flex-1 w-full overflow-hidden">
         <div
           data-map-popup-obstacle="top"

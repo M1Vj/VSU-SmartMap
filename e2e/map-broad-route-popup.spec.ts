@@ -11,7 +11,7 @@ const VIEWPORTS = [
 const BASEMAPS = ["vector", "satellite"] as const;
 const ZOOM_METHODS = ["wheel", "pinch", "control", "double-click", "keyboard", "programmatic"] as const;
 const EDGE_POSITIONS = ["center", "north", "east", "south", "west"] as const;
-const TOUCH_WIDTHS = new Set([320, 390, 412, 768]);
+const TOUCH_WIDTHS = new Set([320, 390, 412, 768, 1024]);
 const MARKER_KINDS = ["facility", "boarding"] as const;
 const KEYBOARD_KEYS = ["Enter", "Space"] as const;
 // Native Leaflet transitions can leave a delayed transform tail under throttling;

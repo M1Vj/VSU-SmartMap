@@ -171,6 +171,19 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
             line-height: 44px;
           }
         }
+
+        @media (pointer: coarse), (any-pointer: coarse) {
+          .map-wrapper .leaflet-control-zoom a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            min-width: 44px;
+            height: 44px;
+            min-height: 44px;
+            line-height: 44px;
+          }
+        }
       `}</style>
       <MapContainer
         center={[MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng]}

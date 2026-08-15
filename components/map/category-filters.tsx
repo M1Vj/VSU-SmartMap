@@ -43,6 +43,14 @@ export function CategoryFilters({
 
   return (
     <Popover>
+      <style>{`
+        @media (pointer: coarse), (any-pointer: coarse) {
+          [data-map-control="map-filters"] {
+            min-height: 44px;
+            min-width: 44px;
+          }
+        }
+      `}</style>
       <PopoverTrigger asChild>
         <Button
           type="button"
