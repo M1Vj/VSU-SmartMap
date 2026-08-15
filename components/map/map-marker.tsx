@@ -289,10 +289,13 @@ export const MapMarker = memo(function MapMarker({
     if (!element) return;
     const evidenceKind = item.kind === "boarding_house" ? "boarding" : "facility";
     element.dataset.mapItemKind = evidenceKind;
+    if (isRouteDestination) element.dataset.mapRouteDestination = "true";
+    else delete element.dataset.mapRouteDestination;
     return () => {
       if (element.dataset.mapItemKind === evidenceKind) delete element.dataset.mapItemKind;
+      if (element.dataset.mapRouteDestination === "true") delete element.dataset.mapRouteDestination;
     };
-  }, [item.kind, readyMarker]);
+  }, [isRouteDestination, item.kind, readyMarker]);
 
   useEffect(() => {
     if (hideTooltip) {

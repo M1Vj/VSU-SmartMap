@@ -29,6 +29,7 @@ export type MapFrameSampleFailure =
   | "missing-route"
   | "missing-route-path"
   | "route-not-synced"
+  | "missing-route-baseline"
   | "missing-route-element"
   | "missing-route-geometry"
   | "missing-overlay-transform"
@@ -56,6 +57,7 @@ export type MapFrameSample = {
 };
 
 type ScreenPoint = { x: number; y: number };
+type AffineTransform = { a: number; b: number; c: number; d: number; e: number; f: number };
 
 export type MapEvidenceRect = {
   left: number;
@@ -78,7 +80,7 @@ export type MapEvidenceSnapshot = {
     startedAt: number | null;
     stoppedAt: number | null;
     frameCount: number;
-    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "cleanup" | null;
+    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "visibilitychange" | "cleanup" | null;
     totalCostMs: number;
   };
 };
@@ -169,6 +171,7 @@ type ProbeState = {
   frameProbeStoppedAt: number | null;
   frameProbeStopReason: MapEvidenceSnapshot["frameProbe"]["stopReason"];
   frameProbeCostMs: number;
+  visibilityChangeHandler: (() => void) | null;
 };
 
 let activeState: ProbeState | null = null;
@@ -335,7 +338,14 @@ export function normalizeLeafletPaneProjection(
   paneRect: MapEvidenceRect,
   paneSize: { width: number; height: number },
   targetRect: MapEvidenceRect,
+  rendererTransform?: AffineTransform,
 ): ScreenPoint {
+  if (rendererTransform) {
+    return {
+      x: rendererTransform.a * point.x + rendererTransform.c * point.y + rendererTransform.e - targetRect.left,
+      y: rendererTransform.b * point.x + rendererTransform.d * point.y + rendererTransform.f - targetRect.top,
+    };
+  }
   const scaleX = paneSize.width > 0 ? paneRect.width / paneSize.width : 1;
   const scaleY = paneSize.height > 0 ? paneRect.height / paneSize.height : 1;
   return {
@@ -558,6 +568,10 @@ function projectCoordinate(
     return { point: { x: 0, y: 0 }, failure: "missing-overlay-transform" };
   }
   const projected = map.latLngToLayerPoint([coordinate.lat, coordinate.lng]);
+  const routeElement = state.route?.polyline.getElement?.() as (SVGPathElement & {
+    getScreenCTM?: () => AffineTransform | null;
+  }) | null;
+  const rendererTransform = routeElement?.getScreenCTM?.() ?? undefined;
   const pane = overlayPane as typeof overlayPane & {
     offsetWidth?: number;
     offsetHeight?: number;
@@ -573,6 +587,10 @@ function projectCoordinate(
       overlayRect,
       paneSize,
       containerRect,
+      rendererTransform && [rendererTransform.a, rendererTransform.b, rendererTransform.c, rendererTransform.d, rendererTransform.e, rendererTransform.f]
+        .every((value) => Number.isFinite(value))
+        ? rendererTransform
+        : undefined,
     ),
     failure: null,
   };
@@ -610,6 +628,61 @@ function routeMatchesAuthoritativePath(route: RegisteredRoute) {
   );
 }
 
+function hasFiniteAffineTransform(transform: AffineTransform | null | undefined) {
+  return Boolean(transform) && [
+    transform!.a,
+    transform!.b,
+    transform!.c,
+    transform!.d,
+    transform!.e,
+    transform!.f,
+  ].every((value) => Number.isFinite(value));
+}
+
+function routeReadinessFailure(state: ProbeState, route: RegisteredRoute): MapFrameSampleFailure | null {
+  if (route.readinessFailure) return route.readinessFailure;
+  if (route.path.length < 2) return "missing-route-path";
+  if (!routeMatchesAuthoritativePath(route)) return "route-not-synced";
+
+  const vectorCanvasExists = typeof document !== "undefined" && Boolean(document.querySelector(".maplibregl-canvas"));
+  if (vectorCanvasExists && !state.mapLibreMap) return "missing-renderer-registration";
+
+  const routeElement = route.polyline.getElement?.() as (SVGPathElement & {
+    getScreenCTM?: () => AffineTransform | null;
+  }) | null;
+  if (!routeElement) return "missing-route-baseline";
+  if (!hasFiniteAffineTransform(routeElement.getScreenCTM?.())) return "missing-route-geometry";
+
+  const mapContainer = route.map.getContainer?.();
+  const mapRect = mapContainer?.getBoundingClientRect?.();
+  if (!mapRect || ![mapRect.left, mapRect.top, mapRect.width, mapRect.height].every(Number.isFinite) || mapRect.width <= 0 || mapRect.height <= 0) {
+    return "missing-route-baseline";
+  }
+
+  if (state.mapLibreMap) {
+    const canvas = state.mapLibreMap.getCanvas?.();
+    const rendererContainer = state.mapLibreMap.getContainer?.();
+    if (!canvas || !rendererContainer || typeof state.mapLibreMap.project !== "function") {
+      return "missing-renderer-projection";
+    }
+  } else {
+    const overlayPane = route.map.getPanes?.().overlayPane;
+    const overlayRect = overlayPane?.getBoundingClientRect?.();
+    if (!overlayRect || typeof route.map.latLngToLayerPoint !== "function" || overlayRect.width <= 0 || overlayRect.height <= 0) {
+      return "missing-overlay-transform";
+    }
+  }
+
+  const destination = state.destination;
+  if (!destination) return "missing-destination";
+  const markerElement = destination.marker.getElement?.();
+  const markerRect = markerElement?.getBoundingClientRect?.();
+  if (!markerElement || !markerRect || ![markerRect.left, markerRect.top, markerRect.width, markerRect.height].every(Number.isFinite) || markerRect.width <= 0 || markerRect.height <= 0) {
+    return "missing-destination-element";
+  }
+  return null;
+}
+
 function cancelRouteReadiness(route: RegisteredRoute) {
   if (route.settleFrameId !== null && typeof cancelAnimationFrame === "function") {
     cancelAnimationFrame(route.settleFrameId);
@@ -625,8 +698,8 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
     route.settleTimeout = null;
     if (!isStateActive(state) || state.route !== route) return;
     route.readinessSettled = true;
-    route.ready = route.readinessFailure === null && routeMatchesAuthoritativePath(route);
-    if (!route.ready && route.readinessFailure === null) route.readinessFailure = "route-not-synced";
+    route.readinessFailure = routeReadinessFailure(state, route);
+    route.ready = route.readinessFailure === null;
   };
   if (typeof requestAnimationFrame === "function") route.settleFrameId = requestAnimationFrame(settle);
   else route.settleTimeout = setTimeout(settle, 0);
@@ -939,6 +1012,10 @@ function createApi(state: ProbeState): MapEvidenceApi {
 
 function disposeState(state: ProbeState) {
   stopFrameProbeForState(state, "cleanup");
+  if (state.visibilityChangeHandler) {
+    state.window.removeEventListener("visibilitychange", state.visibilityChangeHandler);
+    state.visibilityChangeHandler = null;
+  }
   cancelPendingDelays(state, new DOMException("Map evidence probe was disposed", "AbortError"));
   if (state.route) cancelRouteReadiness(state.route);
   state.leafletMap = null;
@@ -1020,10 +1097,18 @@ export function initializeMapEvidence(url: string): () => void {
     frameProbeStoppedAt: null,
     frameProbeStopReason: null,
     frameProbeCostMs: 0,
+    visibilityChangeHandler: null,
   } as ProbeState;
   state.api = createApi(state);
   activeState = state;
   hostWindow.__VSU_MAP_E2E__ = state.api;
+  state.visibilityChangeHandler = () => {
+    if (!isStateActive(state)) return;
+    if (hostWindow.document?.visibilityState === "hidden") {
+      stopFrameProbeForState(state, "visibilitychange");
+    }
+  };
+  hostWindow.addEventListener("visibilitychange", state.visibilityChangeHandler);
 
   let released = false;
   return () => {

@@ -18,6 +18,8 @@ type MarkerKind = (typeof MARKER_KINDS)[number];
 type EdgePosition = (typeof EDGE_POSITIONS)[number];
 
 const configuredBaseUrl = process.env.MAP_E2E_BASE_URL;
+const ROUTE_A_LABEL_ENV = "MAP_E2E_ROUTE_A_LABEL";
+const ROUTE_B_LABEL_ENV = "MAP_E2E_ROUTE_B_LABEL";
 
 function evidenceUrl(overrides: Record<string, string> = {}, enabled = true) {
   const url = new URL(configuredBaseUrl ?? "http://localhost:3000/");
@@ -84,17 +86,45 @@ async function requireMarker(page: Page, testInfo: TestInfo, kind: MarkerKind) {
   return markers.first();
 }
 
-async function requireFacilityPair(page: Page, testInfo: TestInfo) {
-  const markers = page.locator('[data-map-item-kind="facility"]');
-  await expect.poll(() => markers.count(), { timeout: 8_000 }).toBeGreaterThanOrEqual(2).catch(() => {
-    blockFixture(testInfo, "two facility fixtures are not published on this runtime");
+function requiredFixtureLabel(testInfo: TestInfo, envName: string) {
+  const label = process.env[envName]?.trim();
+  if (!label) blockFixture(testInfo, `${envName} is not configured for exact route fixtures`);
+  return label;
+}
+
+async function requireExactMarker(page: Page, testInfo: TestInfo, kind: MarkerKind, label: string) {
+  const markers = page.locator(`[data-map-item-kind="${kind}"]`);
+  const matchingCount = () => markers.evaluateAll((nodes, expectedLabel) => nodes.filter((node) =>
+    node.getAttribute("aria-label") === expectedLabel || node.getAttribute("title") === expectedLabel,
+  ).length, label);
+  await expect.poll(matchingCount, { timeout: 8_000 }).toBeGreaterThan(0).catch(() => {
+    blockFixture(testInfo, `${kind} fixture label is not published: ${label}`);
   });
-  const identities = await markers.evaluateAll((nodes) => nodes.slice(0, 2).map((node) => ({
-    accessibleLabel: node.getAttribute("aria-label") ?? node.getAttribute("title") ?? "",
-  })));
-  expect(identities[0]?.accessibleLabel).not.toBe(identities[1]?.accessibleLabel);
-  expect(await markers.evaluateAll((nodes) => nodes[0] !== nodes[1])).toBe(true);
-  return markers;
+  expect(await matchingCount()).toBe(1);
+  const matchingIndex = await markers.evaluateAll((nodes, expectedLabel) => nodes.findIndex((node) =>
+    node.getAttribute("aria-label") === expectedLabel || node.getAttribute("title") === expectedLabel,
+  ), label);
+  const marker = markers.nth(matchingIndex);
+  await expect(marker).toHaveAttribute("data-map-item-kind", kind);
+  return marker;
+}
+
+async function requireRouteFixturePair(page: Page, testInfo: TestInfo) {
+  const routeALabel = requiredFixtureLabel(testInfo, ROUTE_A_LABEL_ENV);
+  const routeBLabel = requiredFixtureLabel(testInfo, ROUTE_B_LABEL_ENV);
+  expect(routeALabel).not.toBe(routeBLabel);
+  const markerA = await requireExactMarker(page, testInfo, "facility", routeALabel);
+  const markerB = await requireExactMarker(page, testInfo, "facility", routeBLabel);
+  expect(await markerA.count()).toBe(1);
+  expect(await markerB.count()).toBe(1);
+  return { markerA, markerB, routeALabel, routeBLabel };
+}
+
+function assertActivationOpenCorrelation(events: readonly { name: string; correlationOrdinal: number | null }[]) {
+  const activation = events.find((event) => event.name === "marker-activation");
+  const popupOpen = events.find((event) => event.name === "popup-open");
+  expect(typeof activation?.correlationOrdinal).toBe("number");
+  expect(popupOpen?.correlationOrdinal).toBe(activation?.correlationOrdinal);
 }
 
 async function mapAndMarkerGeometry(marker: ReturnType<Page["locator"]>) {
@@ -209,7 +239,7 @@ async function assertPopupBounds(page: Page) {
   expect(typeof bounds.scrollable).toBe("boolean");
 }
 
-async function assertFrameGate(page: Page) {
+async function assertFrameGate(page: Page, requireTransition = true) {
   await expect.poll(
     async () => (await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().frames.length ?? 0)),
     { timeout: 8_000 },
@@ -228,7 +258,16 @@ async function assertFrameGate(page: Page) {
   const sampledZooms = snapshot.frames
     .map((frame) => frame.zoom)
     .filter((zoom): zoom is number => typeof zoom === "number" && Number.isFinite(zoom));
-  expect(snapshot.frames.some((frame) => frame.animatingZoom) || new Set(sampledZooms).size >= 2).toBe(true);
+  if (requireTransition) {
+    const before = sampledZooms[0];
+    const after = sampledZooms.at(-1);
+    const hasStrictlyIntermediateZoom = typeof before === "number" && typeof after === "number" && before !== after && sampledZooms.some((zoom) => {
+      const low = Math.min(before, after);
+      const high = Math.max(before, after);
+      return zoom > low && zoom < high;
+    });
+    expect(snapshot.frames.some((frame) => frame.animatingZoom) || hasStrictlyIntermediateZoom).toBe(true);
+  }
 }
 
 async function assertPointerPopupGeometry(page: Page, marker: ReturnType<Page["locator"]>) {
@@ -416,6 +455,9 @@ for (const viewport of VIEWPORTS) {
     for (const zoomMethod of ZOOM_METHODS) {
       const runRouteAlignment = async ({ page }: { page: Page }, testInfo: TestInfo) => {
         test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+        if (zoomMethod === "pinch") {
+          testInfo.annotations.push({ type: "synthetic", description: "CDP pinch is synthetic gesture evidence, not physical touch hardware." });
+        }
         const errors = collectConsoleErrors(page);
         await page.setViewportSize(viewport);
         await openEvidencePage(page);
@@ -458,8 +500,10 @@ for (const kind of MARKER_KINDS) {
         expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
         const popup = page.locator(".leaflet-popup");
         expect(await popup.locator("[data-map-control='marker-popup']").count()).toBe(1);
-        expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
-        expect((await getEvents(page)).some((event) => event.name === "background-activation")).toBe(false);
+        const events = await getEvents(page);
+        expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+        assertActivationOpenCorrelation(events);
+        expect(events.some((event) => event.name === "background-activation")).toBe(false);
         await popup.getByRole("button", { name: "Close" }).click();
         await expect(page.locator(".leaflet-popup")).toHaveCount(0);
         expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
@@ -488,7 +532,9 @@ for (const kind of MARKER_KINDS) {
           await expect(page.locator(".leaflet-popup")).toHaveCount(1);
           await assertPointerPopupGeometry(page, marker);
           expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
-          expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+          const events = await getEvents(page);
+          expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+          assertActivationOpenCorrelation(events);
           assertNoConsoleErrors(errors);
         });
       });
@@ -511,7 +557,9 @@ for (const kind of MARKER_KINDS) {
         await page.keyboard.press(key);
         await expect(page.locator(".leaflet-popup")).toHaveCount(1);
         await expect(page.locator("[data-map-popup-first-control='true']")).toBeFocused();
-        expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+        const events = await getEvents(page);
+        expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+        assertActivationOpenCorrelation(events);
         await page.keyboard.press("Escape");
         await expect(page.locator(".leaflet-popup")).toHaveCount(0);
         expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
@@ -543,6 +591,7 @@ test("CDP pen activation is accepted once without background activation", async 
   expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+  assertActivationOpenCorrelation(events);
   expect(events.some((event) => event.name === "background-activation")).toBe(false);
   testInfo.annotations.push({ type: "synthetic", description: "CDP pen input is synthetic pointer evidence, not physical stylus hardware." });
   assertNoConsoleErrors(errors);
@@ -603,14 +652,14 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   const errors = collectConsoleErrors(page);
   await page.setViewportSize({ width: 1024, height: 768 });
   await openEvidencePage(page);
-  const markers = await requireFacilityPair(page, testInfo);
-  const markerA = markers.nth(0);
-  const markerB = markers.nth(1);
+  const { markerA, markerB, routeALabel } = await requireRouteFixturePair(page, testInfo);
 
   await positionMarkerAtEdge(page, markerA, "center");
   await activateRoute(page, testInfo, markerA);
   const committedA = await page.locator(".map-route-line").getAttribute("d");
   if (!committedA) throw new Error("committed route A has no rendered geometry");
+  await expect.poll(() => page.locator('[data-map-route-destination="true"]').count(), { timeout: 8_000 }).toBe(1);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
 
   await positionMarkerAtEdge(page, markerB, "east");
   await markerB.click();
@@ -621,12 +670,21 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   await page.getByRole("button", { name: "Navigate", exact: true }).click();
   await chooseMainGate(page, testInfo);
 
+  await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
   const zoomState = await performZoomMethod(page, "wheel");
   expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
   await page.waitForTimeout(120);
+  const pendingSnapshot = await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot());
+  expect(pendingSnapshot?.frames.length ?? 0).toBeGreaterThan(0);
+  expect(pendingSnapshot?.frames.every((frame) => frame.routeVisible && frame.failure === null && [frame.routeErrorPx, frame.destinationErrorPx, frame.rendererErrorPx]
+    .filter((value): value is number => value !== null)
+    .every((value) => value <= 2))).toBe(true);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedA);
+  expect(await page.locator(".map-route-line").count()).toBe(1);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
   await page.waitForTimeout(600);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedA);
+  await assertFrameGate(page);
   await expect(page.getByRole("alert")).toBeVisible({ timeout: 3_000 });
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["navigate", "route-request", "navigation-feedback"]);
@@ -641,42 +699,50 @@ test("committed route survives popup Close and Escape without a bottom card", as
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   await page.setViewportSize({ width: 390, height: 844 });
   await openEvidencePage(page);
-  const marker = await requireMarker(page, testInfo, "facility");
-  await positionMarkerAtEdge(page, marker, "center");
-  await activateRoute(page, testInfo, marker);
+  const { markerA, markerB, routeALabel } = await requireRouteFixturePair(page, testInfo);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
   const committedPath = await page.locator(".map-route-line").getAttribute("d");
   if (!committedPath) throw new Error("committed route has no rendered geometry");
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
 
+  await positionMarkerAtEdge(page, markerB, "east");
   await resetProbe(page);
-  await marker.click();
+  await markerB.click();
   const popup = page.locator(".leaflet-popup");
   await expect(popup).toHaveCount(1);
   await popup.getByRole("button", { name: /^Close/ }).click();
   await expect(popup).toHaveCount(0);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
-  expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+  const closeEvents = await getEvents(page);
+  expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+  assertActivationOpenCorrelation(closeEvents);
+  expect(closeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
   expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
 
   await resetProbe(page);
-  await marker.click();
+  await markerB.click();
   await expect(popup).toHaveCount(1);
   await popup.locator("[data-map-control='marker-popup']").press("Escape");
   await expect(popup).toHaveCount(0);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
-  expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+  const escapeEvents = await getEvents(page);
+  expect(escapeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+  assertActivationOpenCorrelation(escapeEvents);
+  expect(escapeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
+  expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
 });
 
 test("successful A-to-B replacement commits the new route and preserves correlation", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   await page.setViewportSize({ width: 1024, height: 768 });
   await openEvidencePage(page);
-  const markers = await requireFacilityPair(page, testInfo);
-  const markerA = markers.nth(0);
-  const markerB = markers.nth(1);
+  const { markerA, markerB, routeALabel, routeBLabel } = await requireRouteFixturePair(page, testInfo);
   await positionMarkerAtEdge(page, markerA, "center");
   await activateRoute(page, testInfo, markerA);
   const pathA = await page.locator(".map-route-line").getAttribute("d");
   if (!pathA) throw new Error("route A has no rendered geometry");
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
   await positionMarkerAtEdge(page, markerB, "east");
   await markerB.click();
   await expect(page.locator(".leaflet-popup")).toHaveCount(1);
@@ -687,6 +753,9 @@ test("successful A-to-B replacement commits the new route and preserves correlat
   const pathB = await page.locator(".map-route-line").getAttribute("d");
   expect(pathB).not.toBeNull();
   expect(pathB).not.toBe(pathA);
+  await expect.poll(() => page.locator('[data-map-route-destination="true"]').count(), { timeout: 8_000 }).toBe(1);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeBLabel);
+  await expect(markerA).not.toHaveAttribute("data-map-route-destination", "true");
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["navigate", "route-request", "navigation-feedback"]);
   expect(new Set(events.map((event) => event.correlationOrdinal)).size).toBe(1);
@@ -697,14 +766,25 @@ test("basemap switching keeps an active committed route", async ({ page }, testI
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   await page.setViewportSize({ width: 1024, height: 768 });
   await openEvidencePage(page);
-  const marker = await requireMarker(page, testInfo, "facility");
-  await positionMarkerAtEdge(page, marker, "center");
-  await activateRoute(page, testInfo, marker);
+  const { markerA, routeALabel } = await requireRouteFixturePair(page, testInfo);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
   const before = await page.locator(".map-route-line").getAttribute("d");
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
+  await markerA.click();
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+  await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
   await chooseSatellite(page);
+  await assertFrameGate(page, false);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(before);
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
+  await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
   await chooseMapStyle(page, "Vector");
+  await assertFrameGate(page, false);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(before);
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
 });
 
 for (const kind of MARKER_KINDS) {
@@ -777,12 +857,19 @@ test("reduced motion and light/dark appearance retain one accepted activation", 
   await openEvidencePage(page);
   await chooseTheme(page, "Light");
   expect(await page.locator("html").getAttribute("class")).not.toContain("dark");
-  const marker = await requireMarker(page, testInfo, "facility");
-  await positionMarkerAtEdge(page, marker, "center");
+  const { markerA } = await requireRouteFixturePair(page, testInfo);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
+  await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
+  const zoomState = await performZoomMethod(page, "programmatic");
+  expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
+  await assertFrameGate(page);
   await resetProbe(page);
-  await marker.click();
+  await markerA.click();
   await expect(page.locator(".leaflet-popup")).toHaveCount(1);
-  expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+  const events = await getEvents(page);
+  expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
+  assertActivationOpenCorrelation(events);
   await chooseTheme(page, "Dark");
   expect(await page.locator("html").getAttribute("class")).toContain("dark");
   assertNoConsoleErrors(errors);
@@ -816,9 +903,7 @@ test("A-to-B transfer has a complete ordered event list and no background activa
   const errors = collectConsoleErrors(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openEvidencePage(page);
-  const markers = await requireFacilityPair(page, testInfo);
-  const markerA = markers.nth(0);
-  const markerB = markers.nth(1);
+  const { markerA, markerB } = await requireRouteFixturePair(page, testInfo);
   await positionMarkerAtEdge(page, markerA, "center");
   await positionMarkerAtEdge(page, markerB, "east");
   await resetProbe(page);
@@ -839,6 +924,25 @@ test("A-to-B transfer has a complete ordered event list and no background activa
   expect(events[2]?.correlationOrdinal).toBe(events[0]?.correlationOrdinal);
   expect(events[3]?.correlationOrdinal).toBe(events[4]?.correlationOrdinal);
   expect(events[3]?.correlationOrdinal).not.toBe(events[0]?.correlationOrdinal);
+  assertNoConsoleErrors(errors);
+});
+
+test("rapid repeated native zoom keeps committed route within frame gate", async ({ page }, testInfo) => {
+  test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  const errors = collectConsoleErrors(page);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openEvidencePage(page);
+  const { markerA } = await requireRouteFixturePair(page, testInfo);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
+  await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
+  await page.locator(".leaflet-container").hover();
+  for (let index = 0; index < 5; index += 1) {
+    await page.mouse.wheel(0, -120);
+  }
+  await page.waitForTimeout(600);
+  await assertFrameGate(page);
+  expect(await page.locator(".map-route-line").count()).toBe(1);
   assertNoConsoleErrors(errors);
 });
 

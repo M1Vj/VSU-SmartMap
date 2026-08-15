@@ -29,6 +29,7 @@ import {
 
 type FakeWindow = {
   __VSU_MAP_E2E__?: unknown;
+  document?: { visibilityState: DocumentVisibilityState };
   addEventListener: (type: string, listener: EventListener) => void;
   removeEventListener: (type: string, listener: EventListener) => void;
   dispatchEvent: (event: Event) => boolean;
@@ -183,6 +184,13 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /await expect\(navigate\)\.toBeVisible/);
   assert.match(browserSpec, /evidenceOnlyChunks/);
   assert.match(browserSpec, /browser\.newContext/);
+  assert.match(browserSpec, /MAP_E2E_ROUTE_A_LABEL/);
+  assert.match(browserSpec, /MAP_E2E_ROUTE_B_LABEL/);
+  assert.match(browserSpec, /data-map-route-destination/);
+  assert.match(browserSpec, /rapid repeated native zoom/);
+  assert.match(browserSpec, /synthetic.*pinch/i);
+  const markerSource = readFileSync(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
+  assert.match(markerSource, /dataset\.mapRouteDestination/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {
@@ -322,6 +330,19 @@ test("Leaflet pane projection includes its live rendered offset and scale", () =
   );
 });
 
+test("Leaflet pane projection applies the live SVG renderer scale and translation", () => {
+  assert.deepEqual(
+    normalizeLeafletPaneProjection(
+      { x: 10, y: 20 },
+      { left: 100, top: 50, width: 200, height: 100 },
+      { width: 200, height: 100 },
+      { left: 20, top: 10, width: 400, height: 200 },
+      { a: 1.25, b: 0.1, c: 0.2, d: 0.9, e: 45, f: 30 },
+    ),
+    { x: 41.5, y: 39 },
+  );
+});
+
 test("route clipping keeps visible intersections and interior vertices", () => {
   assert.deepEqual(
     clipScreenPolylineToRect(
@@ -381,6 +402,24 @@ test("strict opt-in cleanup removes global state, frame work, delayed route work
   assert.equal(rafCallbacks.size, 0);
   assert.equal(timerCallbacks.size, 0);
   assert.ok([...listenerCounts.values()].every((count) => count === 0));
+});
+
+test("visibilitychange cancels active frame work without claiming a background pass", () => {
+  installFakeBrowser();
+  fakeWindow.document = { visibilityState: "visible" };
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frameProbeRunning: boolean; frameProbe: { stopReason: string | null } };
+  };
+  api.startFrameProbe();
+  assert.equal(rafCallbacks.size, 1);
+  fakeWindow.document.visibilityState = "hidden";
+  fakeWindow.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(api.snapshot().frameProbeRunning, false);
+  assert.equal(api.snapshot().frameProbe.stopReason, "visibilitychange");
+  assert.equal(rafCallbacks.size, 0);
+  cleanup();
 });
 
 test("initialization is safe across a Strict Mode setup and cleanup pair", () => {
@@ -677,6 +716,44 @@ test("frame probe uses authoritative route and destination geometry with bounded
   cleanup();
 });
 
+test("frame probe applies the live satellite SVG scale and translation", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => mapRect } }),
+    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const transform = { a: 1.1, b: 0, c: 0, d: 0.95, e: 5, f: 3 };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => transform,
+    }),
+  };
+  const marker = {
+    getElement: () => ({ getBoundingClientRect: () => ({ left: 110, top: -17, width: 10, height: 20 }) }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; routeErrorPx: number | null; destinationErrorPx: number | null; failure: string | null }> } };
+  api.startFrameProbe();
+  for (const callback of [...rafCallbacks.values()]) callback(16);
+  for (const callback of [...rafCallbacks.values()]) callback(32);
+  const frame = api.snapshot().frames[0];
+  assert.equal(frame.routeVisible, true);
+  assert.equal(frame.failure, null);
+  assert.ok((frame.routeErrorPx ?? Infinity) < 1e-9);
+  assert.ok((frame.destinationErrorPx ?? Infinity) < 1e-9);
+  cleanup();
+});
+
 test("frame probe projects through the live MapLibre canvas offset and scale", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
@@ -824,6 +901,31 @@ test("invalid rendered geometry fails with a typed route geometry error", () => 
   rafCallbacks.delete(frame[0]);
   frame[1](16);
   assert.equal(api.snapshot().frames[0]?.failure, "missing-route-geometry");
+  cleanup();
+});
+
+test("route readiness reports a typed baseline failure when the rendered path is not ready", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }),
+    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) } }),
+    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const polyline = { getLatLngs: () => path };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-route-baseline");
   cleanup();
 });
 
