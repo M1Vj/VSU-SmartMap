@@ -238,6 +238,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(probeSource, /mapLibreRenderSnapshot/);
   assert.match(probeSource, /mapLibreRenderGeneration/);
   assert.match(probeSource, /totalFrameCount/);
+  assert.match(probeSource, /frameAwaitingRendererTimeout/);
+  assert.match(probeSource, /failAwaitingRendererFrame/);
   assert.match(probeSource, /project\.call\(/);
   assert.match(probeSource, /markFrameProbeBoundary/);
   assert.doesNotMatch(probeSource, /rendererTransform[\s\S]*getScreenCTM/);
@@ -1492,13 +1494,12 @@ test("MapLibre frame token rejects logical project and SVG advances while the ca
   const staleFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(staleFrame[0]);
   staleFrame[1](16);
-  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
-  assert.equal(api.snapshot().frames[0]?.rendererFrameToken, 1);
+  assert.equal(api.snapshot().frames.length, 0);
   renderListener?.();
   const liveFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(liveFrame[0]);
   liveFrame[1](32);
-  assert.equal(api.snapshot().frames[1]?.failure, null);
+  assert.equal(api.snapshot().frames[0]?.failure, null);
   cleanup();
 });
 
@@ -1556,12 +1557,59 @@ test("MapLibre arming rejects stale logical and SVG state after the first render
   const staleFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(staleFrame[0]);
   staleFrame[1](16);
-  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frames.length, 0);
   renderListener?.();
   const liveFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(liveFrame[0]);
   liveFrame[1](32);
-  assert.equal(api.snapshot().frames[1]?.failure, null);
+  assert.equal(api.snapshot().frames[0]?.failure, null);
+  cleanup();
+});
+
+test("MapLibre arming stops with one typed failure when no post-input render arrives", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    armFrameProbeForInput: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null }>; frameProbeRunning: boolean; frameProbe: { stopReason: string | null } };
+  };
+  const listeners = new Set<() => void>();
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+  };
+  const renderer = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: (type: string, listener: () => void) => {
+      if (type === "render") listeners.add(listener);
+    },
+    off: (type: string, listener: () => void) => {
+      if (type === "render") listeners.delete(listener);
+    },
+    project: ([lng]: [number]) => ({ x: 20 + lng * 10, y: 40 }),
+  };
+  registerLeafletMapForEvidence({} as never);
+  registerMapLibreForEvidence(renderer as never);
+  for (const listener of listeners) listener();
+  api.startFrameProbe();
+  api.armFrameProbeForInput();
+  const preInput = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(preInput[0]);
+  preInput[1](16);
+  assert.equal(api.snapshot().frames.length, 0);
+  const timeout = [...timerCallbacks.entries()].at(-1);
+  assert.ok(timeout);
+  timerCallbacks.delete(timeout[0]);
+  timeout[1]();
+  assert.equal(api.snapshot().frames.length, 1);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frameProbeRunning, false);
+  assert.equal(api.snapshot().frameProbe.stopReason, "wall-clock-timeout");
   cleanup();
 });
 
@@ -1608,12 +1656,13 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   emitRender();
   api.startFrameProbe();
   api.armFrameProbeForInput();
+  emitRender();
   const first = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(first[0]);
   first[1](0);
   api.stopFrameProbe();
   const firstToken = api.snapshot().frames[0]?.rendererFrameToken;
-  assert.equal(firstToken, 1);
+  assert.equal(firstToken, 2);
 
   registerMapLibreForEvidence(makeRenderer() as never);
   assert.equal(offCalls, 1);
@@ -1622,12 +1671,12 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   const stale = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(stale[0]);
   stale[1](16);
-  assert.equal(api.snapshot().frames.at(-1)?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frames.length, 0);
   emitRender();
   const live = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(live[0]);
   live[1](32);
-  assert.equal(api.snapshot().frames.at(-1)?.rendererFrameToken, 2);
+  assert.equal(api.snapshot().frames.at(-1)?.rendererFrameToken, 3);
   assert.ok((api.snapshot().frames.at(-1)?.rendererFrameToken ?? 0) > (firstToken ?? 0));
   api.stopFrameProbe();
   cleanup();

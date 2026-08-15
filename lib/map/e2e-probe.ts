@@ -202,6 +202,7 @@ type ProbeState = {
   frameTransitionRendererToken: number | null;
   frameTransitionRendererSnapshot: MapLibreRenderSnapshot | null;
   frameAwaitingRendererFrame: boolean;
+  frameAwaitingRendererTimeout: ReturnType<typeof setTimeout> | null;
   visibilityDocument: Document | null;
   visibilityChangeHandler: (() => void) | null;
 };
@@ -1090,18 +1091,7 @@ function recordFrame(state: ProbeState) {
     return;
   }
   if (state.frameAwaitingRendererFrame) {
-    const boundary = state.frameTransitionRendererSnapshot;
-    const snapshot = state.mapLibreRenderSnapshot;
-    const rendererAdvanced = Boolean(
-      snapshot &&
-      boundary &&
-      (snapshot.generation !== boundary.generation || snapshot.token > boundary.token),
-    );
-    if (!rendererAdvanced) {
-      appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-renderer-frame" });
-      return;
-    }
-    state.frameAwaitingRendererFrame = false;
+    return;
   }
   if (
     state.mapLibreMap &&
@@ -1273,6 +1263,15 @@ function scheduleFrame(state: ProbeState) {
       scheduleFrame(state);
       return;
     }
+    if (state.frameAwaitingRendererFrame) {
+      if (!hasRendererAdvancedSinceInput(state)) {
+        scheduleFrame(state);
+        return;
+      }
+      state.frameAwaitingRendererFrame = false;
+      if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
+      state.frameAwaitingRendererTimeout = null;
+    }
     if (state.totalFrameCount >= 600) {
       stopFrameProbeForState(state, "max-frames");
       return;
@@ -1298,9 +1297,11 @@ function stopFrameProbeForState(
   }
   if (state.frameTimeout !== null) clearTimeout(state.frameTimeout);
   if (state.wallClockTimeout !== null) clearTimeout(state.wallClockTimeout);
+  if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
   state.frameId = null;
   state.frameTimeout = null;
   state.wallClockTimeout = null;
+  state.frameAwaitingRendererTimeout = null;
   if (state.frameProbeStartedAt !== null && state.frameProbeStoppedAt === null) {
     state.frameProbeStoppedAt = typeof performance === "undefined" ? Date.now() : performance.now();
     state.frameProbeStopReason = reason;
@@ -1321,6 +1322,8 @@ function detachMapLibreRenderListener(state: ProbeState) {
   state.frameTransitionRendererToken = null;
   state.frameTransitionRendererSnapshot = null;
   state.frameAwaitingRendererFrame = false;
+  if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
+  state.frameAwaitingRendererTimeout = null;
 }
 
 function cancelPendingDelays(state: ProbeState, error = new DOMException("Route request was cancelled", "AbortError")) {
@@ -1337,7 +1340,40 @@ function cloneMapLibreRenderSnapshot(snapshot: MapLibreRenderSnapshot | null) {
     : null;
 }
 
+function hasRendererAdvancedSinceInput(state: ProbeState) {
+  if (!state.mapLibreMap) return true;
+  const snapshot = state.mapLibreRenderSnapshot;
+  if (!snapshot || snapshot.generation !== state.mapLibreRenderGeneration) return false;
+  const boundary = state.frameTransitionRendererSnapshot;
+  if (!boundary) return snapshot.token > 0;
+  return snapshot.generation !== boundary.generation || snapshot.token > boundary.token;
+}
+
+function failAwaitingRendererFrame(state: ProbeState) {
+  if (!isStateActive(state) || !state.frameAwaitingRendererFrame) return;
+  state.frameAwaitingRendererFrame = false;
+  state.frameAwaitingRendererTimeout = null;
+  if (state.totalFrameCount >= 600) {
+    stopFrameProbeForState(state, "max-frames");
+    return;
+  }
+  state.frameCount += 1;
+  state.totalFrameCount += 1;
+  const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+  appendFrame(state, startedAt, {
+    routeVisible: false,
+    routeErrorPx: null,
+    destinationErrorPx: null,
+    rendererErrorPx: null,
+    expectedSampleCount: 0,
+    renderedSampleCount: 0,
+    failure: "missing-renderer-frame",
+  });
+  stopFrameProbeForState(state, "wall-clock-timeout");
+}
+
 function armFrameProbeForInputState(state: ProbeState) {
+  if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
   state.frames = [];
   state.frameCount = 0;
   state.frameProbeCostMs = 0;
@@ -1346,6 +1382,9 @@ function armFrameProbeForInputState(state: ProbeState) {
   state.frameTransitionRendererToken = state.mapLibreRenderToken;
   state.frameTransitionRendererSnapshot = cloneMapLibreRenderSnapshot(state.mapLibreRenderSnapshot);
   state.frameAwaitingRendererFrame = Boolean(state.mapLibreMap);
+  state.frameAwaitingRendererTimeout = state.mapLibreMap
+    ? setTimeout(() => failAwaitingRendererFrame(state), 1_000)
+    : null;
 }
 
 function createApi(state: ProbeState): MapEvidenceApi {
@@ -1399,6 +1438,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameTransitionRendererToken = null;
       state.frameTransitionRendererSnapshot = null;
       state.frameAwaitingRendererFrame = false;
+      state.frameAwaitingRendererTimeout = null;
     },
     startFrameProbe: () => {
       if (!isActive()) return;
@@ -1411,6 +1451,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameTransitionRendererToken = null;
       state.frameTransitionRendererSnapshot = null;
       state.frameAwaitingRendererFrame = false;
+      state.frameAwaitingRendererTimeout = null;
       state.wallClockTimeout = setTimeout(() => {
         if (!isStateActive(state)) return;
         stopFrameProbeForState(state, "wall-clock-timeout");
@@ -1548,6 +1589,7 @@ export function initializeMapEvidence(url: string): () => void {
     frameTransitionRendererToken: null,
     frameTransitionRendererSnapshot: null,
     frameAwaitingRendererFrame: false,
+    frameAwaitingRendererTimeout: null,
     visibilityDocument: null,
     visibilityChangeHandler: null,
   } as ProbeState;
@@ -1607,7 +1649,10 @@ export function registerMapLibreForEvidence(map: MapLibreMap): () => void {
     const token = state.mapLibreRenderSequence + 1;
     state.mapLibreRenderSequence = token;
     state.mapLibreRenderToken = token;
-    state.mapLibreRenderSnapshot = captureMapLibreRenderSnapshot(map, state.mapLibreRenderGeneration, token);
+    const snapshot = captureMapLibreRenderSnapshot(map, state.mapLibreRenderGeneration, token);
+    state.mapLibreRenderSnapshot = snapshot;
+    if (snapshot && state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
+    if (snapshot) state.frameAwaitingRendererTimeout = null;
   };
   mapWithEvents.on("render", onRender);
   state.mapLibreRenderMap = map;
