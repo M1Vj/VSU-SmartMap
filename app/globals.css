@@ -239,10 +239,6 @@ select:focus-visible,
   color: hsl(var(--accent-foreground));
 }
 
-.leaflet-zoom-anim .leaflet-zoom-animated {
-  transition: transform 0.03s ease-out !important;
-}
-
 .leaflet-marker-icon {
   contain: layout style paint;
   will-change: transform;

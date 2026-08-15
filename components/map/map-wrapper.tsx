@@ -3,13 +3,12 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
 
 import L from "leaflet";
-import { MapContainer, TileLayer, useMap } from "@/components/map/leaflet-react";
+import { MapContainer, TileLayer, ZoomControl, useMap } from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useApp } from "@/lib/context/app-context";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
-import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
@@ -201,8 +200,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
           <OpenFreeMapVectorLayer key={mapStyleUrl} styleUrl={mapStyleUrl} />
         )}
         <DeveloperAttribution />
-        <SmoothZoomControl position="bottomleft" />
-        <SmoothWheelZoom />
+        <ZoomControl position="bottomleft" />
         {children}
       </MapContainer>
       {satelliteFallbackActive && (

@@ -1,44 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   MAP_LEAFLET_ZOOM_OPTIONS,
-  MAP_SMOOTH_CONTROL_ZOOM_OPTIONS,
-  MAP_SMOOTH_WHEEL_ZOOM_OPTIONS,
   MAP_ZOOM_ANIMATION_OPTIONS,
 } from "./wheel-zoom.ts";
 
-test("map zoom options disable Leaflet's batched wheel handler for continuous wheel zoom", () => {
+test("map zoom options use Leaflet's supported native input lifecycle", () => {
   assert.deepEqual(MAP_LEAFLET_ZOOM_OPTIONS, {
-    scrollWheelZoom: false,
+    scrollWheelZoom: true,
+    doubleClickZoom: true,
+    touchZoom: true,
+    keyboard: true,
     zoomSnap: 0,
     zoomDelta: 0.25,
+    wheelDebounceTime: 40,
   });
 });
 
-test("shared map zoom options can be spread into every Leaflet map", () => {
-  assert.deepEqual(Object.keys(MAP_LEAFLET_ZOOM_OPTIONS).sort(), [
-    "scrollWheelZoom",
-    "zoomDelta",
-    "zoomSnap",
-  ]);
-});
-
-test("smooth wheel zoom options keep mouse and trackpad zoom responsive without jumpy steps", () => {
-  assert.deepEqual(MAP_SMOOTH_WHEEL_ZOOM_OPTIONS, {
-    enabled: true,
-    easing: 0.32,
-    minZoomDelta: 0.001,
-    sensitivity: 0.0048,
-    settleDelayMs: 140,
-  });
-});
-
-test("smooth zoom control options use the same small zoom step as the map controls", () => {
-  assert.deepEqual(MAP_SMOOTH_CONTROL_ZOOM_OPTIONS, {
-    enabled: true,
-    zoomDelta: 0.25,
-  });
+test("private smooth zoom option contracts no longer exist", async () => {
+  const source = await readFile(new URL("./wheel-zoom.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /MAP_SMOOTH_(WHEEL|CONTROL)_ZOOM_OPTIONS/);
 });
 
 test("shared map zoom animation options enable animated zoom controls", () => {

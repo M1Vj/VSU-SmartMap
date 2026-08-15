@@ -65,3 +65,24 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.match(fallbackBranch, /url=\{MAP_TILES\.satelliteFallbackUrl\}/);
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
+
+test("all map surfaces use one native bottom-left zoom control without private smooth zoom", async () => {
+  const surfaces = await Promise.all([
+    readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../admin/location-preview-map.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../admin/navigation/editor-map-content.tsx", import.meta.url), "utf8"),
+  ]);
+  const css = await readFile(new URL("../../app/globals.css", import.meta.url), "utf8");
+
+  for (const surface of surfaces) {
+    assert.doesNotMatch(surface, /SmoothWheelZoom|SmoothZoomControl|smooth-wheel-zoom/);
+    assert.match(surface, /zoomControl=\{false\}/);
+    assert.equal(surface.match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
+  }
+
+  assert.doesNotMatch(
+    css,
+    /\.leaflet-zoom-anim\s+\.leaflet-zoom-animated\s*\{[\s\S]*?transition:/,
+  );
+});

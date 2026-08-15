@@ -77,6 +77,23 @@ export function useMap(): L.Map {
   return map;
 }
 
+type ZoomControlProps = {
+  position?: L.ControlPosition;
+};
+
+export function ZoomControl({ position = "topleft" }: ZoomControlProps) {
+  const map = useMap();
+
+  useEffect(() => {
+    const control = L.control.zoom({ position }).addTo(map);
+    return () => {
+      control.remove();
+    };
+  }, [map, position]);
+
+  return null;
+}
+
 function useEventHandlers(
   target: L.Evented | null,
   eventHandlers?: LeafletEventHandlerFnMap,

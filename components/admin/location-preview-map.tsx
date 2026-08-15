@@ -3,14 +3,13 @@
 import "leaflet/dist/leaflet.css";
 
 import { useEffect } from "react";
-import { MapContainer, TileLayer, CircleMarker, useMap } from "@/components/map/leaflet-react";
+import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
 import type { LatLng } from "@/lib/types/common";
 import { MAP_MAX_ZOOM, MAP_MIN_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useMapStyle } from "@/lib/context/map-style-context";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
-import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 
 interface LocationPreviewMapProps {
   coordinates: LatLng;
@@ -75,8 +74,7 @@ export function LocationPreviewMap({ coordinates }: LocationPreviewMapProps) {
             />
           </>
         )}
-        <SmoothZoomControl />
-        <SmoothWheelZoom />
+        <ZoomControl position="bottomleft" />
         <InvalidateOnReady />
         <CircleMarker
           center={[coordinates.lat, coordinates.lng]}

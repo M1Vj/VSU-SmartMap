@@ -8,6 +8,7 @@ import {
   CircleMarker,
   MapContainer,
   TileLayer,
+  ZoomControl,
   useMap,
   useMapEvents,
 } from "@/components/map/leaflet-react";
@@ -21,7 +22,6 @@ import {
   isPointInsideVsuCampus,
 } from "@/lib/map/vsu-campus-boundary";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
-import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 import { cn } from "@/lib/utils";
 
 type MarkerPoint = { id: string; lat: number; lng: number };
@@ -83,7 +83,7 @@ function InvalidateOnReady() {
 /**
  * Shared location picker map — single source of truth for the "select location"
  * experience (admin facility coordinate picker, owner listing location, and the
- * student walking-time reference). Theme/style-aware tiles, smooth zoom, and a
+ * student walking-time reference). Theme/style-aware tiles, native zoom, and a
  * click-to-place blue marker. Set `restrictToCampus` for on-campus-only pins.
  */
 export function LocationPickerMap({
@@ -143,8 +143,7 @@ export function LocationPickerMap({
             />
           </>
         )}
-        <SmoothZoomControl position="bottomleft" />
-        <SmoothWheelZoom />
+        <ZoomControl position="bottomleft" />
         <InvalidateOnReady />
         <MapCenterUpdater value={value} />
         <ClickCapture onChange={onChange} restrictToCampus={restrictToCampus} />
