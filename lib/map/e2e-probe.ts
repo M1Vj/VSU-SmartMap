@@ -486,21 +486,64 @@ export function parseLeafletRasterTileUrl(source: string): LeafletRasterTileAddr
 
 const LEAFLET_TILE_SIZE = 256;
 
-function getLeafletRasterTilePoint(
-  map: LeafletMap,
-  containerRect: DOMRect,
+type LeafletRasterTileFrame = {
+  address: LeafletRasterTileAddress;
+  rect: MapEvidenceRect;
+  width: number;
+  height: number;
+};
+
+type LeafletRasterProjection = {
+  map: LeafletMap;
+  containerRect: DOMRect;
+  frames: readonly LeafletRasterTileFrame[];
+};
+
+function projectThroughLeafletRasterFrame(
+  projection: LeafletRasterProjection,
+  frame: LeafletRasterTileFrame,
+  coordinate: { lat: number; lng: number },
+): ScreenPoint | null {
+  const mapWithProject = projection.map as LeafletMap & {
+    project: (latLng: [number, number], zoom: number) => ScreenPoint;
+  };
+  const projected = mapWithProject.project([coordinate.lat, coordinate.lng], frame.address.zoom);
+  if (!isFiniteScreenPoint(projected)) return null;
+  const localX = projected.x - frame.address.x * LEAFLET_TILE_SIZE;
+  const localY = projected.y - frame.address.y * LEAFLET_TILE_SIZE;
+  const point = {
+    x: frame.rect.left - projection.containerRect.left + localX * (frame.rect.width / frame.width),
+    y: frame.rect.top - projection.containerRect.top + localY * (frame.rect.height / frame.height),
+  };
+  return isFiniteScreenPoint(point) ? point : null;
+}
+
+function projectLeafletRasterCoordinate(
+  projection: LeafletRasterProjection,
   coordinate: { lat: number; lng: number },
 ): { point: ScreenPoint; failure: MapFrameSampleFailure | null } {
+  const points = projection.frames
+    .map((frame) => projectThroughLeafletRasterFrame(projection, frame, coordinate))
+    .filter((point): point is ScreenPoint => point !== null);
+  if (points.length === 0) return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
+  const first = points[0];
+  if (points.some((point) => distance(point, first) > 2)) {
+    return { point: { x: 0, y: 0 }, failure: "inconsistent-raster-projection" };
+  }
+  return { point: first, failure: null };
+}
+
+function buildLeafletRasterProjection(
+  map: LeafletMap,
+  containerRect: DOMRect,
+): { projection: LeafletRasterProjection | null; failure: MapFrameSampleFailure | null } {
   const tilePane = map.getPanes?.().tilePane as RasterPane | undefined;
   const rawTiles = tilePane?.querySelectorAll?.(".leaflet-tile");
   const tiles = rawTiles ? Array.from(rawTiles) : [];
   if (tiles.length === 0 || typeof (map as LeafletMap & { project?: unknown }).project !== "function") {
-    return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
+    return { projection: null, failure: "missing-raster-tile" };
   }
-  const projectedPoints: ScreenPoint[] = [];
-  const mapWithProject = map as LeafletMap & {
-    project: (latLng: [number, number], zoom: number) => ScreenPoint;
-  };
+  const frames: LeafletRasterTileFrame[] = [];
   for (const tile of tiles) {
     const source = tile.src ?? tile.getAttribute?.("src") ?? "";
     const address = parseLeafletRasterTileUrl(source);
@@ -521,23 +564,26 @@ function getLeafletRasterTilePoint(
       naturalWidth <= 0 ||
       naturalHeight <= 0
     ) continue;
-    const projected = mapWithProject.project([coordinate.lat, coordinate.lng], address.zoom);
-    if (!isFiniteScreenPoint(projected)) continue;
-    const localX = projected.x - address.x * LEAFLET_TILE_SIZE;
-    const localY = projected.y - address.y * LEAFLET_TILE_SIZE;
-    if (localX < -1 || localY < -1 || localX > LEAFLET_TILE_SIZE + 1 || localY > LEAFLET_TILE_SIZE + 1) continue;
-    const point = {
-      x: rect.left - containerRect.left + localX * (rect.width / width),
-      y: rect.top - containerRect.top + localY * (rect.height / height),
-    };
-    if (isFiniteScreenPoint(point)) projectedPoints.push(point);
+    frames.push({ address, rect, width, height });
   }
-  if (projectedPoints.length === 0) return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
-  const first = projectedPoints[0];
-  if (projectedPoints.some((point) => distance(point, first) > 2)) {
-    return { point: { x: 0, y: 0 }, failure: "inconsistent-raster-projection" };
+  if (frames.length === 0) return { projection: null, failure: "missing-raster-tile" };
+  const projection: LeafletRasterProjection = { map, containerRect, frames };
+  const validationCoordinates = [{ lat: 0, lng: 0 }, { lat: 1, lng: 1 }];
+  for (const coordinate of validationCoordinates) {
+    const validation = projectLeafletRasterCoordinate(projection, coordinate);
+    if (validation.failure) return { projection: null, failure: validation.failure };
   }
-  return { point: first, failure: null };
+  return { projection, failure: null };
+}
+
+function getLeafletRasterTilePoint(
+  map: LeafletMap,
+  containerRect: DOMRect,
+  coordinate: { lat: number; lng: number },
+): { point: ScreenPoint; failure: MapFrameSampleFailure | null } {
+  const result = buildLeafletRasterProjection(map, containerRect);
+  if (!result.projection || result.failure) return { point: { x: 0, y: 0 }, failure: result.failure ?? "missing-raster-tile" };
+  return projectLeafletRasterCoordinate(result.projection, coordinate);
 }
 
 function transformScreenPoint(
@@ -608,6 +654,7 @@ function projectCoordinate(
   map: LeafletMap,
   containerRect: DOMRect,
   coordinate: { lat: number; lng: number },
+  rasterProjection?: LeafletRasterProjection | null,
 ): { point: ScreenPoint; failure: MapFrameSampleFailure | null } {
   if (state.mapLibreMap) {
     const mapLibre = state.mapLibreMap;
@@ -644,6 +691,7 @@ function projectCoordinate(
     };
   }
 
+  if (rasterProjection) return projectLeafletRasterCoordinate(rasterProjection, coordinate);
   return getLeafletRasterTilePoint(map, containerRect, coordinate);
 }
 
@@ -814,10 +862,13 @@ function recordFrame(state: ProbeState) {
   }
 
   try {
+    const rasterProjectionResult = state.mapLibreMap
+      ? { projection: null, failure: null }
+      : buildLeafletRasterProjection(map, containerRect);
     const projectedPath: ScreenPoint[] = [];
-    let projectionFailure: MapFrameSampleFailure | null = null;
+    let projectionFailure: MapFrameSampleFailure | null = rasterProjectionResult.failure;
     for (const point of route.path) {
-      const projected = projectCoordinate(state, map, containerRect, point);
+      const projected = projectCoordinate(state, map, containerRect, point, rasterProjectionResult.projection);
       projectionFailure ??= projected.failure;
       projectedPath.push(projected.point);
     }
@@ -876,7 +927,7 @@ function recordFrame(state: ProbeState) {
       ) {
         sampleFailure ??= "missing-destination-element";
       } else {
-        const expectedDestination = projectCoordinate(state, map, containerRect, destination.coordinate);
+        const expectedDestination = projectCoordinate(state, map, containerRect, destination.coordinate, rasterProjectionResult.projection);
         sampleFailure ??= expectedDestination.failure;
         if (!expectedDestination.failure) {
           const renderedDestination = getConfiguredMarkerAnchorPoint(

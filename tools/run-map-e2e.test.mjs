@@ -50,3 +50,16 @@ test("map E2E wrapper cannot bypass the required fail-closed reporter", () => {
   assert.match(result.stderr, /owns its fail-closed reporter/);
   assert.doesNotMatch(result.stderr, /playwright|browser/i);
 });
+
+test("map E2E wrapper rejects selection flags that could report a partial matrix", () => {
+  for (const flag of ["--list", "--grep=route", "--grep-invert=route", "--shard=1/2", "--project=chromium"]) {
+    const result = spawnSync(process.execPath, ["tools/run-map-e2e.mjs", flag], {
+      cwd: process.cwd(),
+      env: { ...process.env, MAP_E2E_BASE_URL: "http://127.0.0.1:3000", MAP_E2E_ROUTE_A_LABEL: "Facility A", MAP_E2E_ROUTE_B_LABEL: "Facility B" },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1, flag);
+    assert.match(result.stderr, /selection flags|full matrix/i, flag);
+    assert.doesNotMatch(result.stderr, /playwright|browser/i, flag);
+  }
+});

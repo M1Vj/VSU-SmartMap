@@ -140,6 +140,12 @@ function assertActivationOpenCorrelation(events: readonly { name: string; correl
   expect(popupOpen?.correlationOrdinal).toBe(activation?.correlationOrdinal);
 }
 
+function assertActivationOpenCloseCorrelation(events: readonly { name: string; correlationOrdinal: number | null }[]) {
+  const interaction = events.filter((event) => ["marker-activation", "popup-open", "popup-close"].includes(event.name));
+  assertOneCorrelation(interaction);
+  assertActivationOpenCorrelation(interaction);
+}
+
 async function mapAndMarkerGeometry(marker: ReturnType<Page["locator"]>) {
   return marker.evaluate((element) => {
     const map = element.closest(".leaflet-container");
@@ -521,7 +527,9 @@ for (const kind of MARKER_KINDS) {
         expect(events.some((event) => event.name === "background-activation")).toBe(false);
         await popup.getByRole("button", { name: "Close" }).click();
         await expect(page.locator(".leaflet-popup")).toHaveCount(0);
-        expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+        const closeEvents = await getEvents(page);
+        expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+        assertActivationOpenCloseCorrelation(closeEvents);
         assertNoConsoleErrors(errors);
       });
     }
@@ -577,7 +585,9 @@ for (const kind of MARKER_KINDS) {
         assertActivationOpenCorrelation(events);
         await page.keyboard.press("Escape");
         await expect(page.locator(".leaflet-popup")).toHaveCount(0);
-        expect((await getEvents(page)).map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+        const closeEvents = await getEvents(page);
+        expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
+        assertActivationOpenCloseCorrelation(closeEvents);
         expect(await page.evaluate(() => document.activeElement?.classList.contains("leaflet-marker-icon"))).toBe(true);
         assertNoConsoleErrors(errors);
       });
@@ -731,7 +741,7 @@ test("committed route survives popup Close and Escape without a bottom card", as
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
   const closeEvents = await getEvents(page);
   expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
-  assertActivationOpenCorrelation(closeEvents);
+  assertActivationOpenCloseCorrelation(closeEvents);
   expect(closeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
   await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
   await expect(page.locator('[data-map-route-destination="true"]')).not.toHaveAttribute("title", routeBLabel);
@@ -745,7 +755,7 @@ test("committed route survives popup Close and Escape without a bottom card", as
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedPath);
   const escapeEvents = await getEvents(page);
   expect(escapeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
-  assertActivationOpenCorrelation(escapeEvents);
+  assertActivationOpenCloseCorrelation(escapeEvents);
   expect(escapeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
   await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
   await expect(page.locator('[data-map-route-destination="true"]')).not.toHaveAttribute("title", routeBLabel);
@@ -958,9 +968,11 @@ test("A-to-B transfer has a complete ordered event list and no background activa
     "popup-open",
   ]);
   expect(events.some((event) => event.name === "background-activation")).toBe(false);
-  assertOneCorrelation(events.slice(0, 2));
-  assertOneCorrelation(events.slice(2));
-  expect(events[3]?.correlationOrdinal).not.toBe(events[0]?.correlationOrdinal);
+  const activationA = events.slice(0, 3);
+  const activationB = events.slice(3);
+  assertActivationOpenCloseCorrelation(activationA);
+  assertOneCorrelation(activationB);
+  expect(activationB[0]?.correlationOrdinal).not.toBe(activationA[0]?.correlationOrdinal);
   assertNoConsoleErrors(errors);
 });
 
@@ -982,6 +994,15 @@ test("rapid repeated native zoom keeps committed route within frame gate", async
   expect(snapshot.frameProbe.stopReason).toBe("explicit");
   expect((snapshot.frames.at(-1)?.at ?? 0) - (snapshot.frames[0]?.at ?? 0)).toBeLessThan(2_000);
   expect(await page.locator(".map-route-line").count()).toBe(1);
+  const settledCamera = await cameraSignature(page);
+  const settledFrameCount = snapshot.frameProbe.frameCount;
+  const settledSampleCount = snapshot.frames.length;
+  await page.waitForTimeout(1_100);
+  const postTail = await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot());
+  expect(postTail?.frameProbeRunning).toBe(false);
+  expect(postTail?.frameProbe.frameCount).toBe(settledFrameCount);
+  expect(postTail?.frames.length).toBe(settledSampleCount);
+  expect(await cameraSignature(page)).toBe(settledCamera);
   assertNoConsoleErrors(errors);
 });
 

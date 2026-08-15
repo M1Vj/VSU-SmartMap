@@ -130,6 +130,15 @@ async function flushBridgeImport() {
   await Promise.resolve();
 }
 
+async function waitForBridgeGlobalPresence(expected: boolean, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((fakeWindow.__VSU_MAP_E2E__ !== undefined) === expected) return;
+    await new Promise<void>((resolve) => originalSetTimeout(resolve, 10));
+  }
+  assert.equal(fakeWindow.__VSU_MAP_E2E__ !== undefined, expected);
+}
+
 function rasterTileFixture(
   rect: { left: number; top: number; width: number; height: number } = { left: 0, top: 0, width: 200, height: 100 },
   source = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0",
@@ -228,6 +237,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /MAP_E2E_ROUTE_B_LABEL/);
   assert.match(browserSpec, /data-map-route-destination/);
   assert.match(browserSpec, /rapid repeated native zoom/);
+  assert.match(browserSpec, /settledFrameCount/);
+  assert.match(browserSpec, /postTail/);
   assert.match(browserSpec, /synthetic.*pinch/i);
   assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
   assert.match(browserSpec, /hasStrictlyIntermediateVisualSpan\)\.toBe\(true\)/);
@@ -241,6 +252,8 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(playwrightConfig, /channel:\s*["']chrome["']/);
   const markerSource = readFileSync(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
   assert.match(markerSource, /dataset\.mapRouteDestination/);
+  const runnerSource = readFileSync(new URL("../../tools/run-map-e2e.mjs", import.meta.url), "utf8");
+  assert.match(runnerSource, /selectionFlags/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {
@@ -786,6 +799,126 @@ test("frame probe uses authoritative route and destination geometry with bounded
   cleanup();
 });
 
+test("frame probe clips an offscreen route endpoint after projecting through visible raster imagery", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: -100 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(mapRect);
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; routeErrorPx: number | null; failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  const sample = api.snapshot().frames[0];
+  assert.equal(sample?.routeVisible, true);
+  assert.equal(sample?.failure, null);
+  assert.ok((sample?.routeErrorPx ?? Infinity) <= 2);
+  cleanup();
+});
+
+test("frame probe supports mixed offscreen and visible route vertices before clipping", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: -100 }, { lat: 0, lng: 5 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(mapRect);
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[2], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; routeErrorPx: number | null; failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  const sample = api.snapshot().frames[0];
+  assert.equal(sample?.routeVisible, true);
+  assert.equal(sample?.failure, null);
+  assert.ok((sample?.routeErrorPx ?? Infinity) <= 2);
+  cleanup();
+});
+
+test("validated raster frames reconcile cross-provider and cross-zoom tiles for offscreen routes", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: -100 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const arcgisTile = rasterTileFixture(
+    mapRect,
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0",
+  );
+  const cartoTile = rasterTileFixture(
+    { left: 0, top: 0, width: 100, height: 50 },
+    "https://a.basemaps.cartocdn.com/light_all/1/0/0.png",
+  );
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => ({ tilePane: { querySelectorAll: (selector: string) => selector === ".leaflet-tile" ? [arcgisTile, cartoTile] : [] } }),
+    project: ([lat, lng]: [number, number], zoom = 0) => ({ x: lng * 10 * 2 ** zoom, y: lat * 10 * 2 ** zoom }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeVisible: boolean; failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  const sample = api.snapshot().frames[0];
+  assert.equal(sample?.routeVisible, true);
+  assert.equal(sample?.failure, null);
+  cleanup();
+});
+
 test("frame probe applies the live satellite tile-image scale and translation", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
@@ -1221,21 +1354,27 @@ test("the lazy bridge gates exact trusted URLs and cleans up owners without touc
   const trusted = "http://localhost:3000/?mapEvidence=1";
   const firstDispose = initializeBridgeMapEvidence(trusted);
   const secondDispose = initializeBridgeMapEvidence(trusted);
-  await flushBridgeImport();
-  assert.ok(fakeWindow.__VSU_MAP_E2E__);
-  recordBridgeMapEvidenceEvent("popup-open", "raw-private-id", "mouse");
-  firstDispose();
-  assert.ok(fakeWindow.__VSU_MAP_E2E__);
-  secondDispose();
-  await flushBridgeImport();
-  assert.equal(fakeWindow.__VSU_MAP_E2E__, undefined);
+  try {
+    await waitForBridgeGlobalPresence(true);
+    assert.ok(fakeWindow.__VSU_MAP_E2E__);
+    recordBridgeMapEvidenceEvent("popup-open", "raw-private-id", "mouse");
+    firstDispose();
+    assert.ok(fakeWindow.__VSU_MAP_E2E__);
+  } finally {
+    firstDispose();
+    secondDispose();
+    await waitForBridgeGlobalPresence(false);
+  }
 
   const foreign = { foreign: true };
   fakeWindow.__VSU_MAP_E2E__ = foreign;
   const blockedDispose = initializeBridgeMapEvidence(trusted);
-  await flushBridgeImport();
-  assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
-  blockedDispose();
-  assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
-  delete fakeWindow.__VSU_MAP_E2E__;
+  try {
+    await flushBridgeImport();
+    assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
+  } finally {
+    blockedDispose();
+    assert.equal(fakeWindow.__VSU_MAP_E2E__, foreign);
+    delete fakeWindow.__VSU_MAP_E2E__;
+  }
 });

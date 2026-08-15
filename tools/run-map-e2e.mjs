@@ -22,6 +22,12 @@ if (hasReporter) {
   console.error("The map E2E release runner owns its fail-closed reporter; remove the custom --reporter option.");
   process.exit(1);
 }
+const selectionFlags = ["--list", "--grep", "--grep-invert", "--shard", "--project"];
+const hasSelectionFlag = extraArgs.some((argument) => selectionFlags.some((flag) => argument === flag || argument.startsWith(`${flag}=`)));
+if (hasSelectionFlag) {
+  console.error("The map E2E release runner requires the full matrix; selection flags are not allowed.");
+  process.exit(1);
+}
 const child = spawn(
   process.execPath,
   [
