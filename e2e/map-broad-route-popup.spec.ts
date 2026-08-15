@@ -35,6 +35,12 @@ function blockFixture(testInfo: TestInfo, reason: string): never {
   throw new Error(`BLOCKED: ${reason}`);
 }
 
+function blockExternalCapability(testInfo: TestInfo, reason: string): never {
+  testInfo.annotations.push({ type: "external-blocked", description: reason });
+  test.skip(true, `EXTERNAL BLOCKED: ${reason}`);
+  throw new Error(`EXTERNAL BLOCKED: ${reason}`);
+}
+
 async function openEvidencePage(page: Page, params: Record<string, string> = {}) {
   await page.goto(evidenceUrl(params), { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
@@ -93,18 +99,15 @@ function requiredFixtureLabel(testInfo: TestInfo, envName: string) {
 }
 
 async function requireExactMarker(page: Page, testInfo: TestInfo, kind: MarkerKind, label: string) {
-  const markers = page.locator(`[data-map-item-kind="${kind}"]`);
-  const matchingCount = () => markers.evaluateAll((nodes, expectedLabel) => nodes.filter((node) =>
-    node.getAttribute("aria-label") === expectedLabel || node.getAttribute("title") === expectedLabel,
-  ).length, label);
-  await expect.poll(matchingCount, { timeout: 8_000 }).toBeGreaterThan(0).catch(() => {
+  const escapedLabel = label.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  const marker = page.locator(
+    `[data-map-item-kind="${kind}"][aria-label="${escapedLabel}"],` +
+    `[data-map-item-kind="${kind}"][title="${escapedLabel}"]`,
+  );
+  await expect.poll(() => marker.count(), { timeout: 8_000 }).toBeGreaterThan(0).catch(() => {
     blockFixture(testInfo, `${kind} fixture label is not published: ${label}`);
   });
-  expect(await matchingCount()).toBe(1);
-  const matchingIndex = await markers.evaluateAll((nodes, expectedLabel) => nodes.findIndex((node) =>
-    node.getAttribute("aria-label") === expectedLabel || node.getAttribute("title") === expectedLabel,
-  ), label);
-  const marker = markers.nth(matchingIndex);
+  expect(await marker.count()).toBe(1);
   await expect(marker).toHaveAttribute("data-map-item-kind", kind);
   return marker;
 }
@@ -117,7 +120,17 @@ async function requireRouteFixturePair(page: Page, testInfo: TestInfo) {
   const markerB = await requireExactMarker(page, testInfo, "facility", routeBLabel);
   expect(await markerA.count()).toBe(1);
   expect(await markerB.count()).toBe(1);
+  const markerBHandle = await markerB.elementHandle();
+  expect(markerBHandle).not.toBeNull();
+  expect(await markerA.evaluate((node, other) => node !== other, markerBHandle)).toBe(true);
   return { markerA, markerB, routeALabel, routeBLabel };
+}
+
+function assertOneCorrelation(events: readonly { correlationOrdinal: number | null }[]) {
+  const ordinals = events.map((event) => event.correlationOrdinal);
+  expect(ordinals.length).toBeGreaterThan(0);
+  expect(ordinals.every((ordinal): ordinal is number => typeof ordinal === "number" && Number.isFinite(ordinal))).toBe(true);
+  expect(new Set(ordinals).size).toBe(1);
 }
 
 function assertActivationOpenCorrelation(events: readonly { name: string; correlationOrdinal: number | null }[]) {
@@ -247,6 +260,7 @@ async function assertFrameGate(page: Page, requireTransition = true) {
   await page.evaluate(() => window.__VSU_MAP_E2E__?.stopFrameProbe());
   const snapshot = await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot());
   if (!snapshot) throw new Error("map evidence probe disappeared during frame sampling");
+  expect(snapshot.frames.length).toBeGreaterThanOrEqual(2);
   expect(snapshot.frames.every((frame) => frame.routeVisible && frame.failure === null)).toBe(true);
   expect(snapshot.frames.every((frame) =>
     [frame.routeErrorPx, frame.destinationErrorPx, frame.rendererErrorPx]
@@ -266,8 +280,10 @@ async function assertFrameGate(page: Page, requireTransition = true) {
       const high = Math.max(before, after);
       return zoom > low && zoom < high;
     });
-    expect(snapshot.frames.some((frame) => frame.animatingZoom) || hasStrictlyIntermediateZoom).toBe(true);
+    expect(sampledZooms.length).toBeGreaterThanOrEqual(3);
+    expect(hasStrictlyIntermediateZoom).toBe(true);
   }
+  return snapshot;
 }
 
 async function assertPointerPopupGeometry(page: Page, marker: ReturnType<Page["locator"]>) {
@@ -448,6 +464,12 @@ test("default page does not install the evidence probe or fetch its lazy chunks"
     if (optInContext) await optInContext.close().catch(() => undefined);
     if (defaultContext) await defaultContext.close().catch(() => undefined);
   }
+});
+
+test("installed Google Chrome channel launches the evidence matrix", async ({ page }) => {
+  test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  await page.goto(evidenceUrl({}, false), { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(() => navigator.userAgent)).toMatch(/Chrome\//);
 });
 
 for (const viewport of VIEWPORTS) {
@@ -640,8 +662,7 @@ for (const kind of MARKER_KINDS) {
       "navigation-feedback",
     ]);
     const routeEvents = (await getEvents(page)).filter((event) => ["navigate", "route-request", "navigation-feedback"].includes(event.name));
-    expect(new Set(routeEvents.map((event) => event.correlationOrdinal)).size).toBe(1);
-    expect(routeEvents.every((event) => typeof event.correlationOrdinal === "number")).toBe(true);
+    assertOneCorrelation(routeEvents);
     assertSanitizedEvents(await getEvents(page));
     assertNoConsoleErrors(errors);
   });
@@ -652,7 +673,7 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   const errors = collectConsoleErrors(page);
   await page.setViewportSize({ width: 1024, height: 768 });
   await openEvidencePage(page);
-  const { markerA, markerB, routeALabel } = await requireRouteFixturePair(page, testInfo);
+  const { markerA, markerB, routeALabel, routeBLabel } = await requireRouteFixturePair(page, testInfo);
 
   await positionMarkerAtEdge(page, markerA, "center");
   await activateRoute(page, testInfo, markerA);
@@ -682,13 +703,14 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedA);
   expect(await page.locator(".map-route-line").count()).toBe(1);
   await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
+  await expect(page.locator('[data-map-route-destination="true"]')).not.toHaveAttribute("title", routeBLabel);
   await page.waitForTimeout(600);
   expect(await page.locator(".map-route-line").getAttribute("d")).toBe(committedA);
-  await assertFrameGate(page);
+  await assertFrameGate(page, false);
   await expect(page.getByRole("alert")).toBeVisible({ timeout: 3_000 });
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["navigate", "route-request", "navigation-feedback"]);
-  expect(events.at(-1)?.correlationOrdinal).toBe(events[0]?.correlationOrdinal);
+  assertOneCorrelation(events);
   expect((await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().routeDelayMs))).toBe(500);
   await page.evaluate(() => window.__VSU_MAP_E2E__?.reset());
   expect(await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().routeDelayMs)).toBe(0);
@@ -699,7 +721,7 @@ test("committed route survives popup Close and Escape without a bottom card", as
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   await page.setViewportSize({ width: 390, height: 844 });
   await openEvidencePage(page);
-  const { markerA, markerB, routeALabel } = await requireRouteFixturePair(page, testInfo);
+  const { markerA, markerB, routeALabel, routeBLabel } = await requireRouteFixturePair(page, testInfo);
   await positionMarkerAtEdge(page, markerA, "center");
   await activateRoute(page, testInfo, markerA);
   const committedPath = await page.locator(".map-route-line").getAttribute("d");
@@ -718,6 +740,8 @@ test("committed route survives popup Close and Escape without a bottom card", as
   expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
   assertActivationOpenCorrelation(closeEvents);
   expect(closeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
+  await expect(page.locator('[data-map-route-destination="true"]')).not.toHaveAttribute("title", routeBLabel);
   expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
 
   await resetProbe(page);
@@ -730,6 +754,8 @@ test("committed route survives popup Close and Escape without a bottom card", as
   expect(escapeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
   assertActivationOpenCorrelation(escapeEvents);
   expect(escapeEvents.some((event) => event.name === "route-request" || event.name === "navigation-feedback")).toBe(false);
+  await expect(page.locator('[data-map-route-destination="true"]')).toHaveAttribute("title", routeALabel);
+  await expect(page.locator('[data-map-route-destination="true"]')).not.toHaveAttribute("title", routeBLabel);
   expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
 });
 
@@ -758,7 +784,7 @@ test("successful A-to-B replacement commits the new route and preserves correlat
   await expect(markerA).not.toHaveAttribute("data-map-route-destination", "true");
   const events = await getEvents(page);
   expect(events.map((event) => event.name)).toEqual(["navigate", "route-request", "navigation-feedback"]);
-  expect(new Set(events.map((event) => event.correlationOrdinal)).size).toBe(1);
+  assertOneCorrelation(events);
   expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
 });
 
@@ -863,7 +889,7 @@ test("reduced motion and light/dark appearance retain one accepted activation", 
   await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
   const zoomState = await performZoomMethod(page, "programmatic");
   expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
-  await assertFrameGate(page);
+  await assertFrameGate(page, false);
   await resetProbe(page);
   await markerA.click();
   await expect(page.locator(".leaflet-popup")).toHaveCount(1);
@@ -875,10 +901,11 @@ test("reduced motion and light/dark appearance retain one accepted activation", 
   assertNoConsoleErrors(errors);
 });
 
-test("forced satellite tile failures switch to the attributed fallback", async ({ page }, testInfo) => {
+test("forced satellite tile failures switch to a connected Carto fallback without losing route controls", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   const errors = collectConsoleErrors(page);
   let aborted = 0;
+  const fallbackRequests: string[] = [];
   await page.route("**/*", async (route) => {
     const url = route.request().url();
     if (url.includes("server.arcgisonline.com/ArcGIS/rest/services/World_Imagery") && aborted < 3) {
@@ -886,13 +913,31 @@ test("forced satellite tile failures switch to the attributed fallback", async (
       await route.abort();
       return;
     }
+    if (/basemaps\.cartocdn\.com\//.test(url)) fallbackRequests.push(url);
     await route.continue();
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await openEvidencePage(page);
+  const { markerA } = await requireRouteFixturePair(page, testInfo);
+  await positionMarkerAtEdge(page, markerA, "center");
+  await activateRoute(page, testInfo, markerA);
+  const routeBefore = await page.locator(".map-route-line").getAttribute("d");
+  await markerA.click();
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
   await chooseSatellite(page);
   await expect.poll(() => aborted, { timeout: 8_000 }).toBeGreaterThanOrEqual(3);
   await expect(page.getByRole("status", { name: /Satellite imagery unavailable/i })).toBeVisible({ timeout: 8_000 });
+  await expect.poll(() => fallbackRequests.length, { timeout: 12_000 }).toBeGreaterThan(0);
+  const fallbackTile = page.locator('.leaflet-tile[src*="basemaps.cartocdn.com"]').first();
+  await expect(fallbackTile).toBeVisible({ timeout: 12_000 });
+  await expect.poll(() => fallbackTile.evaluate((image) => {
+    const tile = image as HTMLImageElement;
+    return tile.complete && tile.naturalWidth > 0;
+  }), { timeout: 12_000 }).toBe(true);
+  expect(await page.locator(".map-route-line").count()).toBe(1);
+  expect(await page.locator(".map-route-line").getAttribute("d")).toBe(routeBefore);
+  await expect(page.locator(".leaflet-control-zoom")).toBeVisible();
+  await expect(page.locator(".leaflet-popup")).toHaveCount(1);
   testInfo.annotations.push({ type: "synthetic", description: "Satellite tile aborts are deterministic fallback evidence, not an outage or hardware result." });
   await page.unroute("**/*");
   assertNoConsoleErrors(errors);
@@ -920,9 +965,8 @@ test("A-to-B transfer has a complete ordered event list and no background activa
     "popup-open",
   ]);
   expect(events.some((event) => event.name === "background-activation")).toBe(false);
-  expect(events[0]?.correlationOrdinal).toBe(events[1]?.correlationOrdinal);
-  expect(events[2]?.correlationOrdinal).toBe(events[0]?.correlationOrdinal);
-  expect(events[3]?.correlationOrdinal).toBe(events[4]?.correlationOrdinal);
+  assertOneCorrelation(events.slice(0, 2));
+  assertOneCorrelation(events.slice(2));
   expect(events[3]?.correlationOrdinal).not.toBe(events[0]?.correlationOrdinal);
   assertNoConsoleErrors(errors);
 });
@@ -941,17 +985,19 @@ test("rapid repeated native zoom keeps committed route within frame gate", async
     await page.mouse.wheel(0, -120);
   }
   await page.waitForTimeout(600);
-  await assertFrameGate(page);
+  const snapshot = await assertFrameGate(page);
+  expect(snapshot.frameProbe.stopReason).toBe("explicit");
+  expect((snapshot.frames.at(-1)?.at ?? 0) - (snapshot.frames[0]?.at ?? 0)).toBeLessThan(2_000);
   expect(await page.locator(".map-route-line").count()).toBe(1);
   assertNoConsoleErrors(errors);
 });
 
 test("true Chrome 200% browser zoom row is explicitly blocked", async ({}, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
-  blockFixture(testInfo, "true browser zoom is not safely driveable through this Chrome channel; synthetic root-font evidence is covered separately");
+  blockExternalCapability(testInfo, "true browser zoom is not safely driveable through this Chrome channel; synthetic root-font evidence is covered separately");
 });
 
 test("background-tab lifecycle throttling row is explicitly blocked", async ({}, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
-  blockFixture(testInfo, "background lifecycle throttling needs an external page lifecycle/CDP harness");
+  blockExternalCapability(testInfo, "background lifecycle throttling needs an external page lifecycle/CDP harness");
 });

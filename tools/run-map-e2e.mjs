@@ -7,10 +7,30 @@ if (!baseUrl) {
   process.exit(1);
 }
 
+const routeALabel = process.env.MAP_E2E_ROUTE_A_LABEL?.trim();
+const routeBLabel = process.env.MAP_E2E_ROUTE_B_LABEL?.trim();
+if (!routeALabel || !routeBLabel || routeALabel === routeBLabel) {
+  console.error("MAP_E2E_ROUTE_A_LABEL and MAP_E2E_ROUTE_B_LABEL must be non-empty and distinct.");
+  process.exit(1);
+}
+
 const playwrightCli = fileURLToPath(new URL("../node_modules/@playwright/test/cli.js", import.meta.url));
+const requiredReporter = fileURLToPath(new URL("./map-e2e-required-reporter.mjs", import.meta.url));
+const extraArgs = process.argv.slice(2);
+const hasReporter = extraArgs.some((argument) => argument === "--reporter" || argument.startsWith("--reporter="));
+if (hasReporter) {
+  console.error("The map E2E release runner owns its fail-closed reporter; remove the custom --reporter option.");
+  process.exit(1);
+}
 const child = spawn(
   process.execPath,
-  [playwrightCli, "test", "e2e/map-broad-route-popup.spec.ts", ...process.argv.slice(2)],
+  [
+    playwrightCli,
+    "test",
+    "e2e/map-broad-route-popup.spec.ts",
+    ...extraArgs,
+    `--reporter=${requiredReporter}`,
+  ],
   { stdio: "inherit", env: { ...process.env, MAP_E2E_BASE_URL: baseUrl } },
 );
 

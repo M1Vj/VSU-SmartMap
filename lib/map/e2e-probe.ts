@@ -33,6 +33,9 @@ export type MapFrameSampleFailure =
   | "missing-route-element"
   | "missing-route-geometry"
   | "missing-overlay-transform"
+  | "missing-raster-pane"
+  | "missing-raster-tile"
+  | "inconsistent-raster-projection"
   | "incompatible-sample-count"
   | "sampling-capped"
   | "missing-destination"
@@ -171,6 +174,7 @@ type ProbeState = {
   frameProbeStoppedAt: number | null;
   frameProbeStopReason: MapEvidenceSnapshot["frameProbe"]["stopReason"];
   frameProbeCostMs: number;
+  visibilityDocument: Document | null;
   visibilityChangeHandler: (() => void) | null;
 };
 
@@ -338,14 +342,7 @@ export function normalizeLeafletPaneProjection(
   paneRect: MapEvidenceRect,
   paneSize: { width: number; height: number },
   targetRect: MapEvidenceRect,
-  rendererTransform?: AffineTransform,
 ): ScreenPoint {
-  if (rendererTransform) {
-    return {
-      x: rendererTransform.a * point.x + rendererTransform.c * point.y + rendererTransform.e - targetRect.left,
-      y: rendererTransform.b * point.x + rendererTransform.d * point.y + rendererTransform.f - targetRect.top,
-    };
-  }
   const scaleX = paneSize.width > 0 ? paneRect.width / paneSize.width : 1;
   const scaleY = paneSize.height > 0 ? paneRect.height / paneSize.height : 1;
   return {
@@ -452,6 +449,96 @@ function getMapContainerRect(map: LeafletMap) {
   return container?.getBoundingClientRect?.() ?? null;
 }
 
+type RasterTile = {
+  src?: string;
+  getAttribute?: (name: string) => string | null;
+  getBoundingClientRect?: () => MapEvidenceRect;
+  offsetWidth?: number;
+  offsetHeight?: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
+};
+
+type RasterPane = {
+  querySelectorAll?: (selector: string) => ArrayLike<RasterTile>;
+};
+
+export type LeafletRasterTileAddress = { zoom: number; x: number; y: number };
+
+/** Parse only the tile URL forms used by the configured ArcGIS/Carto layers. */
+export function parseLeafletRasterTileUrl(source: string): LeafletRasterTileAddress | null {
+  try {
+    const parsed = new URL(source);
+    const arcgis = parsed.pathname.match(/\/tile\/(\d+)\/(\d+)\/(\d+)\/?$/i);
+    if (arcgis && parsed.hostname === "server.arcgisonline.com") {
+      return { zoom: Number(arcgis[1]), x: Number(arcgis[3]), y: Number(arcgis[2]) };
+    }
+    const carto = parsed.pathname.match(/\/(\d+)\/(\d+)\/(\d+)(?:@2x)?\.png\/?$/i);
+    if (carto && (parsed.hostname === "basemaps.cartocdn.com" || parsed.hostname.endsWith(".basemaps.cartocdn.com"))) {
+      return { zoom: Number(carto[1]), x: Number(carto[2]), y: Number(carto[3]) };
+    }
+  } catch {
+    // An unloaded/invalid image is a typed probe failure, not a public error.
+  }
+  return null;
+}
+
+const LEAFLET_TILE_SIZE = 256;
+
+function getLeafletRasterTilePoint(
+  map: LeafletMap,
+  containerRect: DOMRect,
+  coordinate: { lat: number; lng: number },
+): { point: ScreenPoint; failure: MapFrameSampleFailure | null } {
+  const tilePane = map.getPanes?.().tilePane as RasterPane | undefined;
+  const rawTiles = tilePane?.querySelectorAll?.(".leaflet-tile");
+  const tiles = rawTiles ? Array.from(rawTiles) : [];
+  if (tiles.length === 0 || typeof (map as LeafletMap & { project?: unknown }).project !== "function") {
+    return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
+  }
+  const projectedPoints: ScreenPoint[] = [];
+  const project = (map as LeafletMap & {
+    project: (latLng: [number, number], zoom: number) => ScreenPoint;
+  }).project;
+  for (const tile of tiles) {
+    const source = tile.src ?? tile.getAttribute?.("src") ?? "";
+    const address = parseLeafletRasterTileUrl(source);
+    if (!address) continue;
+    const rect = tile.getBoundingClientRect?.();
+    const width = tile.offsetWidth ?? 0;
+    const height = tile.offsetHeight ?? 0;
+    const naturalWidth = tile.naturalWidth ?? 0;
+    const naturalHeight = tile.naturalHeight ?? 0;
+    if (
+      !rect ||
+      ![rect.left, rect.top, rect.width, rect.height, width, height, naturalWidth, naturalHeight]
+        .every((value) => Number.isFinite(value)) ||
+      rect.width <= 0 ||
+      rect.height <= 0 ||
+      width <= 0 ||
+      height <= 0 ||
+      naturalWidth <= 0 ||
+      naturalHeight <= 0
+    ) continue;
+    const projected = project([coordinate.lat, coordinate.lng], address.zoom);
+    if (!isFiniteScreenPoint(projected)) continue;
+    const localX = projected.x - address.x * LEAFLET_TILE_SIZE;
+    const localY = projected.y - address.y * LEAFLET_TILE_SIZE;
+    if (localX < -1 || localY < -1 || localX > LEAFLET_TILE_SIZE + 1 || localY > LEAFLET_TILE_SIZE + 1) continue;
+    const point = {
+      x: rect.left - containerRect.left + localX * (rect.width / width),
+      y: rect.top - containerRect.top + localY * (rect.height / height),
+    };
+    if (isFiniteScreenPoint(point)) projectedPoints.push(point);
+  }
+  if (projectedPoints.length === 0) return { point: { x: 0, y: 0 }, failure: "missing-raster-tile" };
+  const first = projectedPoints[0];
+  if (projectedPoints.some((point) => distance(point, first) > 2)) {
+    return { point: { x: 0, y: 0 }, failure: "inconsistent-raster-projection" };
+  }
+  return { point: first, failure: null };
+}
+
 function transformScreenPoint(
   x: number,
   y: number,
@@ -556,44 +643,7 @@ function projectCoordinate(
     };
   }
 
-  const overlayPane = map.getPanes?.().overlayPane;
-  const overlayRect = overlayPane?.getBoundingClientRect?.();
-  if (
-    !overlayRect ||
-    ![overlayRect.left, overlayRect.top].every((value) => Number.isFinite(value)) ||
-    ![overlayRect.width, overlayRect.height]
-      .every((value) => Number.isFinite(value) && value > 0) ||
-    typeof map.latLngToLayerPoint !== "function"
-  ) {
-    return { point: { x: 0, y: 0 }, failure: "missing-overlay-transform" };
-  }
-  const projected = map.latLngToLayerPoint([coordinate.lat, coordinate.lng]);
-  const routeElement = state.route?.polyline.getElement?.() as (SVGPathElement & {
-    getScreenCTM?: () => AffineTransform | null;
-  }) | null;
-  const rendererTransform = routeElement?.getScreenCTM?.() ?? undefined;
-  const pane = overlayPane as typeof overlayPane & {
-    offsetWidth?: number;
-    offsetHeight?: number;
-  };
-  if (!isFiniteScreenPoint(projected)) return { point: { x: 0, y: 0 }, failure: "missing-overlay-transform" };
-  const paneSize = {
-    width: pane.offsetWidth && pane.offsetWidth > 0 ? pane.offsetWidth : overlayRect.width,
-    height: pane.offsetHeight && pane.offsetHeight > 0 ? pane.offsetHeight : overlayRect.height,
-  };
-  return {
-    point: normalizeLeafletPaneProjection(
-      projected,
-      overlayRect,
-      paneSize,
-      containerRect,
-      rendererTransform && [rendererTransform.a, rendererTransform.b, rendererTransform.c, rendererTransform.d, rendererTransform.e, rendererTransform.f]
-        .every((value) => Number.isFinite(value))
-        ? rendererTransform
-        : undefined,
-    ),
-    failure: null,
-  };
+  return getLeafletRasterTilePoint(map, containerRect, coordinate);
 }
 
 function getRouteCoordinates(polyline: LeafletPolyline) {
@@ -666,11 +716,8 @@ function routeReadinessFailure(state: ProbeState, route: RegisteredRoute): MapFr
       return "missing-renderer-projection";
     }
   } else {
-    const overlayPane = route.map.getPanes?.().overlayPane;
-    const overlayRect = overlayPane?.getBoundingClientRect?.();
-    if (!overlayRect || typeof route.map.latLngToLayerPoint !== "function" || overlayRect.width <= 0 || overlayRect.height <= 0) {
-      return "missing-overlay-transform";
-    }
+    const baseline = getLeafletRasterTilePoint(route.map, mapRect as DOMRect, route.path[0]);
+    if (baseline.failure) return baseline.failure;
   }
 
   const destination = state.destination;
@@ -1013,7 +1060,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
 function disposeState(state: ProbeState) {
   stopFrameProbeForState(state, "cleanup");
   if (state.visibilityChangeHandler) {
-    state.window.removeEventListener("visibilitychange", state.visibilityChangeHandler);
+    state.visibilityDocument?.removeEventListener("visibilitychange", state.visibilityChangeHandler);
     state.visibilityChangeHandler = null;
   }
   cancelPendingDelays(state, new DOMException("Map evidence probe was disposed", "AbortError"));
@@ -1097,6 +1144,7 @@ export function initializeMapEvidence(url: string): () => void {
     frameProbeStoppedAt: null,
     frameProbeStopReason: null,
     frameProbeCostMs: 0,
+    visibilityDocument: null,
     visibilityChangeHandler: null,
   } as ProbeState;
   state.api = createApi(state);
@@ -1104,11 +1152,12 @@ export function initializeMapEvidence(url: string): () => void {
   hostWindow.__VSU_MAP_E2E__ = state.api;
   state.visibilityChangeHandler = () => {
     if (!isStateActive(state)) return;
-    if (hostWindow.document?.visibilityState === "hidden") {
+    if (state.visibilityDocument?.visibilityState === "hidden") {
       stopFrameProbeForState(state, "visibilitychange");
     }
   };
-  hostWindow.addEventListener("visibilitychange", state.visibilityChangeHandler);
+  state.visibilityDocument = hostWindow.document ?? null;
+  state.visibilityDocument?.addEventListener("visibilitychange", state.visibilityChangeHandler);
 
   let released = false;
   return () => {

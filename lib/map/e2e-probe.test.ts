@@ -19,6 +19,7 @@ import {
   recordMapEvidenceEvent,
   sampleScreenPolyline,
   sampleScreenPolylineDetailed,
+  parseLeafletRasterTileUrl,
   throwIfMapEvidenceRouteFailureRequested,
   waitForMapEvidenceRouteDelay,
 } from "./e2e-probe.ts";
@@ -29,7 +30,12 @@ import {
 
 type FakeWindow = {
   __VSU_MAP_E2E__?: unknown;
-  document?: { visibilityState: DocumentVisibilityState };
+  document?: {
+    visibilityState: DocumentVisibilityState;
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
+    dispatchEvent: (event: Event) => boolean;
+  };
   addEventListener: (type: string, listener: EventListener) => void;
   removeEventListener: (type: string, listener: EventListener) => void;
   dispatchEvent: (event: Event) => boolean;
@@ -89,6 +95,12 @@ function installFakeBrowser() {
       } as MediaQueryList;
     },
   };
+  fakeWindow.document = {
+    visibilityState: "visible",
+    addEventListener: fakeWindow.addEventListener,
+    removeEventListener: fakeWindow.removeEventListener,
+    dispatchEvent: fakeWindow.dispatchEvent,
+  };
 
   (globalThis as { window?: unknown }).window = fakeWindow;
   globalThis.requestAnimationFrame = (callback) => {
@@ -116,6 +128,25 @@ function installFakeBrowser() {
 async function flushBridgeImport() {
   await new Promise<void>((resolve) => originalSetTimeout(resolve, 0));
   await Promise.resolve();
+}
+
+function rasterTileFixture(
+  rect: { left: number; top: number; width: number; height: number } = { left: 0, top: 0, width: 200, height: 100 },
+  source = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0",
+) {
+  return {
+    src: source,
+    getAttribute: (name: string) => (name === "src" ? source : null),
+    getBoundingClientRect: () => rect,
+    offsetWidth: 200,
+    offsetHeight: 100,
+    naturalWidth: 200,
+    naturalHeight: 100,
+  };
+}
+
+function rasterPanes(tile: ReturnType<typeof rasterTileFixture>) {
+  return { tilePane: { querySelectorAll: (selector: string) => selector === ".leaflet-tile" ? [tile] : [] } };
 }
 
 test.afterEach(() => {
@@ -179,6 +210,13 @@ test("production map components cross the lazy bridge instead of statically load
   assert.doesNotMatch(navigationLayer, /smoothFactor=\{0\}/);
   const probeSource = readFileSync(new URL("./e2e-probe.ts", import.meta.url), "utf8");
   assert.doesNotMatch(probeSource, /getPadding/);
+  assert.match(probeSource, /getPanes\?\.\(\)\.tilePane/);
+  assert.match(probeSource, /\.leaflet-tile/);
+  assert.match(probeSource, /parseLeafletRasterTileUrl/);
+  assert.match(probeSource, /map as LeafletMap & \{[\s\S]*project/);
+  assert.match(probeSource, /naturalWidth/);
+  assert.match(probeSource, /inconsistent-raster-projection/);
+  assert.doesNotMatch(probeSource, /rendererTransform[\s\S]*getScreenCTM/);
   const browserSpec = readFileSync(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8");
   assert.match(browserSpec, /await expect\(mainGate\)\.toBeVisible/);
   assert.match(browserSpec, /await expect\(navigate\)\.toBeVisible/);
@@ -189,6 +227,14 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /data-map-route-destination/);
   assert.match(browserSpec, /rapid repeated native zoom/);
   assert.match(browserSpec, /synthetic.*pinch/i);
+  assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
+  assert.match(browserSpec, /hasStrictlyIntermediateZoom\)\.toBe\(true\)/);
+  assert.match(browserSpec, /naturalWidth\s*>\s*0/);
+  assert.match(browserSpec, /basemaps\.cartocdn\.com/);
+  const mapWrapperSource = readFileSync(new URL("../../components/map/map-wrapper.tsx", import.meta.url), "utf8");
+  assert.match(mapWrapperSource, /satelliteFallbackUrl/);
+  const playwrightConfig = readFileSync(new URL("../../playwright.config.ts", import.meta.url), "utf8");
+  assert.match(playwrightConfig, /channel:\s*["']chrome["']/);
   const markerSource = readFileSync(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
   assert.match(markerSource, /dataset\.mapRouteDestination/);
 });
@@ -330,17 +376,29 @@ test("Leaflet pane projection includes its live rendered offset and scale", () =
   );
 });
 
-test("Leaflet pane projection applies the live SVG renderer scale and translation", () => {
+test("Leaflet pane projection applies the independent tile-pane scale and translation", () => {
   assert.deepEqual(
     normalizeLeafletPaneProjection(
       { x: 10, y: 20 },
-      { left: 100, top: 50, width: 200, height: 100 },
+      { left: 105, top: 53, width: 250, height: 125 },
       { width: 200, height: 100 },
       { left: 20, top: 10, width: 400, height: 200 },
-      { a: 1.25, b: 0.1, c: 0.2, d: 0.9, e: 45, f: 30 },
     ),
-    { x: 41.5, y: 39 },
+    { x: 97.5, y: 68 },
   );
+});
+
+test("Leaflet raster URL parsing accepts only configured ArcGIS and Carto tile forms", () => {
+  assert.deepEqual(
+    parseLeafletRasterTileUrl("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/7/12/13"),
+    { zoom: 7, x: 13, y: 12 },
+  );
+  assert.deepEqual(
+    parseLeafletRasterTileUrl("https://a.basemaps.cartocdn.com/light_all/4/5/6@2x.png"),
+    { zoom: 4, x: 5, y: 6 },
+  );
+  assert.equal(parseLeafletRasterTileUrl("https://attacker.example/tile/7/12/13"), null);
+  assert.equal(parseLeafletRasterTileUrl("not a URL"), null);
 });
 
 test("route clipping keeps visible intersections and interior vertices", () => {
@@ -406,7 +464,8 @@ test("strict opt-in cleanup removes global state, frame work, delayed route work
 
 test("visibilitychange cancels active frame work without claiming a background pass", () => {
   installFakeBrowser();
-  fakeWindow.document = { visibilityState: "visible" };
+  const visibilityDocument = fakeWindow.document!;
+  visibilityDocument.visibilityState = "visible";
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const api = fakeWindow.__VSU_MAP_E2E__ as {
     startFrameProbe: () => void;
@@ -414,8 +473,8 @@ test("visibilitychange cancels active frame work without claiming a background p
   };
   api.startFrameProbe();
   assert.equal(rafCallbacks.size, 1);
-  fakeWindow.document.visibilityState = "hidden";
-  fakeWindow.dispatchEvent(new Event("visibilitychange"));
+  visibilityDocument.visibilityState = "hidden";
+  visibilityDocument.dispatchEvent(new Event("visibilitychange"));
   assert.equal(api.snapshot().frameProbeRunning, false);
   assert.equal(api.snapshot().frameProbe.stopReason, "visibilitychange");
   assert.equal(rafCallbacks.size, 0);
@@ -671,10 +730,11 @@ test("frame probe uses authoritative route and destination geometry with bounded
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
   const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(mapRect);
   const map = {
     getContainer: () => ({ getBoundingClientRect: () => mapRect }),
-    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => mapRect } }),
-    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
     setZoom: () => undefined,
   };
   const polyline = {
@@ -716,15 +776,16 @@ test("frame probe uses authoritative route and destination geometry with bounded
   cleanup();
 });
 
-test("frame probe applies the live satellite SVG scale and translation", () => {
+test("frame probe applies the live satellite tile-image scale and translation", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
   const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture({ left: 5, top: 3, width: 220, height: 95 });
   const map = {
     getContainer: () => ({ getBoundingClientRect: () => mapRect }),
-    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => mapRect } }),
-    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
     setZoom: () => undefined,
   };
   const transform = { a: 1.1, b: 0, c: 0, d: 0.95, e: 5, f: 3 };
@@ -737,7 +798,7 @@ test("frame probe applies the live satellite SVG scale and translation", () => {
     }),
   };
   const marker = {
-    getElement: () => ({ getBoundingClientRect: () => ({ left: 110, top: -17, width: 10, height: 20 }) }),
+    getElement: () => ({ getBoundingClientRect: () => ({ left: 109.5, top: -16, width: 11, height: 19 }) }),
   };
   registerLeafletMapForEvidence(map as never);
   registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
@@ -751,6 +812,146 @@ test("frame probe applies the live satellite SVG scale and translation", () => {
   assert.equal(frame.failure, null);
   assert.ok((frame.routeErrorPx ?? Infinity) < 1e-9);
   assert.ok((frame.destinationErrorPx ?? Infinity) < 1e-9);
+  cleanup();
+});
+
+test("satellite oracle rejects a route and marker shifted from the independent tile image", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(mapRect);
+  const staleLevel = { getBoundingClientRect: () => ({ left: 40, top: 0, width: 200, height: 100 }) };
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => ({
+      tilePane: {
+        querySelectorAll: (selector: string) => selector === ".leaflet-tile" ? [tile] : [staleLevel],
+      },
+    }),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 40, f: 0 }),
+    }),
+  };
+  const marker = {
+    getElement: () => ({ getBoundingClientRect: () => ({ left: 135, top: -20, width: 10, height: 20 }) }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeErrorPx: number | null; destinationErrorPx: number | null; failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  const sample = api.snapshot().frames[0];
+  assert.equal(sample?.failure, null);
+  assert.ok((sample?.routeErrorPx ?? 0) > 2);
+  assert.ok((sample?.destinationErrorPx ?? 0) > 2);
+  cleanup();
+});
+
+test("satellite oracle follows independent tile-image offset and scale during a live zoom", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tileRect = { left: 0, top: 0, width: 200, height: 100 };
+  const tile = rasterTileFixture(tileRect);
+  let transform = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => ({
+      tilePane: { querySelectorAll: (selector: string) => selector === ".leaflet-tile" ? [tile] : [] },
+    }),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => transform,
+    }),
+  };
+  let markerRect = { left: 95, top: -20, width: 10, height: 20 };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => markerRect }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ routeErrorPx: number | null; destinationErrorPx: number | null; failure: string | null }> } };
+  api.startFrameProbe();
+  const firstFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(firstFrame[0]);
+  firstFrame[1](16);
+  tileRect.left = 5;
+  tileRect.top = 3;
+  tileRect.width = 220;
+  tileRect.height = 110;
+  transform = { a: 1.1, b: 0, c: 0, d: 1.1, e: 5, f: 3 };
+  markerRect = { left: 109.5, top: -19, width: 11, height: 22 };
+  const secondFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(secondFrame[0]);
+  secondFrame[1](32);
+  const frames = api.snapshot().frames;
+  assert.equal(frames.length, 2);
+  assert.ok(frames.every((frame) => frame.failure === null));
+  assert.ok(frames.every((frame) => (frame.routeErrorPx ?? Infinity) < 1e-9));
+  assert.ok(frames.every((frame) => (frame.destinationErrorPx ?? Infinity) < 1e-9));
+  cleanup();
+});
+
+test("satellite oracle rejects stale and target raster tiles with inconsistent frames", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const targetTile = rasterTileFixture(mapRect);
+  const staleTile = rasterTileFixture({ left: 40, top: 0, width: 200, height: 100 });
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => mapRect }),
+    getPanes: () => ({
+      tilePane: {
+        querySelectorAll: (selector: string) => selector === ".leaflet-tile" ? [targetTile, staleTile] : [],
+      },
+    }),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "inconsistent-raster-projection");
   cleanup();
 });
 
@@ -880,10 +1081,11 @@ test("invalid rendered geometry fails with a typed route geometry error", () => 
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const tile = rasterTileFixture();
   const map = {
     getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }),
-    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) } }),
-    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
     setZoom: () => undefined,
   };
   const polyline = {
@@ -908,10 +1110,11 @@ test("route readiness reports a typed baseline failure when the rendered path is
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const tile = rasterTileFixture();
   const map = {
     getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }),
-    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) } }),
-    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    getPanes: () => rasterPanes(tile),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
     setZoom: () => undefined,
   };
   const polyline = { getLatLngs: () => path };
@@ -926,6 +1129,45 @@ test("route readiness reports a typed baseline failure when the rendered path is
   rafCallbacks.delete(frame[0]);
   frame[1](16);
   assert.equal(api.snapshot().frames[0]?.failure, "missing-route-baseline");
+  cleanup();
+});
+
+test("satellite readiness reports a typed raster-tile failure when no live tile is present", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }),
+    getPanes: () => ({
+      tilePane: {
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+        querySelectorAll: () => [],
+      },
+    }),
+    project: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 0 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    }),
+  };
+  const marker = { getElement: () => ({ getBoundingClientRect: () => ({ left: 95, top: -20, width: 10, height: 20 }) }) };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-raster-tile");
   cleanup();
 });
 
