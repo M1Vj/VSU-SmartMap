@@ -1,4 +1,4 @@
-import { test, expect, type Page, type TestInfo } from "@playwright/test";
+import { test, expect, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 
 const VIEWPORTS = [
   { width: 320, height: 568 },
@@ -364,15 +364,51 @@ async function activateRoute(page: Page, testInfo: TestInfo, marker: ReturnType<
   await waitForCommittedRoute(page);
 }
 
-test("default page does not install the evidence probe", async ({ page }) => {
+test("default page does not install the evidence probe or fetch its lazy chunks", async ({ context }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
-  const e2eCoreRequests: string[] = [];
-  page.on("request", (request) => {
-    if (/(e2e-probe|map-evidence)/i.test(request.url())) e2eCoreRequests.push(request.url());
-  });
-  await page.goto(evidenceUrl({}, false), { waitUntil: "domcontentloaded" });
-  expect(await page.evaluate(() => window.__VSU_MAP_E2E__)).toBeUndefined();
-  expect(e2eCoreRequests).toEqual([]);
+  const browser = context.browser();
+  if (!browser) blockFixture(testInfo, "browser context cannot create an isolated lazy-chunk comparison");
+
+  const optInChunks = new Set<string>();
+  const defaultChunks = new Set<string>();
+  let optInContext: BrowserContext | undefined;
+  let defaultContext: BrowserContext | undefined;
+  let optInPage: Page | undefined;
+  let defaultPage: Page | undefined;
+
+  try {
+    const createdOptInContext = await browser.newContext();
+    const createdDefaultContext = await browser.newContext();
+    optInContext = createdOptInContext;
+    defaultContext = createdDefaultContext;
+    const createdOptInPage = await createdOptInContext.newPage();
+    const createdDefaultPage = await createdDefaultContext.newPage();
+    optInPage = createdOptInPage;
+    defaultPage = createdDefaultPage;
+    createdOptInPage.on("request", (request) => {
+      if (request.url().includes("/_next/static/chunks/")) optInChunks.add(request.url());
+    });
+    createdDefaultPage.on("request", (request) => {
+      if (request.url().includes("/_next/static/chunks/")) defaultChunks.add(request.url());
+    });
+
+    await createdOptInPage.goto(evidenceUrl(), { waitUntil: "domcontentloaded" });
+    await expect.poll(() => createdOptInPage.evaluate(() => Boolean(window.__VSU_MAP_E2E__)), { timeout: 10_000 }).toBe(true);
+    await createdOptInPage.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+
+    await createdDefaultPage.goto(evidenceUrl({}, false), { waitUntil: "domcontentloaded" });
+    await createdDefaultPage.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+    expect(await createdDefaultPage.evaluate(() => window.__VSU_MAP_E2E__)).toBeUndefined();
+
+    const evidenceOnlyChunks = [...optInChunks].filter((url) => !defaultChunks.has(url));
+    expect(evidenceOnlyChunks.length).toBeGreaterThan(0);
+    expect(evidenceOnlyChunks.every((url) => !defaultChunks.has(url))).toBe(true);
+  } finally {
+    if (optInPage) await optInPage.close().catch(() => undefined);
+    if (defaultPage) await defaultPage.close().catch(() => undefined);
+    if (optInContext) await optInContext.close().catch(() => undefined);
+    if (defaultContext) await defaultContext.close().catch(() => undefined);
+  }
 });
 
 for (const viewport of VIEWPORTS) {

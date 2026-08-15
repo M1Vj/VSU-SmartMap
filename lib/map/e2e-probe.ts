@@ -478,7 +478,8 @@ function readRenderedPolyline(
     !Number.isFinite(totalLength) ||
     totalLength <= 0 ||
     !transform ||
-    !Object.values(transform).every((value) => Number.isFinite(value))
+    ![transform.a, transform.b, transform.c, transform.d, transform.e, transform.f]
+      .every((value) => Number.isFinite(value))
   ) return { points: [], failure: "missing-route-geometry" };
   const requestedSampleCount = Math.max(2, Math.ceil(totalLength / 16) + 1);
   const sampleCount = Math.min(256, requestedSampleCount);

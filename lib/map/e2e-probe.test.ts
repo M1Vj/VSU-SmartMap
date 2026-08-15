@@ -181,7 +181,8 @@ test("production map components cross the lazy bridge instead of statically load
   const browserSpec = readFileSync(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8");
   assert.match(browserSpec, /await expect\(mainGate\)\.toBeVisible/);
   assert.match(browserSpec, /await expect\(navigate\)\.toBeVisible/);
-  assert.match(browserSpec, /e2eCoreRequests/);
+  assert.match(browserSpec, /evidenceOnlyChunks/);
+  assert.match(browserSpec, /browser\.newContext/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {
