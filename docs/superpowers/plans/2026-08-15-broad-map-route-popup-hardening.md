@@ -627,7 +627,7 @@ export function MapMarkerPopupShell({
       aria-modal="false"
       aria-label={`${label} quick actions`}
       data-map-control="marker-popup"
-      className="relative flex max-h-[min(60dvh,calc(100dvh-23.5rem),22rem)] w-[min(260px,calc(100vw-1.5rem))] flex-col overflow-hidden"
+      className="relative flex max-h-[min(60dvh,calc(100dvh-376px),22rem)] w-[min(260px,calc(100vw-1.5rem))] flex-col overflow-hidden"
       onKeyDown={(event) => handleMapPopupKeyDown(event, onClose)}
     >
       <button
@@ -657,7 +657,7 @@ Remove both `layout` props and every bottom-sheet branch. Facility actions becom
     type="button"
     size="sm"
     variant="outline"
-    className="h-11 min-h-11 flex-1 gap-2 text-xs"
+    className="h-auto min-h-11 min-w-[6.5rem] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight"
     onClick={onViewDetails}
   >
     <Info className="h-3 w-3" aria-hidden />
@@ -666,7 +666,7 @@ Remove both `layout` props and every bottom-sheet branch. Facility actions becom
   <Button
     type="button"
     size="sm"
-    className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+    className="h-auto min-h-11 min-w-[6.5rem] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight bg-blue-600 text-white hover:bg-blue-700"
     onClick={handleDirections}
   >
     <Route className="h-3 w-3" aria-hidden />
@@ -721,7 +721,7 @@ export function runMapPopupActionOnce(
 
 Each card keeps one `useRef(false)` and calls `runMapPopupActionOnce(directionsPendingRef, () => onDirections?.())`. Remove the obsolete fake `loading` state. Boarding-house Details remains `<Link href={`/boarding-houses/${listing.slug}`}>`; its Navigate button uses this same guard and 44px contract.
 
-Add render tests for both cards. They must prove that facility Details/Navigate and boarding Navigate are explicit `type="button"` controls with `h-11 min-h-11`, boarding Details remains a semantic link with the same 44px minimum, both header rows reserve `pr-10`, and no `setTimeout` or fake loading state remains. In `popup-action.test.ts`, call the production helper twice synchronously and prove the callback runs once, then prove a later task can run it again. The real browser matrix in Task 7 owns computed-size and 200% text-scale bounds.
+Add render tests for both cards. They must prove that facility Details/Navigate and boarding Navigate are explicit `type="button"` controls with `h-auto min-h-11`, wrapping text, and a `6.5rem` minimum width; boarding Details remains a semantic link with the same 44px minimum, both header rows reserve `pr-10`, and no `setTimeout` or fake loading state remains. In `popup-action.test.ts`, call the production helper twice synchronously and prove the callback runs once, then prove a later task can run it again. The real browser matrix in Task 7 owns computed-size and 200% text-scale bounds.
 
 - [ ] **Step 7: Run popup unit/source GREEN**
 
@@ -973,8 +973,8 @@ Assert in `mobile-map-control-layout.test.ts` and `map-option-a.test.ts`:
 ```ts
 assert.doesNotMatch(pageSource, /MapBottomCard|mapBottomCardHeight|--map-mini-card-height/);
 assert.doesNotMatch(pageSource, /onHeightChange=\{setMapBottomCardHeight\}/);
-assert.match(pageSource, /bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\]/);
-assert.match(pageSource, /bottom-\[calc\(7\.5rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
+assert.match(pageSource, /bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\]/);
+assert.match(pageSource, /bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\]/);
 assert.match(locationButtonSource, /h-11 w-11 min-w-11/);
 assert.doesNotMatch(optionASource, /ResizeObserver|observeMapCardHeight|layout="bottom-sheet"/);
 ```
@@ -996,13 +996,13 @@ In `app/(student)/page.tsx`:
 - set `UserLocationControl` to:
 
 ```tsx
-className="left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-[80px]"
+className="left-[12px] bottom-[calc(160px+env(safe-area-inset-bottom))] md:bottom-[80px]"
 ```
 
 - set the action dock to:
 
 ```tsx
-className="pointer-events-none fixed inset-x-0 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
+className="pointer-events-none fixed inset-x-0 bottom-[calc(120px+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
 ```
 
 Keep the selected-item mobile `Submit Location` suppression until the popup browser matrix proves it can coexist without overlap.
@@ -1029,7 +1029,7 @@ Expected: no application source hit.
 rtk proxy node --experimental-test-module-mocks --import tsx --test components/map/mobile-map-control-layout.test.ts lib/map/map-option-a.test.ts components/map/map-markers.test.ts
 ```
 
-Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency. Popup tests also prove `autoPanPaddingTopLeft={[12, 128]}`, `autoPanPaddingBottomRight={[12, 248]}`, the bounded dynamic-viewport shell height, wrapped action rows, and 44px controls with a `6.5rem` minimum width for 200% text scaling.
+Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency. Pixel-stable 160px/120px offsets do not move when the root font grows. Popup tests also prove `autoPanPaddingTopLeft={[12, 128]}`, `autoPanPaddingBottomRight={[12, 248]}`, `max-h-[min(60dvh,calc(100dvh-376px),22rem)]`, wrapped/growable action rows, and 44px controls with a `6.5rem` minimum width for 200% text scaling.
 
 - [ ] **Step 6: Commit bottom-card removal**
 
