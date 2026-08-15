@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createPointerActivation,
+  isPrimaryCompatibilityClick,
   isPrimaryPointerActivation,
   isPointerTap,
   shouldDedupeCompatibilityClick,
@@ -47,6 +48,13 @@ test("only primary left-button pointers can activate markers", () => {
   assert.equal(isPrimaryPointerActivation(event({ button: 0, isPrimary: false })), false);
   assert.equal(isPrimaryPointerActivation(event({ pointerType: "touch", isPrimary: true })), true);
   assert.equal(isPrimaryPointerActivation(event({ pointerType: "pen", isPrimary: true })), true);
+});
+
+test("compatibility clicks accept a primary left button even when isPrimary is false", () => {
+  assert.equal(isPrimaryCompatibilityClick({ button: 0, isPrimary: false }), true);
+  assert.equal(isPrimaryCompatibilityClick({ button: 2, isPrimary: false }), false);
+  assert.equal(isPrimaryCompatibilityClick({ button: 1, isPrimary: true }), false);
+  assert.equal(isPrimaryCompatibilityClick({}), true);
 });
 
 test("compatibility click dedupes only the same physical pointer identity", () => {

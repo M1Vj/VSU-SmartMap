@@ -30,6 +30,8 @@ export interface CompatibilityActivationRecord {
 export interface CompatibilityClickEvent {
   pointerId?: number;
   detail?: number;
+  button?: number;
+  isPrimary?: boolean;
 }
 
 export const POINTER_TAP_MOVE_TOLERANCE_PX = 12;
@@ -41,6 +43,10 @@ export function normalizePointerModality(pointerType: string): PointerModality {
 
 export function isPrimaryPointerActivation(event: PointerActivationEvent): boolean {
   if (event.isPrimary === false) return false;
+  return event.button === undefined || event.button === 0;
+}
+
+export function isPrimaryCompatibilityClick(event: CompatibilityClickEvent): boolean {
   return event.button === undefined || event.button === 0;
 }
 

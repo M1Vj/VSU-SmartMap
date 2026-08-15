@@ -16,6 +16,7 @@ import { useApp } from "@/lib/context/app-context";
 import { useIsMobile } from "./use-is-mobile";
 import {
   createPointerActivation,
+  isPrimaryCompatibilityClick,
   isPrimaryPointerActivation,
   isPointerTap,
   shouldDedupeCompatibilityClick,
@@ -269,10 +270,7 @@ export const MapMarker = memo(function MapMarker({
               isPrimary?: boolean;
             };
           }).originalEvent;
-          if (
-            original?.isPrimary === false ||
-            (original?.button !== undefined && original.button !== 0)
-          ) {
+          if (!isPrimaryCompatibilityClick({ button: original?.button, isPrimary: original?.isPrimary })) {
             return;
           }
           const cancelledAt = cancelledPointerAtRef.current;
