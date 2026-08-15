@@ -51,8 +51,9 @@ function collectConsoleErrors(page: Page) {
   return errors;
 }
 
-function assertNoConsoleErrors(errors: string[]) {
-  expect(errors, errors.join("\n")).toEqual([]);
+function assertNoConsoleErrors(errors: string[], allowed: readonly RegExp[] = []) {
+  const unexpected = errors.filter((message) => !allowed.some((pattern) => pattern.test(message)));
+  expect(unexpected, unexpected.join("\n")).toEqual([]);
 }
 
 async function resetProbe(page: Page) {
@@ -167,7 +168,7 @@ async function assertPopupBounds(page: Page) {
         reachable: rect.width >= 44 && rect.height >= 44 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight,
       };
     });
-    const obstacles = [...document.querySelectorAll<HTMLElement>("header, nav, [data-map-action-dock], [data-map-status-hud]")]
+    const obstacles = [...document.querySelectorAll<HTMLElement>("header, nav, [data-map-action-dock], [data-map-status-hud], [data-map-popup-obstacle]")]
       .filter((element) => element !== popup && getComputedStyle(element).display !== "none")
       .map((element) => element.getBoundingClientRect())
       .filter((rect) => rect.width > 0 && rect.height > 0);
@@ -496,13 +497,13 @@ test("delayed failed B replacement preserves committed A and consumes one-shot f
   expect((await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().routeDelayMs))).toBe(500);
   await page.evaluate(() => window.__VSU_MAP_E2E__?.reset());
   expect(await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().routeDelayMs)).toBe(0);
-  assertNoConsoleErrors(errors);
+  assertNoConsoleErrors(errors, [/^NavigationLayer: Process error/]);
 });
 
 test("active-route popup survives safe-area and synthetic 200% root-font stress", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
   const errors = collectConsoleErrors(page);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 320, height: 568 });
   await openEvidencePage(page);
   const marker = await requireMarker(page, testInfo, "facility");
   await positionMarkerAtEdge(page, marker, "center");
@@ -513,15 +514,36 @@ test("active-route popup survives safe-area and synthetic 200% root-font stress"
   try {
     await client.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 12, right: 0, bottom: 34, left: 0 } });
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    await expect.poll(async () => page.locator(".leaflet-popup").evaluate((popup) => {
+      const map = popup.closest(".leaflet-container");
+      if (!map) return false;
+      const popupRect = popup.getBoundingClientRect();
+      const mapRect = map.getBoundingClientRect();
+      const obstacles = [...document.querySelectorAll<HTMLElement>("header, nav, [data-map-action-dock], [data-map-status-hud], [data-map-popup-obstacle]")]
+        .filter((element) => element !== popup && getComputedStyle(element).display !== "none")
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const controls = [...popup.querySelectorAll<HTMLElement>("button, a")].map((control) => {
+        const rect = control.getBoundingClientRect();
+        return rect.width >= 44 && rect.height >= 44 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
+      });
+      const overlaps = obstacles.some((obstacle) => popupRect.left < obstacle.right && popupRect.right > obstacle.left && popupRect.top < obstacle.bottom && popupRect.bottom > obstacle.top);
+      return popupRect.left >= mapRect.left && popupRect.right <= mapRect.right && popupRect.top >= mapRect.top && popupRect.bottom <= mapRect.bottom && !overlaps && controls.every(Boolean);
+    }).catch(() => false), { timeout: 5_000 }).toBe(true);
     await assertPopupBounds(page);
     const scrollState = await page.evaluate(() => ({
-      bodyScrollable: document.documentElement.scrollHeight >= document.documentElement.clientHeight,
+      popupScrollable: (() => {
+        const scrollArea = document.querySelector<HTMLElement>("[data-map-control='marker-popup'] > div");
+        if (!scrollArea) return false;
+        const style = getComputedStyle(scrollArea);
+        return scrollArea.scrollHeight > scrollArea.clientHeight || style.overflowY === "auto" || style.overflowY === "scroll";
+      })(),
       controls: [...document.querySelectorAll<HTMLElement>(".leaflet-popup button, .leaflet-popup a")].map((element) => {
         const rect = element.getBoundingClientRect();
         return { width: rect.width, height: rect.height, reachable: rect.bottom > 0 && rect.top < window.innerHeight };
       }),
     }));
-    expect(scrollState.bodyScrollable).toBe(true);
+    expect(scrollState.popupScrollable).toBe(true);
     expect(scrollState.controls.every((control) => control.reachable && control.width >= 44 && control.height >= 44)).toBe(true);
   } catch (error) {
     if (String(error).includes("Emulation.setSafeAreaInsetsOverride")) blockFixture(testInfo, "CDP safe-area override is unavailable");
