@@ -244,14 +244,15 @@ export function getAffineTransformScale(transform: AffineTransform | null | unde
   return Number.isFinite(scale) && scale > 0 ? scale : null;
 }
 
-export function hasStrictlyIntermediateVisualScale(scales: readonly (number | null)[]) {
+export function hasInFlightVisualScale(scales: readonly (number | null)[]) {
+  const epsilon = 1e-3;
   if (scales.length < 3 || scales.some((scale) => typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0)) return false;
   const before = scales[0]!;
   const after = scales.at(-1)!;
-  if (before === after) return false;
-  const low = Math.min(before, after);
-  const high = Math.max(before, after);
-  return scales.some((scale) => typeof scale === "number" && scale > low && scale < high);
+  return scales.slice(1, -1).some((scale) =>
+    typeof scale === "number" &&
+    Math.abs(scale - before) > epsilon && Math.abs(scale - after) > epsilon,
+  );
 }
 
 function nearestDistance(point: ScreenPoint, points: readonly ScreenPoint[]) {

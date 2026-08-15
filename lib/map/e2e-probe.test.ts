@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   establishMapEvidenceCorrelation,
   getAffineTransformScale,
-  hasStrictlyIntermediateVisualScale,
+  hasInFlightVisualScale,
   getSymmetricPolylineError,
   clipScreenPolylineToRect,
   getConfiguredMarkerAnchorPoint,
@@ -247,7 +247,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /postTail/);
   assert.match(browserSpec, /synthetic.*pinch/i);
   assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
-  assert.match(browserSpec, /hasStrictlyIntermediateVisualScale\)\.toBe\(true\)/);
+  assert.match(browserSpec, /hasInFlightVisualScale\)\.toBe\(true\)/);
   assert.match(browserSpec, /visualRouteScales/);
   assert.match(browserSpec, /getComputedStyle/);
   assert.match(browserSpec, /getScreenCTM/);
@@ -478,9 +478,10 @@ test("renderer CTM scale is finite, sanitized, and detects an in-flight visual t
   assert.equal(getAffineTransformScale({ a: 2, b: 0, c: 0, d: 2, e: 5, f: -3 }), 2);
   assert.equal(getAffineTransformScale({ a: Number.NaN, b: 0, c: 0, d: 1, e: 0, f: 0 }), null);
   assert.equal(getAffineTransformScale(null), null);
-  assert.equal(hasStrictlyIntermediateVisualScale([1, 1.25, 1.5]), true);
-  assert.equal(hasStrictlyIntermediateVisualScale([1, 1, 1]), false);
-  assert.equal(hasStrictlyIntermediateVisualScale([1, null, 1.5]), false);
+  assert.equal(hasInFlightVisualScale([1, 1.25, 1.5]), true);
+  assert.equal(hasInFlightVisualScale([1, 1.5, 1]), true);
+  assert.equal(hasInFlightVisualScale([1, 1, 1]), false);
+  assert.equal(hasInFlightVisualScale([1, null, 1.5]), false);
 });
 
 test("strict opt-in cleanup removes global state, frame work, delayed route work, and listeners", async () => {
@@ -870,7 +871,7 @@ test("frame probe records independent SVG scale when a clipped full-width route 
   assert.ok(frames.every((frame) => (frame.routeErrorPx ?? Infinity) <= 2));
   assert.ok(frames.every((frame) => Math.abs((frame.visualRouteSpanPx ?? 0) - 200) < 1e-9));
   assert.deepEqual(frames.map((frame) => frame.visualRouteScale), [1, 1.5]);
-  assert.equal(hasStrictlyIntermediateVisualScale([1, 1.25, 1.5]), true);
+  assert.equal(hasInFlightVisualScale([1, 1.25, 1.5]), true);
   cleanup();
 });
 

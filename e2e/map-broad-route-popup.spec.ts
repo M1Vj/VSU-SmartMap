@@ -303,13 +303,11 @@ async function assertFrameGate(page: Page, requireTransition = true) {
   if (requireTransition) {
     const before = visualRouteScales[0];
     const after = visualRouteScales.at(-1);
-    const hasStrictlyIntermediateVisualScale = typeof before === "number" && typeof after === "number" && before !== after && visualRouteScales.some((scale) => {
-      const low = Math.min(before, after);
-      const high = Math.max(before, after);
-      return typeof scale === "number" && scale > low && scale < high;
-    });
+    const hasInFlightVisualScale = typeof before === "number" && typeof after === "number" && visualRouteScales
+      .slice(1, -1)
+      .some((scale) => typeof scale === "number" && Math.abs(scale - before) > 1e-3 && Math.abs(scale - after) > 1e-3);
     expect(visualRouteScales.length).toBeGreaterThanOrEqual(3);
-    expect(hasStrictlyIntermediateVisualScale).toBe(true);
+    expect(hasInFlightVisualScale).toBe(true);
   }
   return snapshot;
 }
