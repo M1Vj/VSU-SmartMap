@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useEffect, useRef } from "react";
+import { memo, useMemo, useEffect, useRef, useCallback } from "react";
 import { Marker, Tooltip, Popup } from "@/components/map/leaflet-react";
 import { divIcon, type DivIcon, type Marker as LeafletMarker } from "leaflet";
 import {
@@ -12,8 +12,16 @@ import type { MapItem } from "@/lib/types/map";
 import type { Facility } from "@/lib/types/facility";
 import { MapPopupCard } from "./map-popup-card";
 import { BoardingHouseMapPopupCard } from "./boarding-house-map-popup-card";
+import { MapMarkerPopupShell } from "./map-marker-popup-shell";
 import { useApp } from "@/lib/context/app-context";
-import { useIsMobile } from "./use-is-mobile";
+import {
+  createMarkerPopupLifecycleController,
+  type MarkerPopupModality,
+} from "@/lib/map/popup-lifecycle";
+import {
+  shouldDeselectAfterPopupClose,
+  type MarkerPopupCloseReason,
+} from "@/lib/map/popup-close";
 import {
   createPointerActivation,
   isPrimaryCompatibilityClick,
@@ -36,7 +44,7 @@ type MapMarkerProps = {
   onMarkerTapOverride?: (item: MapItem) => void;
   onMarkerActivate?: (item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => void;
   onDeselect?: () => void;
-  onDirections?: (item: MapItem) => void;
+  onDirections?: (item: MapItem) => number | null;
 };
 
 export const MapMarker = memo(function MapMarker({
@@ -53,7 +61,6 @@ export const MapMarker = memo(function MapMarker({
   onDirections,
 }: MapMarkerProps) {
   const { setFacilitySheetOpen } = useApp();
-  const isMobile = useIsMobile();
   const isMinimized = !isRouteDestination && (forceMinimized || zoom < 16);
   // Label shows only at high zoom and ONLY if NOT selected (avoids redundancy)
   const showSideLabel = zoom >= 18.5 && !isSelected && !forceMinimized;
@@ -103,45 +110,126 @@ export const MapMarker = memo(function MapMarker({
   const cancelledPointerAtRef = useRef<number | null>(null);
   const markerPerformanceStartedAtRef = useRef<number | null>(null);
   const pendingMarkerPerformanceRef = useRef<number | null>(null);
+  const selectedRef = useRef(isSelected);
+  selectedRef.current = isSelected;
+  const lastActivationModalityRef = useRef<MarkerPopupModality>("mouse");
+  const popupOpenFrameRef = useRef<number | null>(null);
+  const popupOpenGenerationRef = useRef(0);
+  const popupFocusFrameRef = useRef<number | null>(null);
+  const markerRestoreFrameRef = useRef<number | null>(null);
+  const markerRestoreGenerationRef = useRef(0);
+  const popupLifecycle = useMemo(() => createMarkerPopupLifecycleController(), []);
+
+  const cancelPopupOpen = useCallback(() => {
+    popupOpenGenerationRef.current += 1;
+    const frameId = popupOpenFrameRef.current;
+    if (frameId === null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+    popupOpenFrameRef.current = null;
+  }, []);
+
+  const cancelPopupFocus = useCallback(() => {
+    const frameId = popupFocusFrameRef.current;
+    if (frameId === null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+    popupFocusFrameRef.current = null;
+  }, []);
+
+  const cancelMarkerRestoreFocus = useCallback(() => {
+    markerRestoreGenerationRef.current += 1;
+    const frameId = markerRestoreFrameRef.current;
+    if (frameId === null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+    markerRestoreFrameRef.current = null;
+  }, []);
+
+  const requestMarkerRestoreFocus = useCallback(() => {
+    cancelMarkerRestoreFocus();
+    const generation = ++markerRestoreGenerationRef.current;
+    const restoreCurrentMarkerFocus = () => {
+      markerRestoreFrameRef.current = null;
+      if (markerRestoreGenerationRef.current !== generation) return;
+      const element = markerRef.current?.getElement();
+      if (!element?.isConnected) return;
+      element.focus();
+    };
+    if (typeof requestAnimationFrame === "function") {
+      markerRestoreFrameRef.current = requestAnimationFrame(restoreCurrentMarkerFocus);
+    } else {
+      queueMicrotask(restoreCurrentMarkerFocus);
+    }
+  }, [cancelMarkerRestoreFocus]);
+
+  const closePopup = useCallback((reason: MarkerPopupCloseReason) => {
+    const marker = markerRef.current;
+    cancelPopupOpen();
+    cancelPopupFocus();
+    cancelMarkerRestoreFocus();
+    return popupLifecycle.close(reason, {
+      closePopup: () => marker?.closePopup(),
+      onDeselect: () => {
+        if (shouldDeselectAfterPopupClose(selectedRef.current, reason)) {
+          onDeselect?.();
+        }
+      },
+      restoreMarkerFocus: requestMarkerRestoreFocus,
+    });
+  }, [cancelMarkerRestoreFocus, cancelPopupFocus, cancelPopupOpen, onDeselect, popupLifecycle, requestMarkerRestoreFocus]);
+
+  useEffect(() => () => {
+    cancelPopupOpen();
+    cancelPopupFocus();
+    cancelMarkerRestoreFocus();
+  }, [cancelMarkerRestoreFocus, cancelPopupFocus, cancelPopupOpen]);
+
+  const requestPopupOpen = useCallback((fromActivation = false) => {
+    const marker = markerRef.current;
+    if (!marker || onMarkerTapOverride) return;
+    if (!fromActivation && (marker.isPopupOpen() || popupOpenFrameRef.current !== null)) return;
+    if (fromActivation) {
+      cancelPopupOpen();
+      cancelPopupFocus();
+      cancelMarkerRestoreFocus();
+      popupLifecycle.selectionChanged(true);
+    }
+    const generation = ++popupOpenGenerationRef.current;
+    const openAfterNativeToggle = () => {
+      popupOpenFrameRef.current = null;
+      if (popupOpenGenerationRef.current !== generation) return;
+      if (!selectedRef.current || onMarkerTapOverride || marker.isPopupOpen()) return;
+      marker.closeTooltip();
+      marker.openPopup();
+    };
+    if (typeof requestAnimationFrame === "function") {
+      popupOpenFrameRef.current = requestAnimationFrame(openAfterNativeToggle);
+    } else {
+      queueMicrotask(openAfterNativeToggle);
+    }
+  }, [cancelMarkerRestoreFocus, cancelPopupFocus, cancelPopupOpen, onMarkerTapOverride, popupLifecycle]);
 
   useEffect(() => {
     const marker = markerRef.current;
     if (!marker) return;
 
+    selectedRef.current = isSelected;
     marker.closeTooltip();
 
-    if (isMobile) {
-      marker.closePopup();
+    if (isSelected && !onMarkerTapOverride) requestPopupOpen();
+
+    if (onMarkerTapOverride) {
+      cancelPopupOpen();
+      if (marker.isPopupOpen()) closePopup("selection-transfer");
+      if (!isSelected) popupLifecycle.selectionChanged(false);
       return;
     }
 
-    if (isSelected) {
-      const timer = setTimeout(() => {
-        marker.closeTooltip();
-        marker.openPopup();
-      }, 50);
-      return () => clearTimeout(timer);
-    } else {
-      marker.closePopup();
+    if (!isSelected) {
+      cancelPopupOpen();
+      if (marker.isPopupOpen()) closePopup("selection-transfer");
+      popupLifecycle.selectionChanged(false);
+      return;
     }
-  }, [isMobile, isSelected]);
-
-  useEffect(() => {
-    const marker = markerRef.current;
-    if (!marker) return;
-
-    const handlePopupClose = () => {
-      if (isSelected) {
-        onDeselect?.();
-      }
-    };
-
-    marker.on("popupclose", handlePopupClose);
-
-    return () => {
-      marker.off("popupclose", handlePopupClose);
-    };
-  }, [isSelected, onDeselect]);
+  }, [cancelPopupOpen, closePopup, isSelected, onMarkerTapOverride, popupLifecycle, requestPopupOpen]);
 
   useEffect(() => {
     if (hideTooltip) {
@@ -206,6 +294,8 @@ export const MapMarker = memo(function MapMarker({
         pendingMarkerPerformanceRef.current = startedAt;
       }
       markerRef.current?.closeTooltip();
+      lastActivationModalityRef.current = modality;
+      if (isSelected) requestPopupOpen(true);
       onMarkerActivate(item, activationId, modality);
       element.releasePointerCapture?.(event.pointerId);
     };
@@ -234,11 +324,24 @@ export const MapMarker = memo(function MapMarker({
       pointerActivationRef.current = null;
       markerPerformanceStartedAtRef.current = null;
     };
-  }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride]);
+  }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride, requestPopupOpen]);
 
-  const handleViewDetails = () => {
+  const handleViewDetails = useCallback(() => {
+    if (!closePopup("action")) return;
     setFacilitySheetOpen(true);
-  };
+  }, [closePopup, setFacilitySheetOpen]);
+
+  const handleDirections = useCallback(() => {
+    return popupLifecycle.navigate(
+      () => {
+        const requestId = onDirections?.(item);
+        return typeof requestId === "number" ? requestId : null;
+      },
+      {
+        closePopup: () => markerRef.current?.closePopup(),
+      },
+    );
+  }, [item, onDirections, popupLifecycle]);
 
   const accessibleName =
     item.kind === "boarding_house"
@@ -288,6 +391,8 @@ export const MapMarker = memo(function MapMarker({
           compatibilityActivationRef.current = null;
           const activationId = compatibility?.activationId ?? `${item.id}:mouse:${original?.pointerId ?? "mouse"}:${original?.timeStamp ?? Date.now()}`;
           const modality = compatibility?.modality ?? (original?.pointerType === "touch" || original?.pointerType === "pen" ? original.pointerType : "mouse");
+          lastActivationModalityRef.current = modality;
+          if (isSelected) requestPopupOpen(true);
           onMarkerActivate?.(item, activationId, modality);
           if (onMarkerActivate) return;
           if (onMarkerTapOverride) {
@@ -303,6 +408,8 @@ export const MapMarker = memo(function MapMarker({
             original?.preventDefault();
             markerRef.current?.closeTooltip();
             const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
+            lastActivationModalityRef.current = "keyboard";
+            if (isSelected) requestPopupOpen(true);
             compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
             const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
             if (onMarkerTapOverride || isSelected) {
@@ -330,7 +437,23 @@ export const MapMarker = memo(function MapMarker({
           markerRef.current?.closeTooltip();
           if (onMarkerTapOverride) {
             markerRef.current?.closePopup();
+            return;
           }
+          popupLifecycle.opened(lastActivationModalityRef.current, () => {
+            cancelPopupFocus();
+            const focusFirstControl = () => {
+              popupFocusFrameRef.current = null;
+              if (!selectedRef.current || !markerRef.current?.isPopupOpen()) return;
+              markerRef.current?.getPopup()?.getElement()
+                ?.querySelector<HTMLElement>('[data-map-popup-first-control="true"]')
+                ?.focus();
+            };
+            if (typeof requestAnimationFrame === "function") {
+              popupFocusFrameRef.current = requestAnimationFrame(focusFirstControl);
+            } else {
+              queueMicrotask(focusFirstControl);
+            }
+          });
         },
       }}
       title={accessibleName}
@@ -345,26 +468,34 @@ export const MapMarker = memo(function MapMarker({
           {item.name}
         </Tooltip>
       )}
-      {!isMobile && (
+      {!onMarkerTapOverride && (
         <Popup
           offset={[0, -20]}
           className="map-popup-card"
+          closeButton={false}
+          closeOnEscapeKey={false}
           autoPan
-          autoPanPaddingTopLeft={[24, 88]}
-          autoPanPaddingBottomRight={[24, 96]}
+          autoPanPaddingTopLeft={[12, 96]}
+          autoPanPaddingBottomRight={[12, 168]}
         >
-          {item.kind === "boarding_house" ? (
-            <BoardingHouseMapPopupCard
-              listing={item.summary}
-              onDirections={() => onDirections?.(item)}
-            />
-          ) : (
-            <MapPopupCard
-              facility={item as unknown as Facility}
-              onViewDetails={handleViewDetails}
-              onDirections={() => onDirections?.(item)}
-            />
-          )}
+          <MapMarkerPopupShell
+            label={accessibleName}
+            onClose={() => closePopup("dismiss")}
+          >
+            {item.kind === "boarding_house" ? (
+              <BoardingHouseMapPopupCard
+                listing={item.summary}
+                onDetails={() => closePopup("action")}
+                onDirections={handleDirections}
+              />
+            ) : (
+              <MapPopupCard
+                facility={item as unknown as Facility}
+                onViewDetails={handleViewDetails}
+                onDirections={handleDirections}
+              />
+            )}
+          </MapMarkerPopupShell>
         </Popup>
       )}
     </Marker>

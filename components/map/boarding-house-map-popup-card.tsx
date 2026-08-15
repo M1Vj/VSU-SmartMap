@@ -9,34 +9,30 @@ import { formatBoardingHousePriceRange } from "@/lib/boarding-houses/filters";
 import { formatSlotCount } from "@/lib/boarding-houses/labels";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
 import { useWalkEstimate } from "@/components/boarding-houses/use-walk-estimate";
-import { runMapPopupActionOnce } from "@/lib/map/popup-action";
-import { useRef } from "react";
 
 type BoardingHouseMapPopupCardProps = {
   listing: BoardingHouseSummary;
-  onDirections?: () => void;
+  onDetails?: () => void;
+  /** The marker lifecycle owns exact-once dispatch; void keeps Task 6 callers source-compatible. */
+  onDirections?: () => number | null | void;
   /** @deprecated Removed with MapBottomCard in Task 6. */
   layout?: "popup" | "bottom-sheet";
 };
 
 export function BoardingHouseMapPopupCard({
   listing,
+  onDetails,
   onDirections,
 }: BoardingHouseMapPopupCardProps) {
   const isVerified = listing.verificationStatus === "verified";
   const hasRatings = listing.reviewCount > 0;
   const ratingValue = listing.averageRating.toFixed(1);
-  const directionsPendingRef = useRef(false);
   const { estimate } = useWalkEstimate(listing.coordinates);
   const walkLabel = estimate
     ? `${estimate.approximate ? "~" : ""}${estimate.minutes} min walk`
     : listing.walkingMinutesToCampusGate !== null
       ? `${listing.walkingMinutesToCampusGate} min walk`
       : null;
-
-  const handleDirections = () => {
-    runMapPopupActionOnce(directionsPendingRef, () => onDirections?.());
-  };
 
   return (
     <div className="flex min-w-[220px] max-w-[260px] flex-col gap-3 p-3">
@@ -96,7 +92,7 @@ export function BoardingHouseMapPopupCard({
           variant="outline"
           className="h-11 min-h-11 flex-1 gap-2 text-xs"
         >
-          <Link href={`/boarding-houses/${listing.slug}`}>
+          <Link href={`/boarding-houses/${listing.slug}`} onClick={() => onDetails?.()}>
             <Info className="h-3 w-3" aria-hidden />
             Details
           </Link>
@@ -105,7 +101,7 @@ export function BoardingHouseMapPopupCard({
           type="button"
           size="sm"
           className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
-          onClick={handleDirections}
+          onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />
           Navigate

@@ -16,7 +16,7 @@ type MapMarkersProps = {
   onMarkerTapOverride?: (item: MapItem) => void;
   onMarkerActivate?: (item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => void;
   onDeselect?: () => void;
-  onDirections?: (item: MapItem) => void;
+  onDirections?: (item: MapItem) => number | null;
 };
 
 export const MapMarkers = memo(function MapMarkers({

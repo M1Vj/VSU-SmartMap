@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { shouldClearRouteForSelectedItem } from "@/lib/navigation/selection-route-reset";
 
 test("map page presents committed route metadata while a replacement request is pending", async () => {
   const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
@@ -23,7 +22,8 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /setNavStart\(\s*committed\.start/);
   assert.match(source, /setNavEnd\(\s*committed\.end/);
   assert.match(source, /setNavMode\(committed\.mode\)/);
-  assert.match(source, /setNavigationSessionId\(\(sessionId\) => sessionId \+ 1\)/);
+  assert.match(source, /const allocateNavigationSessionId = useCallback/);
+  assert.match(source, /navigationSessionIdRef\.current \+= 1/);
   assert.match(source, /canReuseCommittedRoute/);
   assert.match(source, /canReuseCommittedRoute\(\{[\s\S]{0,500}origin: navigationOrigin/);
   assert.match(source, /reuseCommittedRoute=\{shouldReuseCommittedRoute\}/);
@@ -67,34 +67,17 @@ test("terminal graph-load failure retires only the exact pending route request",
   assert.match(source, /before\.navigation\.pendingRequestId !== requestId/);
 });
 
-test("pending replacement selection does not clear a committed route", () => {
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "facility-new",
-      routeDestinationId: "facility-new",
-      committedRouteDestinationId: "facility-old",
-      hasNavigationState: true,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "facility-old",
-      routeDestinationId: "facility-new",
-      committedRouteDestinationId: "facility-old",
-      hasNavigationState: true,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "unrelated",
-      routeDestinationId: "facility-new",
-      committedRouteDestinationId: "facility-old",
-      hasNavigationState: true,
-    }),
-    true,
-  );
+test("popup selection and changed search never own committed-route clearing", async () => {
+  const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /shouldClearRouteForSelectedItem|shouldClearRouteForMapSearch/);
+  assert.match(source, /onSelect=\{\(item\) => \{/);
+  assert.match(source, /runtime\.dispatch\(\{ type: "selection\/set", itemId: item\.id \}\)/);
+  assert.match(source, /debouncedQuery/);
+  assert.match(source, /clearRouteState/);
+
+  const selectedHandler = source.slice(source.indexOf("onSelect={(item) => {"), source.indexOf("onDirections="));
+  assert.doesNotMatch(selectedHandler, /clearRouteState\(\)/);
 });
 
 test("route adapter allocates fresh IDs for calculations and forwards metadata", async () => {

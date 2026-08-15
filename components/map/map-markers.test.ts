@@ -41,3 +41,8 @@ test("seeds declutter protections from the page-owned runtime marker set", () =>
   );
   assert.match(source, /protectedMarkerIds,/);
 });
+
+test("propagates an accepted navigation ID through the marker registry", () => {
+  assert.match(source, /onDirections\?: \(item: MapItem\) => number \| null;/);
+  assert.match(source, /onDirections=\{onDirections\}/);
+});

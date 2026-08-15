@@ -3,16 +3,14 @@
 import { Button } from "@/components/ui/button";
 import { getCategoryMeta } from "@/lib/constants/facilities";
 import type { Facility } from "@/lib/types/facility";
-import { runMapPopupActionOnce } from "@/lib/map/popup-action";
 import { Info, Route } from "lucide-react";
 import Image from "next/image";
-
-import { useRef } from "react";
 
 interface MapPopupCardProps {
   facility: Facility;
   onViewDetails: () => void;
-  onDirections?: () => void;
+  /** The marker lifecycle owns exact-once dispatch; void keeps Task 6 callers source-compatible. */
+  onDirections?: () => number | null | void;
   /** @deprecated Removed with MapBottomCard in Task 6. */
   layout?: "popup" | "bottom-sheet";
 }
@@ -23,11 +21,6 @@ export function MapPopupCard({
   onDirections,
 }: MapPopupCardProps) {
   const meta = getCategoryMeta(facility.category);
-  const directionsPendingRef = useRef(false);
-
-  const handleDirections = () => {
-    runMapPopupActionOnce(directionsPendingRef, () => onDirections?.());
-  };
 
   return (
     <div className="flex min-w-[200px] max-w-[240px] flex-col gap-3 p-3">
@@ -71,7 +64,7 @@ export function MapPopupCard({
           type="button"
           size="sm"
           className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
-          onClick={handleDirections}
+          onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />
           Navigate

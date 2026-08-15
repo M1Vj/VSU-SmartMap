@@ -82,6 +82,22 @@ test("marker and control targets never become background activations", () => {
   assert.deepEqual(cleared, []);
 });
 
+test("selection transfer activates marker B once without a background clear", () => {
+  const selected: string[] = [];
+  const cleared: number[] = [];
+  const gateway = createInteractionGateway({
+    onMarkerActivate: (itemId) => selected.push(itemId),
+    onBackground: () => cleared.push(1),
+  });
+
+  gateway.dispatch({ type: "marker", itemId: "facility-a", activationId: "a-1", modality: "touch" });
+  gateway.dispatch({ type: "marker", itemId: "facility-b", activationId: "b-1", modality: "touch" });
+  gateway.dispatch({ type: "background", target: "marker", activationId: "a-popup-close" });
+
+  assert.deepEqual(selected, ["facility-a", "facility-b"]);
+  assert.deepEqual(cleared, []);
+});
+
 test("background drag and pointer cancellation never place a manual start", () => {
   const placements: number[] = [];
   const gateway = createInteractionGateway({

@@ -40,6 +40,8 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   assert.match(selectionSource, /requestAnimationFrame\(/);
   assert.match(facilityPopupSource, /h-11 min-h-11 flex-1/);
   assert.match(boardingPopupSource, /h-11 min-h-11 flex-1/);
+  assert.doesNotMatch(facilityPopupSource, /<h3[^>]*onClick/);
+  assert.doesNotMatch(boardingPopupSource, /<h3[^>]*onClick/);
 });
 
 test("marker adapter forwards pointer identity/modality before Leaflet click compatibility", async () => {
@@ -53,8 +55,72 @@ test("marker adapter forwards pointer identity/modality before Leaflet click com
   assert.match(markerSource, /original\?\.button/);
   assert.match(markerSource, /compatibilityActivationRef/);
   assert.match(markerSource, /element\.removeEventListener\("pointercancel"/);
-  assert.match(markerSource, /\[icon, isSelected, item, onMarkerActivate, onMarkerTapOverride\]/);
+  assert.match(markerSource, /lastActivationModalityRef\.current = modality/);
+  assert.match(markerSource, /if \(isSelected\) requestPopupOpen\(true\)/);
+  assert.match(markerSource, /if \(fromActivation\) \{[\s\S]{0,120}cancelPopupOpen\(\)/);
   assert.match(markerSource, /markMapPerformance\([\s\S]{0,120}"marker-activation"/);
+});
+
+test("marker popup lifecycle is viewport-independent and controller-owned", async () => {
+  const markerSource = await readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
+  const selectionSource = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(markerSource, /if \(isMobile\)[\s\S]{0,100}closePopup/);
+  assert.doesNotMatch(markerSource, /\{!isMobile && \(/);
+  assert.match(markerSource, /<MapMarkerPopupShell/);
+  assert.match(markerSource, /shouldDeselectAfterPopupClose/);
+  assert.match(markerSource, /selectedRef\.current = isSelected/);
+  assert.doesNotMatch(markerSource, /marker\.on\("popupclose"/);
+  assert.match(markerSource, /data-map-popup-first-control/);
+  assert.match(markerSource, /autoPanPaddingBottomRight/);
+  assert.match(markerSource, /closeButton=\{false\}/);
+  assert.match(markerSource, /closeOnEscapeKey=\{false\}/);
+  assert.match(markerSource, /restoreMarkerFocus: requestMarkerRestoreFocus/);
+  assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}requestAnimationFrame/);
+  assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}isConnected/);
+  assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}markerRef\.current\?\.getElement\(\)/);
+  assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}element\.focus\(\)/);
+  assert.match(markerSource, /const requestPopupOpen = useCallback\(\(fromActivation = false\) => \{[\s\S]{0,500}cancelPopupFocus\(\);[\s\S]{0,120}cancelMarkerRestoreFocus\(\);/);
+  assert.match(selectionSource, /shouldHandleMapSelectionEscape\(event\)/);
+});
+
+test("navigation closes a popup only after the runtime accepts its intent", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+
+  assert.match(pageSource, /const next = runtime\.dispatch\(\{[\s\S]{0,500}type: "navigation\/requested"/);
+  assert.match(pageSource, /next\.navigation\.pendingRequestId !== requestId/);
+  assert.match(pageSource, /next\.navigation\.request\?\.destinationId !== item\.id/);
+  assert.match(pageSource, /onDirections=\{\(item\) => beginNavigationToItem\(item\)\}/);
+  assert.match(pageSource, /publishNavigationSessionId\(requestId\)/);
+  assert.match(pageSource, /return requestId;/);
+});
+
+test("popup/search presentation never owns committed-route clearing", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(pageSource, /shouldClearRouteForSelectedItem/);
+  assert.doesNotMatch(pageSource, /shouldClearRouteForMapSearch/);
+});
+
+test("a rejected pending navigation remains retryable", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    pageSource,
+    /const acceptedSessionId = beginNavigationToItem\(pendingNavigationFacility\);[\s\S]{0,180}if \(acceptedSessionId !== null\)[\s\S]{0,100}onPendingNavigationConsumed\(\)/,
+  );
+});
+
+test("rapid accepted marker intents allocate distinct page session tokens", async () => {
+  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
+
+  assert.match(pageSource, /navigationSessionIdRef/);
+  assert.match(pageSource, /const allocateNavigationSessionId/);
+  assert.match(pageSource, /navigationSessionIdRef\.current \+= 1/);
+  assert.match(pageSource, /const requestId = allocateNavigationSessionId\(\)/);
+  assert.match(pageSource, /const previousSessionId = navigationSessionIdRef\.current/);
+  assert.match(pageSource, /dismissRouteFoundAnnouncement\(previousSessionId\)/);
+  assert.doesNotMatch(pageSource, /publishNavigationSessionId\(requestId\);[\s\S]{0,80}dismissRouteFoundAnnouncement\(requestId\)/);
 });
 
 test("popup width and margin overrides remain scoped to the popup card", async () => {

@@ -7,6 +7,7 @@ import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarkers } from "./map-markers";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
+import { shouldHandleMapSelectionEscape } from "@/lib/map/popup-lifecycle";
 import { markMapPerformance } from "@/lib/map/performance-marks";
 import {
   createPointerActivation,
@@ -36,7 +37,7 @@ class InteractionCallbackRegistry {
   private onMarkerTapOverride?: (item: MapItem) => void;
   private onClearSelection?: () => void;
   private onMapClick?: (point: { lat: number; lng: number }) => void;
-  private onDirections?: (item: MapItem) => void;
+  private onDirections?: (item: MapItem) => number | null;
 
   constructor({
     items,
@@ -89,7 +90,7 @@ class InteractionCallbackRegistry {
   }
 
   directions(item: MapItem) {
-    this.onDirections?.(item);
+    return this.onDirections?.(item) ?? null;
   }
 }
 
@@ -101,7 +102,7 @@ type MapSelectionLayerProps = {
   protectedMarkerIds?: ReadonlySet<string>;
   onSelect: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
-  onDirections?: (item: MapItem) => void;
+  onDirections?: (item: MapItem) => number | null;
   onMapClick?: (point: { lat: number; lng: number }) => void;
   onClearSelection?: () => void;
   flyZoom?: number;
@@ -199,7 +200,7 @@ export function MapSelectionLayer({
     interactionRegistry.background();
   }, [interactionRegistry]);
   const handleMarkerDirections = useCallback((item: MapItem) => {
-    interactionRegistry.directions(item);
+    return interactionRegistry.directions(item);
   }, [interactionRegistry]);
 
   const handlePlainMapInteraction = useCallback((
@@ -362,7 +363,7 @@ export function MapSelectionLayer({
     if (!selectedId) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (shouldHandleMapSelectionEscape(event)) {
         onClearSelection?.();
       }
     };

@@ -443,8 +443,6 @@ import {
 } from "@/lib/navigation/manual-start";
 import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
 import {
-  shouldClearRouteForMapSearch,
-  shouldClearRouteForSelectedItem,
   shouldRestoreCommittedRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
 import { canReuseCommittedRoute } from "@/lib/navigation/route-reuse";
@@ -520,6 +518,14 @@ function MapView({
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
+  const navigationSessionIdRef = useRef(0);
+  const allocateNavigationSessionId = useCallback(() => {
+    navigationSessionIdRef.current += 1;
+    return navigationSessionIdRef.current;
+  }, []);
+  const publishNavigationSessionId = useCallback((sessionId: number) => {
+    setNavigationSessionId((current) => Math.max(current, sessionId));
+  }, []);
   const pendingNavigation = runtimeState.navigation.request;
   const committedNavigation = runtimeState.navigation.committed;
   const presentedNavigation = getPresentedNavigationSnapshot(runtimeState);
@@ -557,9 +563,6 @@ function MapView({
       start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
       end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
     });
-  const hasNavigationState = Boolean(
-    navStart || navEnd || isManualStartPending || pendingNavigation || committedNavigation,
-  );
   const navigationControls = {
     primaryActionLabel:
       runtimeState.presentation.controls.primaryAction === "clear" ? "Clear Route" : "Cancel Route",
@@ -644,11 +647,8 @@ function MapView({
     const current = runtime.getState();
     if (current.navigation.phase !== "idle" && current.navigation.phase !== "cleared") return;
 
-    const requestId = navigationSessionId + 1;
-    setNavigationSessionId(requestId);
-    setNavMode(persistedNavigationMode);
-    setReuseCommittedRouteAfterRestore(false);
-    runtime.dispatch({
+    const requestId = allocateNavigationSessionId();
+    const next = runtime.dispatch({
       type: "navigation/requested",
       requestId,
       destinationId: persistedDestinationId,
@@ -657,6 +657,15 @@ function MapView({
       start: { lat: navStart.lat, lng: navStart.lng },
       end: { lat: navEnd.lat, lng: navEnd.lng },
     });
+    if (
+      next.navigation.pendingRequestId !== requestId ||
+      next.navigation.request?.destinationId !== persistedDestinationId
+    ) {
+      return;
+    }
+    publishNavigationSessionId(requestId);
+    setNavMode(persistedNavigationMode);
+    setReuseCommittedRouteAfterRestore(false);
     beginMapPerformanceRequest(
       requestId,
       typeof performance === "undefined" ? Date.now() : performance.now(),
@@ -666,7 +675,8 @@ function MapView({
     hasHydrated,
     navEnd,
     navStart,
-    navigationSessionId,
+    allocateNavigationSessionId,
+    publishNavigationSessionId,
     persistedDestinationId,
     persistedNavigationMode,
     persistedNavigationOrigin,
@@ -743,11 +753,14 @@ function MapView({
     setNavMode(committed.mode);
     setReuseCommittedRouteAfterRestore(true);
     setManualLocationRequestPending(false);
-    setNavigationSessionId((sessionId) => sessionId + 1);
+    const nextSessionId = allocateNavigationSessionId();
+    publishNavigationSessionId(nextSessionId);
     return true;
   }, [
+    allocateNavigationSessionId,
     dismissRouteFoundAnnouncement,
     navigationSessionId,
+    publishNavigationSessionId,
     runtime,
     setNavEnd,
     setNavStart,
@@ -793,40 +806,14 @@ function MapView({
       })
     ) {
       restoreCommittedRoute();
-      return;
-    }
-
-    if (
-      shouldClearRouteForSelectedItem({
-        selectedItemId: runtimeState.selectedItemId,
-        routeDestinationId: routeSelectionDestinationId,
-        committedRouteDestinationId: committedNavigation?.destinationId ?? null,
-        hasNavigationState,
-      })
-    ) {
-      clearRouteState();
     }
   }, [
-    clearRouteState,
-    hasNavigationState,
     restoreCommittedRoute,
     runtimeState.selectedItemId,
     runtimeState.navigation.pendingRequestId,
     routeSelectionDestinationId,
     committedNavigation?.destinationId,
   ]);
-
-  useEffect(() => {
-    if (
-      shouldClearRouteForMapSearch({
-        searchQuery: debouncedQuery,
-        selectedItemName: selectedMapItem?.name ?? null,
-        hasNavigationState,
-      })
-    ) {
-      clearRouteState();
-    }
-  }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
 
   const handleRouteCommitted = useCallback((route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => {
     const before = runtime.getState();
@@ -925,16 +912,14 @@ function MapView({
     routeAnnouncementTracker.register(sessionId, toastId);
   }, [routeAnnouncementTracker]);
 
-  const beginNavigationToItem = useCallback((item: MapItem) => {
+  const beginNavigationToItem = useCallback((item: MapItem): number | null => {
     const requestStartedAt = typeof performance === "undefined" ? Date.now() : performance.now();
     const decision = resolveNavigationStart(position);
 
-    dismissRouteFoundAnnouncement(navigationSessionId);
-    const requestId = navigationSessionId + 1;
+    const previousSessionId = navigationSessionIdRef.current;
+    const requestId = allocateNavigationSessionId();
     const end = { lat: item.coordinates.lat, lng: item.coordinates.lng };
-    setNavigationSessionId(requestId);
-    setReuseCommittedRouteAfterRestore(false);
-    runtime.dispatch({
+    const next = runtime.dispatch({
       type: "navigation/requested",
       requestId,
       destinationId: item.id,
@@ -944,10 +929,20 @@ function MapView({
       start: decision.mode === "live" ? { lat: decision.start.lat, lng: decision.start.lng } : null,
       end,
     });
+    if (
+      next.navigation.pendingRequestId !== requestId ||
+      next.navigation.request?.destinationId !== item.id
+    ) {
+      return null;
+    }
+
+    publishNavigationSessionId(requestId);
+    dismissRouteFoundAnnouncement(previousSessionId);
+    setReuseCommittedRouteAfterRestore(false);
     beginMapPerformanceRequest(
       requestId,
       requestStartedAt,
-      runtime.getState().navigation.committed !== null,
+      next.navigation.committed !== null,
     );
 
     if (decision.mode === "live") {
@@ -958,14 +953,16 @@ function MapView({
         mode: navMode,
         origin: "live",
       });
-      return;
+      return requestId;
     }
 
     setNavEnd(end as LatLng);
     setNavStart(null);
+    return requestId;
   }, [
     dismissRouteFoundAnnouncement,
-    navigationSessionId,
+    allocateNavigationSessionId,
+    publishNavigationSessionId,
     navMode,
     position,
     runtime,
@@ -989,9 +986,11 @@ function MapView({
       return;
     }
 
-    lastConsumedPendingNavigationId.current = pendingNavigationFacility.id;
-    beginNavigationToItem(pendingNavigationFacility);
-    onPendingNavigationConsumed();
+    const acceptedSessionId = beginNavigationToItem(pendingNavigationFacility);
+    if (acceptedSessionId !== null) {
+      lastConsumedPendingNavigationId.current = pendingNavigationFacility.id;
+      onPendingNavigationConsumed();
+    }
   }, [beginNavigationToItem, onPendingNavigationConsumed, pendingNavigationFacility]);
 
   const handleManualStartPlacement = useCallback((point: NavigationPoint) => {

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PathResult } from "@/lib/types/graph";
-import { shouldClearRouteForSelectedItem } from "@/lib/navigation/selection-route-reset";
 import {
   createInitialMapRuntimeState,
   getRouteFacingEndpoint,
@@ -331,35 +330,13 @@ test("selection ownership survives a failed replacement without relabeling the c
   assert.equal(state.navigation.committed?.destinationId, "facility-a");
   assert.equal(state.navigation.selectionDestinationId, "facility-b");
   assert.equal(state.navigation.request, null);
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "facility-b",
-      routeDestinationId: state.navigation.selectionDestinationId,
-      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
-      hasNavigationState: true,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "facility-a",
-      routeDestinationId: state.navigation.selectionDestinationId,
-      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
-      hasNavigationState: true,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "unrelated",
-      routeDestinationId: state.navigation.selectionDestinationId,
-      committedRouteDestinationId: state.navigation.committed?.destinationId ?? null,
-      hasNavigationState: true,
-    }),
-    true,
-  );
+  assert.equal(state.navigation.committed?.route, route);
 
-  state = mapRuntimeReducer(state, { type: "navigation/cleared" });
+  const dismissedPopup = mapRuntimeReducer(state, { type: "selection/set", itemId: "facility-b" });
+  assert.equal(dismissedPopup.navigation.committed?.destinationId, "facility-a");
+  assert.equal(dismissedPopup.navigation.committed?.route, route);
+
+  state = mapRuntimeReducer(dismissedPopup, { type: "navigation/cleared" });
   assert.equal(state.navigation.selectionDestinationId, null);
 });
 
