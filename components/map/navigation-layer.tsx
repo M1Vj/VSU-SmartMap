@@ -13,6 +13,7 @@ import {
 } from "@/lib/pathfinding/transition-gates";
 import { resolveNavigationRoute } from "@/lib/navigation/navigation-route-resolver";
 import { createRouteRequestCoordinator } from "@/lib/navigation/route-request-coordinator";
+import { shouldAppendRequestedEndpoint } from "@/lib/navigation/route-endpoint";
 import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/graph";
 import {
   createRouteEngine,
@@ -259,10 +260,16 @@ export function NavigationLayer({
 
       const startNode = makeNode("route-start", from);
       const endNode = makeNode("route-end", to);
-      const endSnappedToEntry = preparedGraph.nodeById.get(endNodeId)?.type === "building_entry";
+      const snappedEndNode = preparedGraph.nodeById.get(endNodeId);
+      const destinationHasBuildingEntries = Boolean(targetId && preparedGraph.buildingEntriesById.has(targetId));
       const finalPath = [startNode, ...route.path];
 
-      if (!endSnappedToEntry) finalPath.push(endNode);
+      if (shouldAppendRequestedEndpoint({
+        destinationHasBuildingEntries,
+        snappedNodeType: snappedEndNode?.type,
+      })) {
+        finalPath.push(endNode);
+      }
 
       let totalDistance = 0;
       for (let i = 0; i < finalPath.length - 1; i++) {
@@ -319,17 +326,17 @@ export function NavigationLayer({
     <>
       <Polyline
         positions={committedRoute.path.map((node) => [node.lat, node.lng])}
-        pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9 }}
+        pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9, className: "map-route-line" }}
       />
       <CircleMarker
         center={[committedRoute.path[0].lat, committedRoute.path[0].lng]}
         radius={6}
-        pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1 }}
+        pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1, className: "map-route-start" }}
       />
       <CircleMarker
         center={[committedRoute.path[committedRoute.path.length - 1].lat, committedRoute.path[committedRoute.path.length - 1].lng]}
         radius={6}
-        pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1 }}
+        pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1, className: "map-route-end" }}
       />
     </>
   );
