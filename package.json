@@ -9,6 +9,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "test": "node tools/run-tests.mjs",
+    "test:map-e2e": "playwright test e2e/map-broad-route-popup.spec.ts",
     "eval:chat": "node tools/evals/run-chat-evals.mjs",
     "preview:offline": "NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next build && NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next start",
     "start": "next start",
@@ -152,6 +153,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@next/bundle-analyzer": "16.2.9",
+    "@playwright/test": "1.62.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useEffect, useRef, useCallback } from "react";
+import { memo, useMemo, useEffect, useRef, useCallback, useState } from "react";
 import { Marker, Tooltip, Popup } from "@/components/map/leaflet-react";
 import { divIcon, type DivIcon, type Marker as LeafletMarker } from "leaflet";
 import {
@@ -32,6 +32,10 @@ import {
   type PointerActivationEvent,
 } from "@/lib/map/pointer-activation";
 import { markMapPerformance } from "@/lib/map/performance-marks";
+import {
+  recordMapEvidenceEvent,
+  registerDestinationMarkerForEvidence,
+} from "@/lib/map/e2e-probe-bridge";
 
 type MapMarkerProps = {
   item: MapItem;
@@ -100,6 +104,7 @@ export const MapMarker = memo(function MapMarker({
 
   const position: [number, number] = [displayCoordinates.lat, displayCoordinates.lng];
   const markerRef = useRef<LeafletMarker>(null);
+  const [readyMarker, setReadyMarker] = useState<LeafletMarker | null>(null);
   const compatibilityActivationRef = useRef<{
     activationId: string;
     modality: "mouse" | "touch" | "pen" | "keyboard";
@@ -113,6 +118,7 @@ export const MapMarker = memo(function MapMarker({
   const selectedRef = useRef(isSelected);
   selectedRef.current = isSelected;
   const lastActivationModalityRef = useRef<MarkerPopupModality>("mouse");
+  const lastActivationIdRef = useRef<string | undefined>(undefined);
   const popupOpenFrameRef = useRef<number | null>(null);
   const popupOpenGenerationRef = useRef(0);
   const popupFocusFrameRef = useRef<number | null>(null);
@@ -165,7 +171,7 @@ export const MapMarker = memo(function MapMarker({
     cancelPopupOpen();
     cancelPopupFocus();
     cancelMarkerRestoreFocus();
-    return popupLifecycle.close(reason, {
+    const closed = popupLifecycle.close(reason, {
       closePopup: () => marker?.closePopup(),
       onDeselect: () => {
         if (shouldDeselectAfterPopupClose(selectedRef.current, reason)) {
@@ -174,6 +180,14 @@ export const MapMarker = memo(function MapMarker({
       },
       restoreMarkerFocus: requestMarkerRestoreFocus,
     });
+    if (closed && reason !== "action") {
+      recordMapEvidenceEvent(
+        "popup-close",
+        lastActivationIdRef.current,
+        lastActivationModalityRef.current,
+      );
+    }
+    return closed;
   }, [cancelMarkerRestoreFocus, cancelPopupFocus, cancelPopupOpen, onDeselect, popupLifecycle, requestMarkerRestoreFocus]);
 
   useEffect(() => () => {
@@ -231,6 +245,42 @@ export const MapMarker = memo(function MapMarker({
     }
   }, [cancelPopupOpen, closePopup, isSelected, onMarkerTapOverride, popupLifecycle, requestPopupOpen]);
 
+  const destinationEvidenceRegistration = useMemo(() => {
+    if (!isRouteDestination) return null;
+    const iconAnchor = icon.options.iconAnchor;
+    const iconSize = icon.options.iconSize;
+    if (!iconAnchor || !iconSize) return null;
+    const [anchorX, anchorY] = Array.isArray(iconAnchor)
+      ? iconAnchor
+      : [iconAnchor.x, iconAnchor.y];
+    const [sizeX, sizeY] = Array.isArray(iconSize)
+      ? iconSize
+      : [iconSize.x, iconSize.y];
+    if (![anchorX, anchorY, sizeX, sizeY].every((value) => typeof value === "number" && Number.isFinite(value))) {
+      return null;
+    }
+    return {
+      coordinate: item.coordinates,
+      iconAnchor: [anchorX, anchorY] as const,
+      iconSize: [sizeX, sizeY] as const,
+    };
+  }, [icon, isRouteDestination, item.coordinates]);
+
+  useEffect(() => {
+    if (!readyMarker || !destinationEvidenceRegistration) return;
+    return registerDestinationMarkerForEvidence({ marker: readyMarker, ...destinationEvidenceRegistration });
+  }, [destinationEvidenceRegistration, readyMarker]);
+
+  useEffect(() => {
+    const element = readyMarker?.getElement();
+    if (!element) return;
+    const evidenceKind = item.kind === "boarding_house" ? "boarding" : "facility";
+    element.dataset.mapItemKind = evidenceKind;
+    return () => {
+      if (element.dataset.mapItemKind === evidenceKind) delete element.dataset.mapItemKind;
+    };
+  }, [item.kind, readyMarker]);
+
   useEffect(() => {
     if (hideTooltip) {
       markerRef.current?.closeTooltip();
@@ -279,6 +329,7 @@ export const MapMarker = memo(function MapMarker({
       }
       const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
       const activationId = activation.activationId;
+      lastActivationIdRef.current = activationId;
       compatibilityActivationRef.current = { activationId, modality, pointerId: event.pointerId, at: Date.now() };
       const startedAt = markerPerformanceStartedAtRef.current ?? (
         typeof performance === "undefined" ? Date.now() : performance.now()
@@ -326,13 +377,19 @@ export const MapMarker = memo(function MapMarker({
     };
   }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride, requestPopupOpen]);
 
+  const handleDetails = useCallback(() => {
+    if (!closePopup("action")) return false;
+    recordMapEvidenceEvent("details", lastActivationIdRef.current, lastActivationModalityRef.current);
+    return true;
+  }, [closePopup]);
+
   const handleViewDetails = useCallback(() => {
-    if (!closePopup("action")) return;
+    if (!handleDetails()) return;
     setFacilitySheetOpen(true);
-  }, [closePopup, setFacilitySheetOpen]);
+  }, [handleDetails, setFacilitySheetOpen]);
 
   const handleDirections = useCallback(() => {
-    return popupLifecycle.navigate(
+    const requestId = popupLifecycle.navigate(
       () => {
         const requestId = onDirections?.(item);
         return typeof requestId === "number" ? requestId : null;
@@ -341,6 +398,10 @@ export const MapMarker = memo(function MapMarker({
         closePopup: () => markerRef.current?.closePopup(),
       },
     );
+    if (typeof requestId === "number") {
+      recordMapEvidenceEvent("navigate", requestId, lastActivationModalityRef.current);
+    }
+    return requestId;
   }, [item, onDirections, popupLifecycle]);
 
   const accessibleName =
@@ -358,6 +419,7 @@ export const MapMarker = memo(function MapMarker({
       key={item.id}
       position={position}
       ref={markerRef}
+      onReady={setReadyMarker}
       icon={icon}
       keyboard
       riseOnHover
@@ -391,6 +453,7 @@ export const MapMarker = memo(function MapMarker({
           compatibilityActivationRef.current = null;
           const activationId = compatibility?.activationId ?? `${item.id}:mouse:${original?.pointerId ?? "mouse"}:${original?.timeStamp ?? Date.now()}`;
           const modality = compatibility?.modality ?? (original?.pointerType === "touch" || original?.pointerType === "pen" ? original.pointerType : "mouse");
+          lastActivationIdRef.current = activationId;
           lastActivationModalityRef.current = modality;
           if (isSelected) requestPopupOpen(true);
           onMarkerActivate?.(item, activationId, modality);
@@ -408,6 +471,7 @@ export const MapMarker = memo(function MapMarker({
             original?.preventDefault();
             markerRef.current?.closeTooltip();
             const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
+            lastActivationIdRef.current = activationId;
             lastActivationModalityRef.current = "keyboard";
             if (isSelected) requestPopupOpen(true);
             compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
@@ -439,6 +503,11 @@ export const MapMarker = memo(function MapMarker({
             markerRef.current?.closePopup();
             return;
           }
+          recordMapEvidenceEvent(
+            "popup-open",
+            lastActivationIdRef.current,
+            lastActivationModalityRef.current,
+          );
           popupLifecycle.opened(lastActivationModalityRef.current, () => {
             cancelPopupFocus();
             const focusFirstControl = () => {
@@ -485,7 +554,7 @@ export const MapMarker = memo(function MapMarker({
             {item.kind === "boarding_house" ? (
               <BoardingHouseMapPopupCard
                 listing={item.summary}
-                onDetails={() => closePopup("action")}
+                onDetails={handleDetails}
                 onDirections={handleDirections}
               />
             ) : (

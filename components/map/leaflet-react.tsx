@@ -27,6 +27,10 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  initializeMapEvidence,
+  registerLeafletMapForEvidence,
+} from "@/lib/map/e2e-probe-bridge";
 
 const MapContext = createContext<L.Map | null>(null);
 const LayerContext = createContext<L.Layer | null>(null);
@@ -75,6 +79,19 @@ export function useMap(): L.Map {
   const map = useContext(MapContext);
   if (!map) throw new Error("Leaflet map components must be rendered inside MapContainer.");
   return map;
+}
+
+export function MapEvidenceLifecycle() {
+  const map = useMap();
+
+  useEffect(() => {
+    const url = typeof window === "undefined" ? "" : window.location.href;
+    return initializeMapEvidence(url);
+  }, []);
+
+  useEffect(() => registerLeafletMapForEvidence(map), [map]);
+
+  return null;
 }
 
 type ZoomControlProps = {
@@ -190,23 +207,26 @@ type PolylineProps = PolylineOptions & {
   positions: LatLngExpression[] | LatLngExpression[][];
   pathOptions?: PathOptions;
   eventHandlers?: LeafletEventHandlerFnMap;
+  onReady?: (layer: L.Polyline | null) => void;
 };
 
-export function Polyline({
-  positions,
-  pathOptions,
-  eventHandlers,
-  ...options
-}: PolylineProps) {
+export const Polyline = forwardRef<L.Polyline, PolylineProps>(function Polyline(
+  { positions, pathOptions, eventHandlers, onReady, ...options },
+  forwardedRef,
+) {
   const map = useMap();
   const initialPositions = useRef(positions);
   const initialOptions = useRef({ ...options, ...pathOptions });
   const [layer, setLayer] = useState<L.Polyline | null>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const instance = L.polyline(initialPositions.current, initialOptions.current).addTo(map);
     setLayer(instance);
+    onReadyRef.current?.(instance);
     return () => {
+      onReadyRef.current?.(null);
       instance.removeFrom(map);
     };
   }, [map]);
@@ -217,19 +237,21 @@ export function Polyline({
   useEffect(() => {
     if (layer && pathOptions) layer.setStyle(pathOptions);
   }, [layer, pathOptions]);
+  useImperativeHandle(forwardedRef, () => layer as L.Polyline, [layer]);
   useEventHandlers(layer, eventHandlers);
 
   return null;
-}
+});
 
 type MarkerProps = MarkerOptions & {
   position: Position;
   children?: ReactNode;
   eventHandlers?: LeafletEventHandlerFnMap;
+  onReady?: (marker: L.Marker | null) => void;
 };
 
 export const Marker = forwardRef<L.Marker, MarkerProps>(function Marker(
-  { position, children, eventHandlers, icon, draggable, opacity, zIndexOffset, ...options },
+  { position, children, eventHandlers, onReady, icon, draggable, opacity, zIndexOffset, ...options },
   forwardedRef,
 ) {
   const map = useMap();
@@ -242,11 +264,15 @@ export const Marker = forwardRef<L.Marker, MarkerProps>(function Marker(
     zIndexOffset,
   });
   const [marker, setMarker] = useState<L.Marker | null>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useLayoutEffect(() => {
     const instance = L.marker(initialPosition.current, initialOptions.current).addTo(map);
     setMarker(instance);
+    onReadyRef.current?.(instance);
     return () => {
+      onReadyRef.current?.(null);
       instance.removeFrom(map);
     };
   }, [map]);

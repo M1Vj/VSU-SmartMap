@@ -3,7 +3,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
 
 import L from "leaflet";
-import { MapContainer, TileLayer, ZoomControl, useMap } from "@/components/map/leaflet-react";
+import {
+  MapContainer,
+  MapEvidenceLifecycle,
+  TileLayer,
+  ZoomControl,
+  useMap,
+} from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
@@ -11,6 +17,7 @@ import { useApp } from "@/lib/context/app-context";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
+import { registerMapLibreForEvidence } from "@/lib/map/e2e-probe-bridge";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
@@ -47,6 +54,7 @@ function OpenFreeMapVectorLayer({ styleUrl }: { styleUrl: string }) {
 
     layer.addTo(map);
     const mapLibreMap = layer.getMaplibreMap();
+    const unregisterMapLibreEvidence = registerMapLibreForEvidence(mapLibreMap);
     const customizeVectorLayer = () => {
       hideNonPlaceTextLabels(mapLibreMap);
       add3dBuildingsLayer(mapLibreMap);
@@ -60,6 +68,7 @@ function OpenFreeMapVectorLayer({ styleUrl }: { styleUrl: string }) {
 
     return () => {
       mapLibreMap.off("load", customizeVectorLayer);
+      unregisterMapLibreEvidence();
       layer.remove();
     };
   }, [map, styleUrl]);
@@ -165,6 +174,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         maxBoundsViscosity={1}
         className={className ?? "h-full w-full"}
       >
+        <MapEvidenceLifecycle />
         {mapStyle === "satellite" ? (
           satelliteFallbackActive ? (
             <TileLayer
