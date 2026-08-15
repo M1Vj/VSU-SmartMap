@@ -269,19 +269,19 @@ async function assertFrameGate(page: Page, requireTransition = true) {
   )).toBe(true);
   expect(snapshot.frames.every((frame) => frame.expectedSampleCount > 0 && frame.renderedSampleCount > 0)).toBe(true);
   expect(snapshot.frameProbe.totalCostMs).toBeGreaterThanOrEqual(0);
-  const sampledZooms = snapshot.frames
-    .map((frame) => frame.zoom)
-    .filter((zoom): zoom is number => typeof zoom === "number" && Number.isFinite(zoom));
+  const visualRouteSpans = snapshot.frames
+    .map((frame) => frame.visualRouteSpanPx)
+    .filter((span): span is number => typeof span === "number" && Number.isFinite(span) && span > 0);
   if (requireTransition) {
-    const before = sampledZooms[0];
-    const after = sampledZooms.at(-1);
-    const hasStrictlyIntermediateZoom = typeof before === "number" && typeof after === "number" && before !== after && sampledZooms.some((zoom) => {
+    const before = visualRouteSpans[0];
+    const after = visualRouteSpans.at(-1);
+    const hasStrictlyIntermediateVisualSpan = typeof before === "number" && typeof after === "number" && before !== after && visualRouteSpans.some((span) => {
       const low = Math.min(before, after);
       const high = Math.max(before, after);
-      return zoom > low && zoom < high;
+      return span > low && span < high;
     });
-    expect(sampledZooms.length).toBeGreaterThanOrEqual(3);
-    expect(hasStrictlyIntermediateZoom).toBe(true);
+    expect(visualRouteSpans.length).toBeGreaterThanOrEqual(3);
+    expect(hasStrictlyIntermediateVisualSpan).toBe(true);
   }
   return snapshot;
 }

@@ -216,6 +216,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(probeSource, /map as LeafletMap & \{[\s\S]*project/);
   assert.match(probeSource, /naturalWidth/);
   assert.match(probeSource, /inconsistent-raster-projection/);
+  assert.match(probeSource, /visualRouteSpanPx/);
   assert.doesNotMatch(probeSource, /rendererTransform[\s\S]*getScreenCTM/);
   const browserSpec = readFileSync(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8");
   assert.match(browserSpec, /await expect\(mainGate\)\.toBeVisible/);
@@ -228,7 +229,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /rapid repeated native zoom/);
   assert.match(browserSpec, /synthetic.*pinch/i);
   assert.match(browserSpec, /frames\.length\)\.toBeGreaterThanOrEqual\(2\)/);
-  assert.match(browserSpec, /hasStrictlyIntermediateZoom\)\.toBe\(true\)/);
+  assert.match(browserSpec, /hasStrictlyIntermediateVisualSpan\)\.toBe\(true\)/);
   assert.match(browserSpec, /naturalWidth\s*>\s*0/);
   assert.match(browserSpec, /basemaps\.cartocdn\.com/);
   const mapWrapperSource = readFileSync(new URL("../../components/map/map-wrapper.tsx", import.meta.url), "utf8");
@@ -759,7 +760,7 @@ test("frame probe uses authoritative route and destination geometry with bounded
   });
   const api = fakeWindow.__VSU_MAP_E2E__ as {
     startFrameProbe: () => void;
-    snapshot: () => { frames: Array<{ routeVisible: boolean; routeErrorPx: number | null; destinationErrorPx: number | null; failure: string | null; probeCostMs: number; expectedSampleCount: number; renderedSampleCount: number }> };
+    snapshot: () => { frames: Array<{ routeVisible: boolean; routeErrorPx: number | null; destinationErrorPx: number | null; failure: string | null; probeCostMs: number; expectedSampleCount: number; renderedSampleCount: number; visualRouteSpanPx: number | null }> };
   };
   // First callback settles the registered polyline; the next one captures a frame.
   api.startFrameProbe();
@@ -773,6 +774,7 @@ test("frame probe uses authoritative route and destination geometry with bounded
   assert.ok(frame.probeCostMs >= 0);
   assert.ok(frame.expectedSampleCount >= 2);
   assert.ok(frame.renderedSampleCount >= 2);
+  assert.ok((frame.visualRouteSpanPx ?? 0) > 0);
   cleanup();
 });
 

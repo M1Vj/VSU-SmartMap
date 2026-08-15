@@ -53,6 +53,7 @@ export type MapFrameSample = {
   rendererErrorPx: number | null;
   expectedSampleCount: number;
   renderedSampleCount: number;
+  visualRouteSpanPx: number | null;
   probeCostMs: number;
   zoom: number | null;
   animatingZoom: boolean;
@@ -755,8 +756,8 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
 function appendFrame(
   state: ProbeState,
   startedAt: number,
-  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom"> &
-    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom">>,
+  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx"> &
+    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx">>,
 ) {
   const at = typeof performance === "undefined" ? Date.now() : performance.now();
   const measurementCostMs = Math.max(0, at - startedAt);
@@ -771,6 +772,7 @@ function appendFrame(
     zoom: typeof zoom === "number" && Number.isFinite(zoom) ? zoom : null,
     animatingZoom,
     ...sample,
+    visualRouteSpanPx: sample.visualRouteSpanPx ?? null,
   });
 }
 
@@ -898,6 +900,9 @@ function recordFrame(state: ProbeState) {
       rendererErrorPx,
       expectedSampleCount: expected.length,
       renderedSampleCount: rendered.length,
+      visualRouteSpanPx: rendered.length >= 2
+        ? rendered.slice(1).reduce((total, point, index) => total + distance(rendered[index], point), 0)
+        : null,
       failure: sampleFailure,
     });
   } catch {
