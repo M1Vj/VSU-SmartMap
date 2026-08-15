@@ -89,7 +89,7 @@ test("browser map contract covers touch tablet controls and exact keyboard marke
     "utf8",
   );
 
-  assert.match(browserSource, /TOUCH_WIDTHS = new Set\(\[320, 390, 412, 768\]\)/);
+  assert.match(browserSource, /TOUCH_WIDTHS = new Set\(\[320, 390, 412, 768, 1024\]\)/);
   assert.match(browserSource, /test\.describe\(`touch[\s\S]{0,2600}await assertVisibleMapControls\(page\)/);
   assert.match(browserSource, /const markerId = await marker\.getAttribute\("data-map-item-id"\)/);
   assert.match(browserSource, /locator\(`\[data-map-item-id="\$\{markerId\}"\]`\)/);
