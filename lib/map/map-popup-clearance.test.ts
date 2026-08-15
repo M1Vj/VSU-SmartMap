@@ -3,9 +3,67 @@ import test from "node:test";
 
 import {
   computePopupAutoPanPadding,
+  DEFAULT_POPUP_AUTO_PAN_PADDING,
   DEFAULT_POPUP_BOTTOM_PADDING,
   DEFAULT_POPUP_TOP_PADDING,
+  resetPopupAutoPanPaddingIfNeeded,
+  shouldRemeasurePopupObstacleMutations,
 } from "./map-popup-clearance";
+
+test("default reset preserves the baseline object until an active override exists", () => {
+  const defaults = {
+    top: DEFAULT_POPUP_TOP_PADDING,
+    bottom: DEFAULT_POPUP_BOTTOM_PADDING,
+  };
+  const active = { top: 176, bottom: 320 };
+
+  assert.strictEqual(
+    resetPopupAutoPanPaddingIfNeeded(DEFAULT_POPUP_AUTO_PAN_PADDING),
+    DEFAULT_POPUP_AUTO_PAN_PADDING,
+  );
+  assert.strictEqual(resetPopupAutoPanPaddingIfNeeded(defaults, defaults), defaults);
+  const reset = resetPopupAutoPanPaddingIfNeeded(active, defaults);
+  assert.notStrictEqual(reset, active);
+  assert.deepEqual(reset, defaults);
+});
+
+test("obstacle mutation summaries remeasure mounts, unmounts, and visibility changes only", () => {
+  assert.equal(
+    shouldRemeasurePopupObstacleMutations([
+      {
+        type: "childList",
+        targetMatchesObstacle: false,
+        changedSubtreeContainsObstacle: true,
+      },
+    ]),
+    true,
+  );
+  assert.equal(
+    shouldRemeasurePopupObstacleMutations([
+      {
+        type: "attributes",
+        targetMatchesObstacle: true,
+        changedSubtreeContainsObstacle: false,
+      },
+    ]),
+    true,
+  );
+  assert.equal(
+    shouldRemeasurePopupObstacleMutations([
+      {
+        type: "childList",
+        targetMatchesObstacle: false,
+        changedSubtreeContainsObstacle: false,
+      },
+      {
+        type: "attributes",
+        targetMatchesObstacle: false,
+        changedSubtreeContainsObstacle: false,
+      },
+    ]),
+    false,
+  );
+});
 
 test("popup clearance keeps the baseline padding when no floating obstacle is present", () => {
   assert.deepEqual(

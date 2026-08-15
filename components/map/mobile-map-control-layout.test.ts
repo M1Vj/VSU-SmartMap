@@ -89,6 +89,24 @@ test("selected marker clearance observes only the selected marker and cleans up 
   assert.match(markerSource, /\[isSelected, isRouteDestination/);
 });
 
+test("unselected markers keep default clearance stable and scoped obstacle changes are coalesced", async () => {
+  const markerSource = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
+
+  assert.match(markerSource, /popupClearanceActiveRef/);
+  assert.match(markerSource, /setPopupAutoPanPadding\(\(current\) =>/);
+  assert.match(markerSource, /new MutationObserver/);
+  assert.match(markerSource, /childList: true/);
+  assert.match(markerSource, /attributeFilter/);
+  assert.match(markerSource, /mutation\.addedNodes/);
+  assert.match(markerSource, /mutation\.removedNodes/);
+  assert.match(markerSource, /target\?\.closest\(obstacleSelector\)/);
+  assert.match(markerSource, /subtree: true/);
+  assert.match(markerSource, /requestAnimationFrame/);
+  assert.match(markerSource, /cancelAnimationFrame/);
+  assert.match(markerSource, /mutationObserver\.disconnect\(\)/);
+  assert.match(markerSource, /shouldRemeasurePopupObstacleMutations/);
+});
+
 test("map obstacle tags cover top search/status and bottom floating controls", async () => {
   const pageSource = await readFile(
     new URL("../../app/(student)/page.tsx", import.meta.url),

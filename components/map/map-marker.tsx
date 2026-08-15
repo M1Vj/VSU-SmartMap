@@ -38,8 +38,10 @@ import {
 } from "@/lib/map/e2e-probe-bridge";
 import {
   computePopupAutoPanPadding,
-  DEFAULT_POPUP_BOTTOM_PADDING,
-  DEFAULT_POPUP_TOP_PADDING,
+  DEFAULT_POPUP_AUTO_PAN_PADDING,
+  resetPopupAutoPanPaddingIfNeeded,
+  shouldRemeasurePopupObstacleMutations,
+  type PopupAutoPanPadding,
   type PopupObstacleRect,
 } from "@/lib/map/map-popup-clearance";
 
@@ -131,10 +133,10 @@ export const MapMarker = memo(function MapMarker({
   const popupFocusFrameRef = useRef<number | null>(null);
   const markerRestoreFrameRef = useRef<number | null>(null);
   const markerRestoreGenerationRef = useRef(0);
-  const [popupAutoPanPadding, setPopupAutoPanPadding] = useState({
-    top: DEFAULT_POPUP_TOP_PADDING,
-    bottom: DEFAULT_POPUP_BOTTOM_PADDING,
-  });
+  const popupClearanceActiveRef = useRef(false);
+  const [popupAutoPanPadding, setPopupAutoPanPadding] = useState<PopupAutoPanPadding>(
+    DEFAULT_POPUP_AUTO_PAN_PADDING,
+  );
   const popupLifecycle = useMemo(() => createMarkerPopupLifecycleController(), []);
 
   const cancelPopupOpen = useCallback(() => {
@@ -311,20 +313,56 @@ export const MapMarker = memo(function MapMarker({
 
   useEffect(() => {
     if (!isSelected || onMarkerTapOverride) {
-      setPopupAutoPanPadding({
-        top: DEFAULT_POPUP_TOP_PADDING,
-        bottom: DEFAULT_POPUP_BOTTOM_PADDING,
-      });
+      if (!popupClearanceActiveRef.current) return;
+      popupClearanceActiveRef.current = false;
+      setPopupAutoPanPadding((current) =>
+        resetPopupAutoPanPaddingIfNeeded(current),
+      );
       return;
     }
 
+    popupClearanceActiveRef.current = true;
+
     const mapContainer = map.getContainer();
     const obstacleSelector = '[data-map-popup-obstacle="top"], [data-map-popup-obstacle="bottom"]';
+    const obstacleRoot =
+      mapContainer.closest<HTMLElement>("#map-panel") ??
+      mapContainer.parentElement ??
+      (typeof document === "undefined" ? null : document.body);
+    if (!obstacleRoot) return;
+
+    let disposed = false;
+    let measurementFrame: number | null = null;
+    const scheduleMeasure = () => {
+      if (disposed || measurementFrame !== null) return;
+      if (typeof requestAnimationFrame === "function") {
+        measurementFrame = requestAnimationFrame(() => {
+          measurementFrame = null;
+          if (disposed) return;
+          measurePopupClearance();
+        });
+        return;
+      }
+      measurementFrame = -1;
+      queueMicrotask(() => {
+        measurementFrame = null;
+        if (disposed) return;
+        measurePopupClearance();
+      });
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(scheduleMeasure);
+    const refreshResizeObserverTargets = () => {
+      resizeObserver?.observe(mapContainer);
+      obstacleRoot.querySelectorAll<HTMLElement>(obstacleSelector).forEach((element) => {
+        resizeObserver?.observe(element);
+      });
+    };
     const measurePopupClearance = () => {
-      if (typeof document === "undefined") return;
       const mapRect = mapContainer.getBoundingClientRect();
       const obstacles = Array.from(
-        document.querySelectorAll<HTMLElement>(obstacleSelector),
+        obstacleRoot.querySelectorAll<HTMLElement>(obstacleSelector),
       ).flatMap((element): PopupObstacleRect[] => {
         if (!element.isConnected) return [];
         const computedStyle = window.getComputedStyle(element);
@@ -354,28 +392,63 @@ export const MapMarker = memo(function MapMarker({
           visible: true,
         }];
       });
-      setPopupAutoPanPadding(
-        computePopupAutoPanPadding({
+      const nextPadding = computePopupAutoPanPadding({
           mapRect,
           obstacles,
-        }),
+        });
+      setPopupAutoPanPadding((current) =>
+        current.top === nextPadding.top && current.bottom === nextPadding.bottom
+          ? current
+          : nextPadding,
       );
+      refreshResizeObserverTargets();
     };
 
     measurePopupClearance();
-    const resizeObserver = typeof ResizeObserver === "undefined"
+    const nodeContainsObstacle = (node: Node) => {
+      if (!(node instanceof Element)) return false;
+      return node.matches(obstacleSelector) || node.querySelector(obstacleSelector) !== null;
+    };
+    const mutationObserver = typeof MutationObserver === "undefined"
       ? null
-      : new ResizeObserver(measurePopupClearance);
-    resizeObserver?.observe(mapContainer);
-    document.querySelectorAll<HTMLElement>(obstacleSelector).forEach((element) => {
-      resizeObserver?.observe(element);
+      : new MutationObserver((mutations) => {
+          const summaries = mutations.map((mutation) => {
+            const target = mutation.target instanceof Element ? mutation.target : null;
+            const targetMatchesObstacle = Boolean(
+              target?.matches(obstacleSelector) || target?.closest(obstacleSelector),
+            );
+            const changedSubtreeContainsObstacle = mutation.type === "childList" && [
+              ...Array.from(mutation.addedNodes),
+              ...Array.from(mutation.removedNodes),
+            ].some(nodeContainsObstacle);
+            return {
+              type: mutation.type === "attributes" ? "attributes" as const : "childList" as const,
+              targetMatchesObstacle,
+              changedSubtreeContainsObstacle,
+            };
+          });
+          if (shouldRemeasurePopupObstacleMutations(summaries)) scheduleMeasure();
+        });
+    mutationObserver?.observe(obstacleRoot, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "data-map-popup-obstacle"],
     });
-    const handleWindowResize = () => measurePopupClearance();
-    const handleMapResize = () => measurePopupClearance();
+    const handleWindowResize = scheduleMeasure;
+    const handleMapResize = scheduleMeasure;
     window.addEventListener("resize", handleWindowResize);
     map.on("resize", handleMapResize);
 
     return () => {
+      disposed = true;
+      if (measurementFrame !== null) {
+        if (measurementFrame > 0 && typeof cancelAnimationFrame === "function") {
+          cancelAnimationFrame(measurementFrame);
+        }
+        measurementFrame = null;
+      }
+      if (mutationObserver) mutationObserver.disconnect();
       if (resizeObserver) resizeObserver.disconnect();
       window.removeEventListener("resize", handleWindowResize);
       map.off("resize", handleMapResize);

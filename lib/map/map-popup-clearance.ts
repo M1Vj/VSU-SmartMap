@@ -24,6 +24,35 @@ export type PopupAutoPanPadding = {
   bottom: number;
 };
 
+export const DEFAULT_POPUP_AUTO_PAN_PADDING: PopupAutoPanPadding = {
+  top: DEFAULT_POPUP_TOP_PADDING,
+  bottom: DEFAULT_POPUP_BOTTOM_PADDING,
+};
+
+export type PopupObstacleMutationSummary = {
+  type: "attributes" | "childList";
+  targetMatchesObstacle: boolean;
+  changedSubtreeContainsObstacle: boolean;
+};
+
+export function resetPopupAutoPanPaddingIfNeeded(
+  current: PopupAutoPanPadding,
+  defaults: PopupAutoPanPadding = DEFAULT_POPUP_AUTO_PAN_PADDING,
+): PopupAutoPanPadding {
+  if (current.top === defaults.top && current.bottom === defaults.bottom) return current;
+  return defaults;
+}
+
+export function shouldRemeasurePopupObstacleMutations(
+  mutations: readonly PopupObstacleMutationSummary[],
+): boolean {
+  return mutations.some((mutation) =>
+    mutation.type === "attributes"
+      ? mutation.targetMatchesObstacle
+      : mutation.changedSubtreeContainsObstacle,
+  );
+}
+
 type ComputePopupAutoPanPaddingOptions = {
   mapRect: PopupMapRect;
   obstacles: readonly PopupObstacleRect[];
