@@ -261,6 +261,21 @@ async function assertPopupBounds(page: Page) {
   expect(typeof bounds.scrollable).toBe("boolean");
 }
 
+async function assertVisibleMapControls(page: Page) {
+  const undersized = await page.locator("[data-map-control], .leaflet-control-zoom a").evaluateAll((elements) => elements
+    .filter((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && Number.parseFloat(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+    })
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    })
+    .filter((rect) => rect.width < 44 || rect.height < 44));
+  expect(undersized).toEqual([]);
+}
+
 async function assertFrameGate(page: Page, requireTransition = true) {
   await expect.poll(
     async () => (await page.evaluate(() => window.__VSU_MAP_E2E__?.snapshot().frames.length ?? 0)),
@@ -281,16 +296,20 @@ async function assertFrameGate(page: Page, requireTransition = true) {
   const visualRouteSpans = snapshot.frames
     .map((frame) => frame.visualRouteSpanPx)
     .filter((span): span is number => typeof span === "number" && Number.isFinite(span) && span > 0);
+  const visualRouteScales = snapshot.frames
+    .map((frame) => frame.visualRouteScale);
+  expect(visualRouteSpans.length).toBeGreaterThan(0);
+  expect(visualRouteScales.every((scale) => typeof scale === "number" && Number.isFinite(scale) && scale > 0)).toBe(true);
   if (requireTransition) {
-    const before = visualRouteSpans[0];
-    const after = visualRouteSpans.at(-1);
-    const hasStrictlyIntermediateVisualSpan = typeof before === "number" && typeof after === "number" && before !== after && visualRouteSpans.some((span) => {
+    const before = visualRouteScales[0];
+    const after = visualRouteScales.at(-1);
+    const hasStrictlyIntermediateVisualScale = typeof before === "number" && typeof after === "number" && before !== after && visualRouteScales.some((scale) => {
       const low = Math.min(before, after);
       const high = Math.max(before, after);
-      return span > low && span < high;
+      return typeof scale === "number" && scale > low && scale < high;
     });
-    expect(visualRouteSpans.length).toBeGreaterThanOrEqual(3);
-    expect(hasStrictlyIntermediateVisualSpan).toBe(true);
+    expect(visualRouteScales.length).toBeGreaterThanOrEqual(3);
+    expect(hasStrictlyIntermediateVisualScale).toBe(true);
   }
   return snapshot;
 }
@@ -337,6 +356,14 @@ async function chooseMapStyle(page: Page, style: "Vector" | "Satellite") {
   if (style === "Satellite") {
     await expect(page.locator(".maplibregl-canvas")).toHaveCount(0, { timeout: 5_000 });
     await expect(page.locator(".leaflet-tile").first()).toBeVisible({ timeout: 5_000 });
+    await expect.poll(
+      () => page.locator(".leaflet-tile").evaluateAll((tiles) => tiles.some((tile) => {
+        const image = tile as HTMLImageElement;
+        const rect = image.getBoundingClientRect();
+        return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0 && rect.width > 0 && rect.height > 0;
+      })),
+      { timeout: 12_000 },
+    ).toBe(true);
   } else {
     await expect(page.locator(".maplibregl-canvas")).toHaveCount(1, { timeout: 5_000 });
   }
@@ -356,9 +383,31 @@ async function chooseTheme(page: Page, theme: "Light" | "Dark") {
 
 async function cameraSignature(page: Page) {
   return page.evaluate(() => {
-    const pane = document.querySelector<HTMLElement>(".leaflet-map-pane");
-    const zoomPane = document.querySelector<HTMLElement>(".leaflet-zoom-animated");
-    return `${pane?.getAttribute("style") ?? ""}|${zoomPane?.getAttribute("style") ?? ""}`;
+    const rectData = (element: Element | null) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? [rect.left, rect.top, rect.width, rect.height] : null;
+    };
+    const computedPane = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) return null;
+      const computed = getComputedStyle(element);
+      return {
+        inline: element.getAttribute("style") ?? "",
+        transform: computed.transform,
+        translate: computed.translate,
+        scale: computed.scale,
+        rect: rectData(element),
+      };
+    };
+    const route = document.querySelector<SVGPathElement>(".map-route-line");
+    const routeTransform = route?.getScreenCTM();
+    return JSON.stringify({
+      panes: [computedPane(".leaflet-map-pane"), computedPane(".leaflet-zoom-animated")],
+      route: {
+        transform: routeTransform ? [routeTransform.a, routeTransform.b, routeTransform.c, routeTransform.d, routeTransform.e, routeTransform.f] : null,
+        rect: rectData(route),
+      },
+    });
   });
 }
 
@@ -820,10 +869,11 @@ test("basemap switching keeps an active committed route", async ({ page }, testI
 });
 
 for (const kind of MARKER_KINDS) {
-  test(`active-route ${kind} popup survives safe-area and synthetic 200% root-font stress`, async ({ page }, testInfo) => {
+  for (const touchViewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }] as const) {
+    test(`active-route ${kind} popup survives safe-area and synthetic 200% root-font stress at ${touchViewport.width}px`, async ({ page }, testInfo) => {
     test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
     const errors = collectConsoleErrors(page);
-    await page.setViewportSize({ width: 320, height: 568 });
+    await page.setViewportSize(touchViewport);
     await openEvidencePage(page, kind === "boarding" ? { boarding: "1" } : {});
     const marker = await requireMarker(page, testInfo, kind);
     await positionMarkerAtEdge(page, marker, "center");
@@ -851,6 +901,7 @@ for (const kind of MARKER_KINDS) {
         return popupRect.left >= mapRect.left && popupRect.right <= mapRect.right && popupRect.top >= mapRect.top && popupRect.bottom <= mapRect.bottom && !overlaps && controls.every(Boolean);
       }).catch(() => false), { timeout: 5_000 }).toBe(true);
       await assertPopupBounds(page);
+      await assertVisibleMapControls(page);
       const scrollState = await page.evaluate(() => ({
         popupScrollable: (() => {
           const popup = document.querySelector<HTMLElement>("[data-map-control='marker-popup']");
@@ -878,7 +929,8 @@ for (const kind of MARKER_KINDS) {
     }
     testInfo.annotations.push({ type: "synthetic", description: "CDP safe-area and 200% root-font evidence are synthetic; physical zoom is separately blocked." });
     assertNoConsoleErrors(errors);
-  });
+    });
+  }
 }
 
 test("reduced motion and light/dark appearance retain one accepted activation", async ({ page }, testInfo) => {

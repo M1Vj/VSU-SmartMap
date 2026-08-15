@@ -54,6 +54,7 @@ export type MapFrameSample = {
   expectedSampleCount: number;
   renderedSampleCount: number;
   visualRouteSpanPx: number | null;
+  visualRouteScale: number | null;
   probeCostMs: number;
   zoom: number | null;
   animatingZoom: boolean;
@@ -230,6 +231,27 @@ function distance(a: ScreenPoint, b: ScreenPoint) {
 
 function isFiniteScreenPoint(point: ScreenPoint) {
   return Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+export function getAffineTransformScale(transform: AffineTransform | null | undefined): number | null {
+  if (
+    !transform ||
+    ![transform.a, transform.b, transform.c, transform.d, transform.e, transform.f].every(Number.isFinite)
+  ) return null;
+  const xScale = Math.hypot(transform.a, transform.b);
+  const yScale = Math.hypot(transform.c, transform.d);
+  const scale = Math.sqrt(xScale * yScale);
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
+}
+
+export function hasStrictlyIntermediateVisualScale(scales: readonly (number | null)[]) {
+  if (scales.length < 3 || scales.some((scale) => typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0)) return false;
+  const before = scales[0]!;
+  const after = scales.at(-1)!;
+  if (before === after) return false;
+  const low = Math.min(before, after);
+  const high = Math.max(before, after);
+  return scales.some((scale) => typeof scale === "number" && scale > low && scale < high);
 }
 
 function nearestDistance(point: ScreenPoint, points: readonly ScreenPoint[]) {
@@ -454,6 +476,8 @@ type RasterTile = {
   src?: string;
   getAttribute?: (name: string) => string | null;
   getBoundingClientRect?: () => MapEvidenceRect;
+  isConnected?: boolean;
+  ownerDocument?: Document;
   offsetWidth?: number;
   offsetHeight?: number;
   naturalWidth?: number;
@@ -498,6 +522,18 @@ type LeafletRasterProjection = {
   containerRect: DOMRect;
   frames: readonly LeafletRasterTileFrame[];
 };
+
+function isConnectedVisibleRasterTile(tile: RasterTile, rect: MapEvidenceRect, containerRect: DOMRect) {
+  if (tile.isConnected === false) return false;
+  const view = tile.ownerDocument?.defaultView;
+  if (view?.getComputedStyle) {
+    const style = view.getComputedStyle(tile as unknown as Element);
+    if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity) <= 0) return false;
+  }
+  const intersectionWidth = Math.min(rect.left + rect.width, containerRect.left + containerRect.width) - Math.max(rect.left, containerRect.left);
+  const intersectionHeight = Math.min(rect.top + rect.height, containerRect.top + containerRect.height) - Math.max(rect.top, containerRect.top);
+  return intersectionWidth > 0 && intersectionHeight > 0;
+}
 
 function projectThroughLeafletRasterFrame(
   projection: LeafletRasterProjection,
@@ -564,6 +600,7 @@ function buildLeafletRasterProjection(
       naturalWidth <= 0 ||
       naturalHeight <= 0
     ) continue;
+    if (!isConnectedVisibleRasterTile(tile, rect, containerRect)) continue;
     frames.push({ address, rect, width, height });
   }
   if (frames.length === 0) return { projection: null, failure: "missing-raster-tile" };
@@ -601,7 +638,7 @@ function transformScreenPoint(
 function readRenderedPolyline(
   polyline: LeafletPolyline,
   containerRect: DOMRect,
-): { points: ScreenPoint[]; failure: MapFrameSampleFailure | null } {
+): { points: ScreenPoint[]; visualRouteScale: number | null; failure: MapFrameSampleFailure | null } {
   const element = polyline.getElement?.() as (SVGPathElement & {
     getTotalLength?: () => number;
     getPointAtLength?: (length: number) => { x: number; y: number };
@@ -614,9 +651,10 @@ function readRenderedPolyline(
       f: number;
     } | null;
   }) | null;
-  if (!element) return { points: [], failure: "missing-route-element" };
+  if (!element) return { points: [], visualRouteScale: null, failure: "missing-route-element" };
   const totalLength = element.getTotalLength?.();
   const transform = element.getScreenCTM?.();
+  const visualRouteScale = getAffineTransformScale(transform);
   if (
     typeof totalLength !== "number" ||
     !Number.isFinite(totalLength) ||
@@ -624,7 +662,8 @@ function readRenderedPolyline(
     !transform ||
     ![transform.a, transform.b, transform.c, transform.d, transform.e, transform.f]
       .every((value) => Number.isFinite(value))
-  ) return { points: [], failure: "missing-route-geometry" };
+  ) return { points: [], visualRouteScale: null, failure: "missing-route-geometry" };
+  if (visualRouteScale === null) return { points: [], visualRouteScale: null, failure: "missing-route-geometry" };
   const requestedSampleCount = Math.max(2, Math.ceil(totalLength / 16) + 1);
   const sampleCount = Math.min(256, requestedSampleCount);
   const samplingCapped = requestedSampleCount > 256;
@@ -633,9 +672,9 @@ function readRenderedPolyline(
     const point = element.getPointAtLength?.(
       (totalLength * index) / (sampleCount - 1),
     );
-    if (!point) return { points: [], failure: "missing-route-geometry" };
+    if (!point) return { points: [], visualRouteScale, failure: "missing-route-geometry" };
     const transformed = transformScreenPoint(point.x, point.y, transform, containerRect);
-    if (!isFiniteScreenPoint(transformed)) return { points: [], failure: "missing-route-geometry" };
+    if (!isFiniteScreenPoint(transformed)) return { points: [], visualRouteScale, failure: "missing-route-geometry" };
     result.push(transformed);
   }
   const clipped = clipScreenPolylineToRect(result, {
@@ -645,8 +684,8 @@ function readRenderedPolyline(
     height: containerRect.height,
   });
   return clipped.length > 0
-    ? { points: clipped, failure: samplingCapped ? "sampling-capped" : null }
-    : { points: [], failure: "missing-route-geometry" };
+    ? { points: clipped, visualRouteScale, failure: samplingCapped ? "sampling-capped" : null }
+    : { points: [], visualRouteScale, failure: "missing-route-geometry" };
 }
 
 function projectCoordinate(
@@ -804,8 +843,8 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
 function appendFrame(
   state: ProbeState,
   startedAt: number,
-  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx"> &
-    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx">>,
+  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale"> &
+    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale">>,
 ) {
   const at = typeof performance === "undefined" ? Date.now() : performance.now();
   const measurementCostMs = Math.max(0, at - startedAt);
@@ -821,6 +860,7 @@ function appendFrame(
     animatingZoom,
     ...sample,
     visualRouteSpanPx: sample.visualRouteSpanPx ?? null,
+    visualRouteScale: sample.visualRouteScale ?? null,
   });
 }
 
@@ -951,6 +991,7 @@ function recordFrame(state: ProbeState) {
       rendererErrorPx,
       expectedSampleCount: expected.length,
       renderedSampleCount: rendered.length,
+      visualRouteScale: renderedResult.visualRouteScale,
       visualRouteSpanPx: rendered.length >= 2
         ? rendered.slice(1).reduce((total, point, index) => total + distance(rendered[index], point), 0)
         : null,
