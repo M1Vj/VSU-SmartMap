@@ -383,7 +383,7 @@ function MapTab() {
             type="button"
             size="default"
             className={cn(
-              "h-11 min-w-11 md:h-9 md:min-w-0 gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
+              "h-11 min-w-11 lg:h-9 lg:min-w-0 gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
               (selectedFacility || selectedBoardingHouse) && "hidden md:inline-flex",
             )}
             onClick={() => setSuggestOpen(true)}

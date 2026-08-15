@@ -604,6 +604,7 @@ for (const kind of MARKER_KINDS) {
           await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
           await expect(page.locator(".leaflet-popup")).toHaveCount(1);
           await assertPointerPopupGeometry(page, marker);
+          await assertVisibleMapControls(page);
           expect(await page.locator("[data-map-bottom-card], .map-bottom-card").count()).toBe(0);
           const events = await getEvents(page);
           expect(events.map((event) => event.name)).toEqual(["marker-activation", "popup-open"]);
@@ -624,6 +625,8 @@ for (const kind of MARKER_KINDS) {
         await page.setViewportSize(viewport);
         await openEvidencePage(page, kind === "boarding" ? { boarding: "1" } : {});
         const marker = await requireMarker(page, testInfo, kind);
+        const markerId = await marker.getAttribute("data-map-item-id");
+        expect(markerId).toBeTruthy();
         await positionMarkerAtEdge(page, marker, "center");
         await marker.focus();
         await resetProbe(page);
@@ -638,12 +641,38 @@ for (const kind of MARKER_KINDS) {
         const closeEvents = await getEvents(page);
         expect(closeEvents.map((event) => event.name)).toEqual(["marker-activation", "popup-open", "popup-close"]);
         assertActivationOpenCloseCorrelation(closeEvents);
-        expect(await page.evaluate(() => document.activeElement?.classList.contains("leaflet-marker-icon"))).toBe(true);
+        const restoredMarker = page.locator(`[data-map-item-id="${markerId}"]`);
+        await expect(restoredMarker).toBeFocused();
         assertNoConsoleErrors(errors);
       });
     }
   }
 }
+
+test("background tap delegates popup close to selection controller", async ({ page }, testInfo) => {
+  test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  const errors = collectConsoleErrors(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openEvidencePage(page);
+  const marker = await requireMarker(page, testInfo, "facility");
+  await positionMarkerAtEdge(page, marker, "center");
+  await marker.click();
+  const popup = page.locator(".leaflet-popup");
+  await expect(popup).toHaveCount(1);
+  await resetProbe(page);
+
+  const map = page.locator(".leaflet-container");
+  const mapBox = await map.boundingBox();
+  if (!mapBox) throw new Error("map bounds are unavailable");
+  await page.mouse.click(mapBox.x + 24, mapBox.y + mapBox.height * 0.55);
+  await expect(popup).toHaveCount(0);
+
+  const events = await getEvents(page);
+  expect(events.map((event) => event.name)).toEqual(["background-activation", "popup-close"]);
+  expect(events[0]?.modality).toBe("mouse");
+  expect(events[1]?.modality).toBe("mouse");
+  assertNoConsoleErrors(errors);
+});
 
 test("CDP pen activation is accepted once without background activation", async ({ page }, testInfo) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");

@@ -49,8 +49,8 @@ test("mobile floating map controls expose 44px hit areas without changing deskto
     wrapperSource,
     /@media \(max-width: 768px\)[\s\S]*?\.map-wrapper \.leaflet-control-zoom a[\s\S]*?min-width: 44px[\s\S]*?min-height: 44px/,
   );
-  assert.match(filtersSource, /h-11 min-w-11 md:h-8 md:min-w-0/);
-  assert.match(pageSource, /h-11 min-w-11 md:h-9 md:min-w-0/);
+  assert.match(filtersSource, /h-11 min-w-11 lg:h-8 lg:min-w-0/);
+  assert.match(pageSource, /h-11 min-w-11 lg:h-9 lg:min-w-0/);
   assert.match(pageSource, /data-tour="map-submit"/);
   assert.match(locationSource, /h-11 w-11 min-w-11/);
   assert.match(pageSource, /data-map-action-dock[\s\S]{0,1500}h-11 min-w-11/);

@@ -712,6 +712,7 @@ export const MapMarker = memo(function MapMarker({
           offset={[0, -20]}
           className="map-popup-card"
           closeButton={false}
+          closeOnClick={false}
           closeOnEscapeKey={false}
           autoPan
           autoPanPaddingTopLeft={[12, popupAutoPanPadding.top]}

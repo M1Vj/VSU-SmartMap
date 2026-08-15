@@ -73,6 +73,7 @@ test("marker popup lifecycle is viewport-independent and controller-owned", asyn
   assert.match(markerSource, /autoPanPaddingBottomRight/);
   assert.match(markerSource, /closeButton=\{false\}/);
   assert.match(markerSource, /closeOnEscapeKey=\{false\}/);
+  assert.match(markerSource, /closeOnClick=\{false\}/);
   assert.match(markerSource, /restoreMarkerFocus: requestMarkerRestoreFocus/);
   assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}requestAnimationFrame/);
   assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}isConnected/);
@@ -80,6 +81,19 @@ test("marker popup lifecycle is viewport-independent and controller-owned", asyn
   assert.match(markerSource, /const requestMarkerRestoreFocus = useCallback\(\(\) => \{[\s\S]{0,700}element\.focus\(\)/);
   assert.match(markerSource, /const requestPopupOpen = useCallback\(\(fromActivation = false\) => \{[\s\S]{0,500}cancelPopupFocus\(\);[\s\S]{0,120}cancelMarkerRestoreFocus\(\);/);
   assert.match(selectionSource, /shouldHandleMapSelectionEscape\(event\)/);
+});
+
+test("browser map contract covers touch tablet controls and exact keyboard marker restoration", async () => {
+  const browserSource = await readFile(
+    new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(browserSource, /TOUCH_WIDTHS = new Set\(\[320, 390, 412, 768\]\)/);
+  assert.match(browserSource, /test\.describe\(`touch[\s\S]{0,2600}await assertVisibleMapControls\(page\)/);
+  assert.match(browserSource, /const markerId = await marker\.getAttribute\("data-map-item-id"\)/);
+  assert.match(browserSource, /locator\(`\[data-map-item-id="\$\{markerId\}"\]`\)/);
+  assert.match(browserSource, /data-map-popup-first-control='true'[\s\S]{0,160}toBeFocused/);
 });
 
 test("navigation closes a popup only after the runtime accepts its intent", async () => {
