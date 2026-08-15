@@ -543,7 +543,7 @@ for (const viewport of VIEWPORTS) {
         await activateRoute(page, testInfo, marker);
         await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
         await page.waitForTimeout(120);
-        await page.evaluate(() => window.__VSU_MAP_E2E__?.markFrameProbeBoundary());
+        await page.evaluate(() => window.__VSU_MAP_E2E__?.armFrameProbeForInput());
         const zoomState = await performZoomMethod(page, zoomMethod);
         expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
         await page.waitForTimeout(600);
