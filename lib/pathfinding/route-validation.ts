@@ -29,7 +29,14 @@ export function isValidPathResult(value: unknown): value is PathResult {
   };
 
   if (!Array.isArray(route.path) || route.path.length < 2) return false;
-  if (!route.path.every(isValidRouteNode)) return false;
+  for (let index = 0; index < route.path.length; index += 1) {
+    if (
+      !Object.prototype.hasOwnProperty.call(route.path, index) ||
+      !isValidRouteNode(route.path[index])
+    ) {
+      return false;
+    }
+  }
   if (
     typeof route.totalDistance !== "number" ||
     !Number.isFinite(route.totalDistance) ||
