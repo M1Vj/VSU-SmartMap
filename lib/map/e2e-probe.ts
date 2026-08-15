@@ -220,6 +220,10 @@ function distance(a: ScreenPoint, b: ScreenPoint) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function isFiniteScreenPoint(point: ScreenPoint) {
+  return Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
 function nearestDistance(point: ScreenPoint, points: readonly ScreenPoint[]) {
   let nearest = Infinity;
   for (const candidate of points) nearest = Math.min(nearest, distance(point, candidate));
@@ -317,13 +321,12 @@ export function normalizeMapLibreProjection(
   clientSize: { width: number; height: number },
   renderedRect: MapEvidenceRect,
   targetRect: MapEvidenceRect,
-  padding: { left: number; top: number } = { left: 0, top: 0 },
 ): ScreenPoint {
   const scaleX = renderedRect.width / clientSize.width;
   const scaleY = renderedRect.height / clientSize.height;
   return {
-    x: renderedRect.left - targetRect.left + (point.x + padding.left) * scaleX,
-    y: renderedRect.top - targetRect.top + (point.y + padding.top) * scaleY,
+    x: renderedRect.left - targetRect.left + point.x * scaleX,
+    y: renderedRect.top - targetRect.top + point.y * scaleY,
   };
 }
 
@@ -470,7 +473,13 @@ function readRenderedPolyline(
   if (!element) return { points: [], failure: "missing-route-element" };
   const totalLength = element.getTotalLength?.();
   const transform = element.getScreenCTM?.();
-  if (!totalLength || !transform) return { points: [], failure: "missing-route-geometry" };
+  if (
+    typeof totalLength !== "number" ||
+    !Number.isFinite(totalLength) ||
+    totalLength <= 0 ||
+    !transform ||
+    !Object.values(transform).every((value) => Number.isFinite(value))
+  ) return { points: [], failure: "missing-route-geometry" };
   const requestedSampleCount = Math.max(2, Math.ceil(totalLength / 16) + 1);
   const sampleCount = Math.min(256, requestedSampleCount);
   const samplingCapped = requestedSampleCount > 256;
@@ -480,7 +489,9 @@ function readRenderedPolyline(
       (totalLength * index) / (sampleCount - 1),
     );
     if (!point) return { points: [], failure: "missing-route-geometry" };
-    result.push(transformScreenPoint(point.x, point.y, transform, containerRect));
+    const transformed = transformScreenPoint(point.x, point.y, transform, containerRect);
+    if (!isFiniteScreenPoint(transformed)) return { points: [], failure: "missing-route-geometry" };
+    result.push(transformed);
   }
   const clipped = clipScreenPolylineToRect(result, {
     left: 0,
@@ -509,10 +520,15 @@ function projectCoordinate(
     const mapLibreRect = canvas.getBoundingClientRect();
     const projected = mapLibre.project([coordinate.lng, coordinate.lat]);
     const clientSize = {
-      width: canvas.clientWidth || canvas.width || mapLibreContainer.clientWidth || mapLibreRect.width,
-      height: canvas.clientHeight || canvas.height || mapLibreContainer.clientHeight || mapLibreRect.height,
+      width: mapLibreContainer.clientWidth || canvas.clientWidth || canvas.width || mapLibreRect.width,
+      height: mapLibreContainer.clientHeight || canvas.clientHeight || canvas.height || mapLibreRect.height,
     };
-    const padding = typeof mapLibre.getPadding === "function" ? mapLibre.getPadding() : { left: 0, top: 0 };
+    if (
+      ![mapLibreRect.left, mapLibreRect.top].every((value) => Number.isFinite(value)) ||
+      ![mapLibreRect.width, mapLibreRect.height, clientSize.width, clientSize.height]
+        .every((value) => Number.isFinite(value) && value > 0) ||
+      !isFiniteScreenPoint(projected)
+    ) return { point: { x: 0, y: 0 }, failure: "missing-renderer-projection" };
     return {
       point: normalizeMapLibreProjection(
         projected,
@@ -524,7 +540,6 @@ function projectCoordinate(
           width: containerRect.width,
           height: containerRect.height,
         },
-        { left: padding.left ?? 0, top: padding.top ?? 0 },
       ),
       failure: null,
     };
@@ -532,7 +547,13 @@ function projectCoordinate(
 
   const overlayPane = map.getPanes?.().overlayPane;
   const overlayRect = overlayPane?.getBoundingClientRect?.();
-  if (!overlayRect || typeof map.latLngToLayerPoint !== "function") {
+  if (
+    !overlayRect ||
+    ![overlayRect.left, overlayRect.top].every((value) => Number.isFinite(value)) ||
+    ![overlayRect.width, overlayRect.height]
+      .every((value) => Number.isFinite(value) && value > 0) ||
+    typeof map.latLngToLayerPoint !== "function"
+  ) {
     return { point: { x: 0, y: 0 }, failure: "missing-overlay-transform" };
   }
   const projected = map.latLngToLayerPoint([coordinate.lat, coordinate.lng]);
@@ -540,6 +561,7 @@ function projectCoordinate(
     offsetWidth?: number;
     offsetHeight?: number;
   };
+  if (!isFiniteScreenPoint(projected)) return { point: { x: 0, y: 0 }, failure: "missing-overlay-transform" };
   const paneSize = {
     width: pane.offsetWidth && pane.offsetWidth > 0 ? pane.offsetWidth : overlayRect.width,
     height: pane.offsetHeight && pane.offsetHeight > 0 ? pane.offsetHeight : overlayRect.height,
@@ -657,7 +679,13 @@ function recordFrame(state: ProbeState) {
     return;
   }
   const containerRect = getMapContainerRect(map);
-  if (!containerRect || containerRect.width <= 0 || containerRect.height <= 0) {
+  if (
+    !containerRect ||
+    ![containerRect.left, containerRect.top, containerRect.width, containerRect.height]
+      .every((value) => Number.isFinite(value)) ||
+    containerRect.width <= 0 ||
+    containerRect.height <= 0
+  ) {
     appendFrame(state, startedAt, { routeVisible: false, routeErrorPx: null, destinationErrorPx: null, rendererErrorPx: null, expectedSampleCount: 0, renderedSampleCount: 0, failure: "missing-route-geometry" });
     return;
   }
@@ -715,7 +743,14 @@ function recordFrame(state: ProbeState) {
     } else {
       const markerElement = destination.marker.getElement?.();
       const markerRect = markerElement?.getBoundingClientRect?.();
-      if (!markerElement || !markerRect) {
+      if (
+        !markerElement ||
+        !markerRect ||
+        ![markerRect.left, markerRect.top, markerRect.width, markerRect.height]
+          .every((value) => Number.isFinite(value)) ||
+        markerRect.width <= 0 ||
+        markerRect.height <= 0
+      ) {
         sampleFailure ??= "missing-destination-element";
       } else {
         const expectedDestination = projectCoordinate(state, map, containerRect, destination.coordinate);

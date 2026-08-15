@@ -89,6 +89,11 @@ async function requireFacilityPair(page: Page, testInfo: TestInfo) {
   await expect.poll(() => markers.count(), { timeout: 8_000 }).toBeGreaterThanOrEqual(2).catch(() => {
     blockFixture(testInfo, "two facility fixtures are not published on this runtime");
   });
+  const identities = await markers.evaluateAll((nodes) => nodes.slice(0, 2).map((node) => ({
+    accessibleLabel: node.getAttribute("aria-label") ?? node.getAttribute("title") ?? "",
+  })));
+  expect(identities[0]?.accessibleLabel).not.toBe(identities[1]?.accessibleLabel);
+  expect(await markers.evaluateAll((nodes) => nodes[0] !== nodes[1])).toBe(true);
   return markers;
 }
 
@@ -220,6 +225,10 @@ async function assertFrameGate(page: Page) {
   )).toBe(true);
   expect(snapshot.frames.every((frame) => frame.expectedSampleCount > 0 && frame.renderedSampleCount > 0)).toBe(true);
   expect(snapshot.frameProbe.totalCostMs).toBeGreaterThanOrEqual(0);
+  const sampledZooms = snapshot.frames
+    .map((frame) => frame.zoom)
+    .filter((zoom): zoom is number => typeof zoom === "number" && Number.isFinite(zoom));
+  expect(snapshot.frames.some((frame) => frame.animatingZoom) || new Set(sampledZooms).size >= 2).toBe(true);
 }
 
 async function assertPointerPopupGeometry(page: Page, marker: ReturnType<Page["locator"]>) {
@@ -242,7 +251,12 @@ async function waitForCommittedRoute(page: Page) {
 
 async function chooseMainGate(page: Page, testInfo: TestInfo) {
   const mainGate = page.locator("button").filter({ hasText: /^Start from main gate$/ }).first();
-  if (await mainGate.count() === 0) blockFixture(testInfo, "manual-start Main Gate control is unavailable");
+  try {
+    await expect(mainGate).toBeVisible({ timeout: 8_000 });
+    await expect(mainGate).toBeEnabled({ timeout: 8_000 });
+  } catch {
+    blockFixture(testInfo, "manual-start Main Gate control is unavailable");
+  }
   await mainGate.click();
 }
 
@@ -339,7 +353,12 @@ async function activateRoute(page: Page, testInfo: TestInfo, marker: ReturnType<
   await expect(page.locator(".leaflet-popup")).toHaveCount(1);
   await resetProbe(page);
   const navigate = page.getByRole("button", { name: "Navigate", exact: true });
-  if (await navigate.count() === 0) blockFixture(testInfo, "Navigate action is unavailable for the selected marker");
+  try {
+    await expect(navigate).toBeVisible({ timeout: 8_000 });
+    await expect(navigate).toBeEnabled({ timeout: 8_000 });
+  } catch {
+    blockFixture(testInfo, "Navigate action is unavailable for the selected marker");
+  }
   await navigate.click();
   await chooseMainGate(page, testInfo);
   await waitForCommittedRoute(page);
@@ -347,8 +366,13 @@ async function activateRoute(page: Page, testInfo: TestInfo, marker: ReturnType<
 
 test("default page does not install the evidence probe", async ({ page }) => {
   test.skip(!configuredBaseUrl, "BLOCKED: MAP_E2E_BASE_URL is not configured");
+  const e2eCoreRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/(e2e-probe|map-evidence)/i.test(request.url())) e2eCoreRequests.push(request.url());
+  });
   await page.goto(evidenceUrl({}, false), { waitUntil: "domcontentloaded" });
   expect(await page.evaluate(() => window.__VSU_MAP_E2E__)).toBeUndefined();
+  expect(e2eCoreRequests).toEqual([]);
 });
 
 for (const viewport of VIEWPORTS) {
@@ -364,6 +388,7 @@ for (const viewport of VIEWPORTS) {
         await positionMarkerAtEdge(page, marker, "center");
         await activateRoute(page, testInfo, marker);
         await page.evaluate(() => window.__VSU_MAP_E2E__?.startFrameProbe());
+        await page.waitForTimeout(120);
         const zoomState = await performZoomMethod(page, zoomMethod);
         expect(zoomState.intermediate !== zoomState.before || zoomState.after !== zoomState.before).toBe(true);
         await page.waitForTimeout(600);

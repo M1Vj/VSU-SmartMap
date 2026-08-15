@@ -176,6 +176,12 @@ test("production map components cross the lazy bridge instead of statically load
   }
   const navigationLayer = readFileSync(new URL("../../components/map/navigation-layer.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(navigationLayer, /smoothFactor=\{0\}/);
+  const probeSource = readFileSync(new URL("./e2e-probe.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(probeSource, /getPadding/);
+  const browserSpec = readFileSync(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8");
+  assert.match(browserSpec, /await expect\(mainGate\)\.toBeVisible/);
+  assert.match(browserSpec, /await expect\(navigate\)\.toBeVisible/);
+  assert.match(browserSpec, /e2eCoreRequests/);
 });
 
 test("event storage is bounded and strips raw correlation and user data", () => {
@@ -272,16 +278,15 @@ test("normalized resampling always returns the requested bounded comparison coun
   assert.deepEqual(expected, rendered);
 });
 
-test("MapLibre projection normalization applies source offset, scale, and target padding", () => {
+test("MapLibre projection normalization applies source offset, scale, and already-padded coordinates", () => {
   assert.deepEqual(
     normalizeMapLibreProjection(
       { x: 520, y: 360 },
       { width: 800, height: 600 },
       { left: 100, top: 60, width: 800, height: 600 },
       { left: 10, top: 20, width: 400, height: 300 },
-      { left: 8, top: 12 },
     ),
-    { x: 618, y: 412 },
+    { x: 610, y: 400 },
   );
 });
 
@@ -291,17 +296,15 @@ test("MapLibre projection preserves rendered canvas translation and scale", () =
     { width: 400, height: 300 },
     { left: 113, top: 67, width: 420, height: 330 },
     { left: 10, top: 20, width: 400, height: 300 },
-    { left: 8, top: 12 },
   );
   const shifted = normalizeMapLibreProjection(
     { x: 100, y: 80 },
     { width: 400, height: 300 },
     { left: 118, top: 72, width: 420, height: 330 },
     { left: 10, top: 20, width: 400, height: 300 },
-    { left: 8, top: 12 },
   );
-  assert.deepEqual(translated, { x: 216.4, y: 148.2 });
-  assert.deepEqual(shifted, { x: 221.4, y: 153.2 });
+  assert.deepEqual(translated, { x: 208, y: 135 });
+  assert.deepEqual(shifted, { x: 213, y: 140 });
   assert.equal(shifted.x - translated.x, 5);
   assert.equal(shifted.y - translated.y, 5);
 });
@@ -694,16 +697,18 @@ test("frame probe projects through the live MapLibre canvas offset and scale", (
     getElement: () => ({ getBoundingClientRect: () => ({ left: 139, top: 32, width: 10, height: 20 }) }),
   };
   const canvas = {
-    clientWidth: 200,
-    clientHeight: 100,
-    width: 200,
-    height: 100,
+    clientWidth: 0,
+    clientHeight: 0,
+    width: 400,
+    height: 200,
     getBoundingClientRect: () => ({ left: 12, top: 8, width: 220, height: 110 }),
   };
   const mapLibre = {
     getCanvas: () => canvas,
     getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
-    getPadding: () => ({ left: 0, top: 0 }),
+    getPadding: () => {
+      throw new Error("MapLibre padding is already included in project coordinates");
+    },
     project: ([lng]: [number, number]) => ({ x: 20 + lng * 10, y: 40 }),
   };
   registerLeafletMapForEvidence(map as never);
@@ -791,6 +796,34 @@ test("vector canvas without a registered renderer fails with a typed registratio
   } finally {
     (globalThis as { document?: unknown }).document = originalDocument;
   }
+});
+
+test("invalid rendered geometry fails with a typed route geometry error", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const map = {
+    getContainer: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) }),
+    getPanes: () => ({ overlayPane: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) } }),
+    latLngToLayerPoint: ([lat, lng]: [number, number]) => ({ x: lng * 10, y: lat * 10 }),
+    setZoom: () => undefined,
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({ getTotalLength: () => Number.NaN }),
+  };
+  registerLeafletMapForEvidence(map as never);
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-route-geometry");
+  cleanup();
 });
 
 test("one-shot route failure is opt-in, abort-safe, and consumed once", async () => {
