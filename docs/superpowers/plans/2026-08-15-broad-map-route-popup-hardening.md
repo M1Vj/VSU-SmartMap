@@ -1078,14 +1078,18 @@ Create `lib/map/e2e-probe.test.ts` that imports the probe module with no browser
 ```ts
 assert.equal(isMapEvidenceEnabled("https://example.com/?mapEvidence=1"), false);
 assert.equal(isMapEvidenceEnabled("http://localhost:3000/?mapEvidence=1"), true);
+assert.equal(isMapEvidenceEnabled("http://127.0.0.1:3000/?mapEvidence=1"), true);
 assert.equal(
-  isMapEvidenceEnabled("https://vsu-smartmap-git-perf-map-broad-rewrite.example.vercel.app/?mapEvidence=1"),
+  isMapEvidenceEnabled("https://vsu-smartmap-git-perf-map-broad-rewrite-vjs-projects-def7d06b.vercel.app/?mapEvidence=1"),
   true,
 );
 assert.equal(
-  isMapEvidenceEnabled("https://vsu-smartmap-git-perf-map-broad-rewrite-attacker.example.com/?mapEvidence=1"),
+  isMapEvidenceEnabled("https://vsu-smartmap-git-perf-map-broad-rewrite-attacker.vercel.app/?mapEvidence=1"),
   false,
 );
+assert.equal(isMapEvidenceEnabled("http://localhost:3001/?mapEvidence=1"), false);
+assert.equal(isMapEvidenceEnabled("http://user@localhost:3000/?mapEvidence=1"), false);
+assert.equal(isMapEvidenceEnabled("http://localhost:3000/?mapEvidence=1&mapEvidence=1"), false);
 assert.equal(isMapEvidenceEnabled("http://localhost:3000/"), false);
 ```
 
@@ -1109,24 +1113,34 @@ export type MapEvidenceEventName =
   | "navigation-feedback";
 
 export type MapFrameSample = {
+  frameIndex: number;
   at: number;
   routeVisible: boolean;
   routeErrorPx: number | null;
   destinationErrorPx: number | null;
   rendererErrorPx: number | null;
+  expectedSampleCount: number;
+  renderedSampleCount: number;
+  probeCostMs: number;
+  zoom: number | null;
+  animatingZoom: boolean;
+  failure: MapFrameSampleFailure | null;
 };
 
 export function isMapEvidenceEnabled(url: string) {
   const parsed = new URL(url);
-  const localHost =
-    parsed.protocol === "http:" &&
-    (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
-  const broadPreview =
-    parsed.protocol === "https:" &&
-    parsed.hostname.endsWith(".vercel.app") &&
-    parsed.hostname.startsWith("vsu-smartmap-git-perf-map-broad-rewrite-");
-  const allowedHost = localHost || broadPreview;
-  return allowedHost && parsed.searchParams.get("mapEvidence") === "1";
+  const allowedOrigins = new Set([
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://vsu-smartmap-git-perf-map-broad-rewrite-vjs-projects-def7d06b.vercel.app",
+  ]);
+  return (
+    parsed.username === "" &&
+    parsed.password === "" &&
+    allowedOrigins.has(parsed.origin) &&
+    parsed.searchParams.getAll("mapEvidence").length === 1 &&
+    parsed.searchParams.get("mapEvidence") === "1"
+  );
 }
 ```
 
@@ -1141,7 +1155,12 @@ export function registerRouteForEvidence(input: {
   polyline: LeafletPolyline;
   path: readonly { lat: number; lng: number }[];
 }): () => void;
-export function registerDestinationMarkerForEvidence(marker: LeafletMarker): () => void;
+export function registerDestinationMarkerForEvidence(input: {
+  marker: LeafletMarker;
+  coordinate: { lat: number; lng: number };
+  iconAnchor: readonly [number, number];
+  iconSize: readonly [number, number];
+}): () => void;
 export function recordMapEvidenceEvent(
   name: MapEvidenceEventName,
   correlation?: string | number,
@@ -1158,29 +1177,34 @@ export function getSymmetricPolylineError(
 ): number;
 ```
 
-The module stores registered Leaflet map, MapLibre map, route polyline/path, route-destination marker, a maximum 100-event buffer, frame samples, and an E2E-only route delay. It maps every raw activation/request correlation to a session-local increasing integer before storage; the public event record exposes only `{ sequence, name, correlationOrdinal, modality }` and never exposes item IDs, raw request IDs, coordinates, URLs, or user data. `initializeMapEvidence` is the sole global-lifecycle owner: it installs `window.__VSU_MAP_E2E__` only when `isMapEvidenceEnabled(url)` is true, is idempotent for React Strict Mode, and its final cleanup cancels RAF/timers, clears every layer/map reference, correlation map, and buffer, and deletes the global only when it still points to the same API object. Registration cleanups clear only the exact matching object they installed. Its public methods are `snapshot()`, `events()`, `reset()`, `startFrameProbe()`, `stopFrameProbe()`, `setRouteDelayMs(number)`, and `zoomTo(number)`. `waitForMapEvidenceRouteDelay` uses an abort-aware timer, removes its abort listener on settle, and resolves immediately when the probe is disabled or its delay is zero.
+The module stores registered Leaflet map, MapLibre map, route polyline/path, authoritative destination coordinates/icon geometry, a maximum 100-event buffer, frame samples, and E2E-only route delay/fail-next controls. It maps every raw activation/request correlation to a session-local increasing integer before storage; both the public event buffer and private correlation map are bounded to 100 and cleared by `reset()`. The public event record exposes only `{ sequence, name, correlationOrdinal, modality }`; snapshots are detached copies and never expose item IDs, raw request IDs, coordinates, paths, URLs, names, error text, or user data. Reject invalid runtime enum values rather than retaining them.
 
-Add lifecycle tests which install against an isolated fake `window`, start a fake RAF and delayed route, then call cleanup and assert the global, RAF, timer, map/layer references, and listeners are gone. Restore `window`, `globalThis`, RAF, cancelRAF, timers, and `matchMedia` in `test.afterEach`, even when an assertion fails.
+`initializeMapEvidence` is the sole global-lifecycle owner. It installs `window.__VSU_MAP_E2E__` only when `isMapEvidenceEnabled(url)` is true, never overwrites a foreign global, and uses captured state plus an owner count so React Strict Mode, two owners, stale disposers, and foreign-global replacement cannot dispose the wrong probe. Final cleanup makes stale API methods inert, cancels RAF/timers, removes listeners, clears every layer/map reference, correlation map, and buffer, and deletes the global only when it still points to that exact API object. Registration cleanups clear only the exact matching object they installed. Its public methods are `snapshot()`, `events()`, `reset()`, `startFrameProbe()`, `stopFrameProbe()`, `setRouteDelayMs(number)`, `failNextRoute()`, and `zoomTo(number)`. `reset()` also clears delay/failure state. Delay input rejects non-finite/negative values and is capped; delay/failure consumption is abort-aware, removes listeners on settle, and is inert when the probe is disabled.
+
+Add lifecycle tests which install against an isolated fake `window`, start a fake RAF and delayed route, then call cleanup and assert the global, RAF, timer, map/layer references, and listeners are gone. Cover two owners, Strict Mode setup/cleanup, a foreign pre-existing global, stale disposer after reinitialization, stale API calls, reset semantics, invalid delay values, bounded private/public retention, detached return values, and raw-data leakage negatives. Restore `window`, `globalThis`, RAF, cancelRAF, timers, and `matchMedia` in `test.afterEach`, even when an assertion fails.
 
 - [ ] **Step 4: Register real map layers without changing default behavior**
 
-Mount one `MapEvidenceLifecycle` under `MapContainer`; it calls `initializeMapEvidence(window.location.href)` and registers its `useMap()` result in one effect. Register the MapLibre map inside `OpenFreeMapVectorLayer` immediately after `getMaplibreMap()` and dispose that exact registration before removing the layer. Use cleanup-returning registration calls:
+Mount one `MapEvidenceLifecycle` under `MapContainer`; it calls `initializeMapEvidence(window.location.href)` and registers its `useMap()` result in one effect. Register the MapLibre map inside `OpenFreeMapVectorLayer` immediately after `getMaplibreMap()` and dispose that exact registration before removing the layer. Use ref-ready callback/state registration rather than reading `ref.current` in an effect that may run once before the Leaflet instance exists. Forward callback refs through the Leaflet adapters; register only after the instance is non-null and after one settled animation frame verifies `polyline.getLatLngs()` matches the authoritative committed path. Use cleanup-returning registration calls:
 
 ```ts
 useEffect(() => registerLeafletMapForEvidence(map), [map]);
 useEffect(() => registerMapLibreForEvidence(mapLibreMap), [mapLibreMap]);
-useEffect(
-  () => registerRouteForEvidence({ map, polyline, path: committedRoute.path }),
-  [committedRoute.path, map, polyline],
-);
+useEffect(() => {
+  if (!polyline) return;
+  return registerRouteForEvidence({ map, polyline, path: committedRoute.path });
+}, [committedRoute.path, map, polyline]);
 useEffect(
   () => {
-    if (!isRouteDestination) return;
-    const marker = markerRef.current;
-    if (!marker) return;
-    return registerDestinationMarkerForEvidence(marker);
+    if (!isRouteDestination || !marker) return;
+    return registerDestinationMarkerForEvidence({
+      marker,
+      coordinate: item.coordinates,
+      iconAnchor,
+      iconSize,
+    });
   },
-  [isRouteDestination],
+  [iconAnchor, iconSize, isRouteDestination, item.coordinates, marker],
 );
 ```
 
@@ -1188,26 +1212,29 @@ useEffect(
 
 Forward a ref from `Polyline` in `leaflet-react.tsx` so the probe can read the SVG path. Keep the latest marker activation ID in a ref so its `popup-open` event reuses the same opaque correlation ordinal. The accepted page navigation-intent/session token and the coordinator-owned calculation request ID remain distinct authorities. The probe maps them into one sanitized public correlation ordinal only when the coordinator's `requestStarted` callback establishes the calculation for that accepted intent; `navigate`, `route-request`, and `navigation-feedback` must then share that public ordinal without assuming the raw IDs are numerically equal. Record Details/Close after a mandatory `events.reset()` baseline in the browser spec. The default URL must not create the global or retain event data.
 
-At the start of the coordinator-owned `resolveRoute` function in `NavigationLayer`, add:
+Record `marker-activation` only after the interaction gateway accepts/deduplicates the physical activation; do not record both pointer-up and its compatibility click. Record `background-activation` only after the background gateway accepts it, so an empty background record proves rejection rather than missing instrumentation. Add a unit case with deliberately unequal raw accepted-intent and coordinator IDs that still aliases `navigate`, `route-request`, and `navigation-feedback` to one public ordinal.
+
+At the start of the coordinator-owned `resolveRoute` function in `NavigationLayer`, add the abort-aware evidence delay and consume the strict one-shot failure control:
 
 ```ts
 await waitForMapEvidenceRouteDelay(signal);
+throwIfMapEvidenceRouteFailureRequested(signal);
 ```
 
-This makes the replacement-route scenario deterministic only when the opt-in probe sets a delay; the normal route path resolves immediately.
+This makes delayed and failed replacement scenarios deterministic only when the opt-in probe requests them; the default and ordinary route paths remain immediate and unchanged.
 
 - [ ] **Step 5: Implement frame error sampling**
 
-For each animation frame, compute:
+For each animation frame, compare authoritative geometry in one live screen coordinate space:
 
-- an expected projected polyline by calling `map.latLngToContainerPoint` for every committed route vertex and subdividing each segment so adjacent samples are at most 16 CSS pixels apart (cap the deterministic sample set at 256 points by increasing the interval when needed);
-- a rendered polyline sample set from `SVGPathElement.getPointAtLength` at at most 256 evenly spaced lengths, transformed through `getScreenCTM()` and normalized to the map-container rectangle;
-- `routeErrorPx` as the maximum of both nearest-neighbor directions between expected and rendered sample sets (a bounded symmetric Hausdorff approximation), not merely endpoint error;
-- expected destination from `map.latLngToContainerPoint(marker.getLatLng())`;
-- rendered destination from the marker element's bottom-center anchor;
-- renderer alignment from the same coordinate projected by MapLibre and Leaflet.
+- in vector mode, project committed coordinates with MapLibre and transform the canvas-local points through the rendered canvas rectangle/client dimensions into the outer Leaflet map-container coordinate space; this includes the adapter's current CSS offset/scale during `zoomanim`;
+- in satellite mode, project committed coordinates through the current rendered Leaflet overlay/map-pane affine transform, not an untransformed target-camera `latLngToContainerPoint`;
+- clip expected segments to the visible map rectangle while retaining route order and every visible vertex; subdivide to at most 16 CSS pixels between samples, cap at 256, and emit typed `sampling-capped` failure if both guarantees cannot hold;
+- sample the rendered SVG path in route order through `getPointAtLength()` and `getScreenCTM()`, normalize it to the same map rectangle, resample expected/rendered visible polylines by normalized cumulative arc length to the same count, and use the maximum pointwise Euclidean distance as `routeErrorPx`; keep `getSymmetricPolylineError` only as a pure secondary shape regression, not as the runtime oracle that can match the wrong nearby segment;
+- project the independently registered authoritative destination coordinate, then compare it with the configured `iconAnchor` transformed through the marker element rectangle and declared icon size; never use `marker.getLatLng()` as the expected coordinate and never assume DOM bottom-center;
+- expose renderer alignment only after MapLibre local points are normalized through the rendered canvas transform; include synthetic offset, scale, padding, and 3–5px translation tests.
 
-Set the Leaflet `Polyline` to `smoothFactor={0}` so committed route vertices are not discarded before measurement. Store maximum Euclidean errors in `MapFrameSample`. A missing path, CTM, map, marker, projection, or zero-sample set records `routeVisible: false` plus a typed sample-failure enum rather than a passing `null`. Stop after 600 frames or explicit `stopFrameProbe()` so a failed test cannot leak a RAF loop.
+Set the Leaflet `Polyline` to `smoothFactor={0}` so committed route vertices are not discarded before measurement. Arm the probe only after a ready baseline proves map/path/CTM/marker/projection availability and rendered-vs-authoritative Leaflet geometry equality. Store frame index/time, zoom, zoom-animation state, expected/rendered counts, typed failure, and probe cost. A missing/invalid/incompatible sequence records `routeVisible: false` and fails the row. Stop after 600 frames, explicit `stopFrameProbe()`, or a 10-second wall-clock timeout; visibility changes and every exit path must cancel RAF/timers/listeners. Keep per-frame work bounded and report probe cost so instrumentation-induced stalls cannot masquerade as application drift.
 
 - [ ] **Step 6: Add Playwright configuration and exact matrix tests**
 
@@ -1234,7 +1261,7 @@ Use `touchscreen.tap` in touch-enabled contexts for facility and `/?boarding=1` 
 
 For keyboard rows, assert `document.activeElement` becomes the shell's first control after Enter/Space and returns to the originating marker after Close/Escape. For pointer rows, assert activation does not force focus into the popup.
 
-For route tests, open the popup, Navigate, choose Main Gate, start the frame probe, then run wheel, CDP pinch, native plus/minus, double-click, keyboard, and probe `zoomTo`. Assert every sampled frame has `routeVisible === true` and every non-null error is `<= 2`. Set a 500ms route delay to verify committed A remains during B replacement.
+For route tests, open the popup, Navigate, choose Main Gate, start the frame probe, then run wheel, CDP pinch, native plus/minus, double-click, keyboard, and probe `zoomTo`. Assert every sampled frame has `routeVisible === true`, `failure === null`, and every non-null error is `<= 2`. Set a 500ms route delay to verify committed A remains during B replacement. Use the opt-in one-shot failure control to deterministically verify failed replacement restores A; it must be unavailable on default URLs and consumed by exactly one current request.
 
 Implement these explicit matrix loops rather than one representative test:
 
@@ -1242,8 +1269,10 @@ Implement these explicit matrix loops rather than one representative test:
 - marker popup: facility and boarding fixtures at center, north, east, south, and west map edges; touch on 320/390/412/768 widths and keyboard on all widths;
 - compatibility input: real touch, mouse, CDP pen, and keyboard traces; reset the probe before each physical activation and require one activation/popup/action record with the expected shared correlation ordinal and zero background record;
 - state: idle, selected, active route, delayed replacement, failed replacement, manual-start, basemap switch, and forced satellite fallback;
-- stress/accessibility: rapid repeated zoom, a second-page background-tab/throttling row, `reducedMotion: "reduce"`, light/dark appearance, and browser text scaling at 200%; use the longest available facility and boarding descriptions and verify body scrolling plus reachable Close/Details/Navigate;
+- stress/accessibility: rapid repeated zoom, a second-page background-tab/lifecycle row, `reducedMotion: "reduce"`, light/dark appearance, an automated 200% root-font stress row, and a separately reported true Chrome 200% browser-zoom row; use the longest available facility and boarding descriptions and verify body scrolling plus reachable Close/Details/Navigate;
 - popup bounds: measure against the map rectangle after header/search, bottom navigation, action dock, and computed safe-area inset; require the arrow/marker anchor and every action target to remain visible with target size at least 44×44 CSS px on touch viewports.
+
+Use Chromium CDP `Emulation.setSafeAreaInsetsOverride` for a nonzero bottom inset row and reset it afterward. Label CDP pen/pinch, root-font scaling, forced tile failures, and lifecycle throttling as synthetic evidence; do not present them as physical hardware proof. Verify facilities/boarding fixtures on the exact preview before the matrix; absent published/verified data marks only the dependent row BLOCKED. Route rows explicitly choose `Start route from main gate` when geolocation is unavailable.
 
 Before Details, Navigate, Close, Escape, and A-to-B transfer, call `window.__VSU_MAP_E2E__.reset()`. After the single physical action, assert the entire event list, not only counts: Details has one `details`; accepted Navigate has one each of `navigate`, `route-request`, and `navigation-feedback` sharing one correlation ordinal; Close/Escape has one `popup-close` and no request/background event; transfer has B activation/open and no background event. If CDP pinch/pen, boarding data, text scaling, or background throttling cannot be exercised, mark its required row BLOCKED and do not declare completion.
 

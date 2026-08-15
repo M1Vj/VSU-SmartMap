@@ -256,6 +256,8 @@ Run on the deployed broad preview using genuine mobile emulation where touch beh
 
 Record per-frame route/projection samples, callback/request counts, popup and control bounding boxes, console errors, long tasks, and relevant screenshots or recordings. A source-pattern test or final-frame screenshot is not sufficient evidence for the route synchronization or first-tap requirements.
 
+Frame evidence must use an independent authoritative oracle in the same rendered screen coordinate space as the current animation frame. Vector expectations are normalized through the rendered MapLibre canvas transform; satellite expectations include the rendered Leaflet pane transform. Destination expectations come from the runtime item's true coordinates and configured icon anchor, never from the marker's own possibly displaced `getLatLng()`. Visible route segments remain ordered and bounded to 16-pixel sampling; missing, clipped-incompatibly, undersampled, stale, or unready geometry is a typed failed row rather than a nullable pass.
+
 ## Completion and release gates
 
 - Every Gherkin scenario is mapped to automated and/or browser evidence and reported as passed, failed, blocked, or not tested.
