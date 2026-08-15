@@ -627,7 +627,7 @@ export function MapMarkerPopupShell({
       aria-modal="false"
       aria-label={`${label} quick actions`}
       data-map-control="marker-popup"
-      className="relative flex max-h-[min(60vh,22rem)] w-[min(260px,calc(100vw-1.5rem))] flex-col overflow-hidden"
+      className="relative flex max-h-[min(60dvh,calc(100dvh-23.5rem),22rem)] w-[min(260px,calc(100vw-1.5rem))] flex-col overflow-hidden"
       onKeyDown={(event) => handleMapPopupKeyDown(event, onClose)}
     >
       <button
@@ -852,7 +852,7 @@ popupopen: () => {
 
 Do not add a `popupclose` listener that infers selection state from a stale render.
 
-Update `shouldClearRouteForMapSearch` so `selectedItemName === null` returns `false`. Popup dismissal may clear selection, but it is not a route-clear intent. A genuine changed search while an item remains selected still clears when its normalized name no longer matches.
+Remove the implicit selection/search route-clear helpers and effects. Popup dismissal, marker selection, and search-result presentation never call `clearRouteState`; only the explicit Clear/Cancel route control removes a committed route. Keep the existing exact-context restore branch that cancels a pending replacement when the user returns to the committed destination.
 
 - [ ] **Step 5: Render the popup on every viewport and close after actions**
 
@@ -863,8 +863,8 @@ Remove `useIsMobile` and render one `Popup` unconditionally when `onMarkerTapOve
   offset={[0, -20]}
   className="map-popup-card"
   autoPan
-  autoPanPaddingTopLeft={[12, 96]}
-  autoPanPaddingBottomRight={[12, 168]}
+  autoPanPaddingTopLeft={[12, 128]}
+  autoPanPaddingBottomRight={[12, 248]}
 >
   <MapMarkerPopupShell
     label={accessibleName}
@@ -963,6 +963,8 @@ rtk git commit -m "fix(map): open marker actions on the first tap"
 - Delete: `components/map/use-is-mobile.ts`
 - Delete: `lib/map/map-card-height.ts`
 - Delete: `lib/map/map-card-height.test.ts`
+- Delete: `lib/map/popup-action.ts`
+- Delete: `lib/map/popup-action.test.ts`
 
 - [ ] **Step 1: Rewrite layout tests to RED against the old bottom card**
 
@@ -990,7 +992,7 @@ Expected: FAIL because the bottom card, height variable, 30px location button, a
 In `app/(student)/page.tsx`:
 
 - remove `MapBottomCard`, `CSSProperties`, `mapBottomCardHeight`, both CSS-variable styles, and the bottom-card render;
-- keep `selectedMapItem` because search/route reset announcements still use its name;
+- remove `selectedMapItem` after confirming it has no consumers once the bottom-card and implicit search-clear paths are gone;
 - set `UserLocationControl` to:
 
 ```tsx
@@ -1013,10 +1015,10 @@ Change the mobile target in `my-location-button.tsx` to:
 "h-11 w-11 min-w-11 rounded-full md:bottom-[80px]"
 ```
 
-Delete the four obsolete files listed above. Run:
+Delete the six obsolete files listed above. Run:
 
 ```bash
-rtk grep "MapBottomCard\|observeMapCardHeight\|map-card-height\|components/map/use-is-mobile\|--map-mini-card-height" app components lib
+rtk grep "MapBottomCard\|observeMapCardHeight\|map-card-height\|components/map/use-is-mobile\|popup-action\|--map-mini-card-height" app components lib
 ```
 
 Expected: no application source hit.
@@ -1027,12 +1029,12 @@ Expected: no application source hit.
 rtk proxy node --experimental-test-module-mocks --import tsx --test components/map/mobile-map-control-layout.test.ts lib/map/map-option-a.test.ts components/map/map-markers.test.ts
 ```
 
-Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency.
+Expected: all tests PASS; action dock and location control remain safe-area-aware with no measured-card dependency. Popup tests also prove `autoPanPaddingTopLeft={[12, 128]}`, `autoPanPaddingBottomRight={[12, 248]}`, the bounded dynamic-viewport shell height, wrapped action rows, and 44px controls with a `6.5rem` minimum width for 200% text scaling.
 
 - [ ] **Step 6: Commit bottom-card removal**
 
 ```bash
-rtk git add 'app/(student)/page.tsx' components/map/map-bottom-card.tsx components/map/mobile-map-control-layout.test.ts components/map/my-location-button.tsx components/map/use-is-mobile.ts lib/map/map-card-height.test.ts lib/map/map-card-height.ts lib/map/map-option-a.test.ts
+rtk git add 'app/(student)/page.tsx' components/map/boarding-house-map-popup-card.test.tsx components/map/boarding-house-map-popup-card.tsx components/map/map-bottom-card.tsx components/map/map-popup-card.test.tsx components/map/map-popup-card.tsx components/map/mobile-map-control-layout.test.ts components/map/my-location-button.tsx components/map/use-is-mobile.ts lib/map/map-card-height.test.ts lib/map/map-card-height.ts lib/map/map-option-a.test.ts lib/map/popup-action.test.ts lib/map/popup-action.ts
 rtk git commit -m "refactor(map): replace mobile card with anchored popup"
 ```
 
@@ -1184,7 +1186,7 @@ useEffect(
 
 `registerDestinationMarkerForEvidence` is used only by the protected facility/boarding `L.Marker`, not by the route-end `L.CircleMarker`. Import `Map as LeafletMap`, `Marker as LeafletMarker`, and `Polyline as LeafletPolyline` from `leaflet`, plus `Map as MapLibreMap` from `maplibre-gl`; declare `Window.__VSU_MAP_E2E__` in this module so application and Playwright types agree.
 
-Forward a ref from `Polyline` in `leaflet-react.tsx` so the probe can read the SVG path. Keep the latest marker activation ID in a ref so its `popup-open` event reuses the same opaque correlation ordinal. When Navigate is accepted, record `navigate`, `route-request`, and `navigation-feedback` with the returned/coordinator request ID; all three public records must share one correlation ordinal. Record Details/Close after a mandatory `events.reset()` baseline in the browser spec. The default URL must not create the global or retain event data.
+Forward a ref from `Polyline` in `leaflet-react.tsx` so the probe can read the SVG path. Keep the latest marker activation ID in a ref so its `popup-open` event reuses the same opaque correlation ordinal. The accepted page navigation-intent/session token and the coordinator-owned calculation request ID remain distinct authorities. The probe maps them into one sanitized public correlation ordinal only when the coordinator's `requestStarted` callback establishes the calculation for that accepted intent; `navigate`, `route-request`, and `navigation-feedback` must then share that public ordinal without assuming the raw IDs are numerically equal. Record Details/Close after a mandatory `events.reset()` baseline in the browser spec. The default URL must not create the global or retain event data.
 
 At the start of the coordinator-owned `resolveRoute` function in `NavigationLayer`, add:
 
