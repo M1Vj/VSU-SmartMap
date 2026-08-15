@@ -38,8 +38,8 @@ test("Option A splits status from a safe-area action dock and lifts both facilit
   assert.match(selectionSource, /"map-ready"/);
   assert.match(selectionSource, /map\.whenReady\(/);
   assert.match(selectionSource, /requestAnimationFrame\(/);
-  assert.match(facilityPopupSource, /h-11 min-h-11 w-full text-sm/);
-  assert.match(boardingPopupSource, /h-11 min-h-11 w-full text-sm/);
+  assert.match(facilityPopupSource, /h-11 min-h-11 flex-1/);
+  assert.match(boardingPopupSource, /h-11 min-h-11 flex-1/);
 });
 
 test("marker adapter forwards pointer identity/modality before Leaflet click compatibility", async () => {
@@ -55,4 +55,30 @@ test("marker adapter forwards pointer identity/modality before Leaflet click com
   assert.match(markerSource, /element\.removeEventListener\("pointercancel"/);
   assert.match(markerSource, /\[icon, isSelected, item, onMarkerActivate, onMarkerTapOverride\]/);
   assert.match(markerSource, /markMapPerformance\([\s\S]{0,120}"marker-activation"/);
+});
+
+test("popup width and margin overrides remain scoped to the popup card", async () => {
+  const [css, facilitySource, boardingSource] = await Promise.all([
+    readFile(new URL("../../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../../components/map/map-popup-card.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../../components/map/boarding-house-map-popup-card.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(
+    css,
+    /\.map-popup-card \.leaflet-popup-content-wrapper\s*\{[\s\S]*?max-width:\s*calc\(100vw - 1\.5rem\)/,
+  );
+  assert.match(
+    css,
+    /\.map-popup-card \.leaflet-popup-content\s*\{[\s\S]*?margin:\s*0/,
+  );
+  assert.doesNotMatch(css, /(?:^|\n)\s*\.leaflet-popup-content-wrapper\s*\{/);
+  assert.doesNotMatch(css, /(?:^|\n)\s*\.leaflet-popup-content\s*\{/);
+  assert.match(facilitySource, /layout\?: "popup" \| "bottom-sheet"/);
+  assert.match(boardingSource, /layout\?: "popup" \| "bottom-sheet"/);
+  assert.doesNotMatch(facilitySource, /isBottomSheet|layout\s*===/);
+  assert.doesNotMatch(boardingSource, /isBottomSheet|layout\s*===/);
 });

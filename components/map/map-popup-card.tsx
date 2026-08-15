@@ -3,16 +3,17 @@
 import { Button } from "@/components/ui/button";
 import { getCategoryMeta } from "@/lib/constants/facilities";
 import type { Facility } from "@/lib/types/facility";
-import { cn } from "@/lib/utils";
+import { runMapPopupActionOnce } from "@/lib/map/popup-action";
 import { Info, Route } from "lucide-react";
 import Image from "next/image";
 
-import { useState } from "react";
+import { useRef } from "react";
 
 interface MapPopupCardProps {
   facility: Facility;
   onViewDetails: () => void;
-  onDirections?: () => void; 
+  onDirections?: () => void;
+  /** @deprecated Removed with MapBottomCard in Task 6. */
   layout?: "popup" | "bottom-sheet";
 }
 
@@ -20,26 +21,17 @@ export function MapPopupCard({
   facility,
   onViewDetails,
   onDirections,
-  layout = "popup",
 }: MapPopupCardProps) {
   const meta = getCategoryMeta(facility.category);
-  const [loading, setLoading] = useState(false);
-  const isBottomSheet = layout === "bottom-sheet";
+  const directionsPendingRef = useRef(false);
 
   const handleDirections = () => {
-    setLoading(true);
-    onDirections?.();
-    setTimeout(() => setLoading(false), 500);
+    runMapPopupActionOnce(directionsPendingRef, () => onDirections?.());
   };
 
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-3 p-3",
-        isBottomSheet ? "w-full" : "min-w-[200px] max-w-[240px]",
-      )}
-    >
-      <div className="flex items-start gap-3">
+    <div className="flex min-w-[200px] max-w-[240px] flex-col gap-3 p-3">
+      <div className="flex items-start gap-3 pr-10">
         {facility.imageUrl && (
           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-muted">
             <Image
@@ -64,38 +56,26 @@ export function MapPopupCard({
         </div>
       </div>
 
-      <div className={cn("flex gap-2", isBottomSheet && "flex-col")}>
-        {isBottomSheet && (
-          <Button
-            size="sm"
-            className="h-11 w-full gap-2 bg-blue-600 text-sm text-white hover:bg-blue-700"
-            onClick={handleDirections}
-            loading={loading}
-          >
-            <Route className="h-4 w-4" aria-hidden />
-            Navigate
-          </Button>
-        )}
+      <div className="flex w-full gap-2">
         <Button
+          type="button"
           size="sm"
           variant="outline"
-          className={cn("gap-2", isBottomSheet ? "h-11 min-h-11 w-full text-sm" : "h-8 flex-1 text-xs")}
+          className="h-11 min-h-11 flex-1 gap-2 text-xs"
           onClick={onViewDetails}
         >
           <Info className="h-3 w-3" aria-hidden />
           Details
         </Button>
-        {!isBottomSheet && (
-          <Button
-            size="sm"
-            className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
-            onClick={handleDirections}
-            loading={loading}
-          >
-            <Route className="h-3 w-3" aria-hidden />
-            Navigate
-          </Button>
-        )}
+        <Button
+          type="button"
+          size="sm"
+          className="h-11 min-h-11 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+          onClick={handleDirections}
+        >
+          <Route className="h-3 w-3" aria-hidden />
+          Navigate
+        </Button>
       </div>
     </div>
   );

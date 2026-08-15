@@ -4,6 +4,9 @@
 
 .map-popup-card .leaflet-popup-content-wrapper {
   @apply p-0 overflow-hidden rounded-lg bg-popover text-popover-foreground border border-border/50;
+  max-width: calc(100vw - 1.5rem);
+  overflow: hidden;
+  border-radius: 0.875rem;
 }
 
 .map-popup-card .leaflet-popup-tip {
@@ -11,7 +14,9 @@
 }
 
 .map-popup-card .leaflet-popup-content {
-  @apply m-0 w-auto !important;
+  width: auto !important;
+  max-width: calc(100vw - 1.5rem);
+  margin: 0;
 }
 
 /* Leaflet injects `.leaflet-popup-content p { margin: 18px 0 }`, which bloats
