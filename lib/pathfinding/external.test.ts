@@ -133,6 +133,44 @@ test("provider resolver rejects an empty geometry before it can replace a valid 
   assert.equal(result?.path[0]?.id, "fallback-start");
 });
 
+test("provider resolver skips endpoint-mismatched geometry and normalizes accepted snapping", async () => {
+  const start = { lat: 10, lng: 20 };
+  const end = { lat: 10.001, lng: 20.001 };
+  const result = await resolveExternalRouteProviders(
+    [
+      async () => ({
+        path: [
+          { id: "wrong-start", lat: 12, lng: 22, type: "node" as const },
+          { id: "wrong-end", lat: 12.001, lng: 22.001, type: "node" as const },
+        ],
+        totalDistance: 1,
+        estimatedTime: 1,
+      }),
+      async () => ({
+        path: [
+          { id: "snapped-start", lat: 10.0005, lng: 20.0005, type: "node" as const },
+          { id: "snapped-end", lat: 10.0015, lng: 20.0015, type: "node" as const },
+        ],
+        totalDistance: 10,
+        estimatedTime: 1,
+      }),
+    ],
+    new AbortController().signal,
+    start,
+    end,
+  );
+
+  assert.equal(result?.path[0]?.id, "snapped-start");
+  assert.deepEqual(
+    { lat: result?.path[0]?.lat, lng: result?.path[0]?.lng },
+    start,
+  );
+  assert.deepEqual(
+    { lat: result?.path.at(-1)?.lat, lng: result?.path.at(-1)?.lng },
+    end,
+  );
+});
+
 const invalidProviderGeometries: Array<[string, MapNode[]]> = [
   ["one point", [{ id: "invalid", lat: 10, lng: 20, type: "node" as const }]],
   [
