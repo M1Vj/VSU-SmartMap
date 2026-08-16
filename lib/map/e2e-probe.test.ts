@@ -1776,6 +1776,52 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   assert.equal(offCalls, 2);
 });
 
+test("MapLibre renderer replacement during an armed probe fails closed", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    armFrameProbeForInput: () => { generation: number; token: number | null };
+    snapshot: () => {
+      frames: Array<{ failure: string | null; rendererGeneration: number | null }>;
+      frameProbeRunning: boolean;
+    };
+  };
+  const listeners = new Set<() => void>();
+  const makeRenderer = () => ({
+    getCanvas: () => ({
+      clientWidth: 200,
+      clientHeight: 100,
+      width: 200,
+      height: 100,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+    }),
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: (type: string, listener: () => void) => {
+      if (type === "render") listeners.add(listener);
+    },
+    off: (type: string, listener: () => void) => {
+      if (type === "render") listeners.delete(listener);
+    },
+    project: function ([lng]: [number]) {
+      if (!this) throw new Error("renderer receiver missing");
+      return { x: 20 + lng * 10, y: 40 };
+    },
+  });
+  registerLeafletMapForEvidence({} as never);
+  registerMapLibreForEvidence(makeRenderer() as never);
+  for (const listener of listeners) listener();
+  api.startFrameProbe();
+  const boundary = api.armFrameProbeForInput();
+  assert.equal(boundary.generation, 1);
+  registerMapLibreForEvidence(makeRenderer() as never);
+  for (const listener of listeners) listener();
+  assert.equal(api.snapshot().frames.at(-1)?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frames.at(-1)?.rendererGeneration, 1);
+  assert.equal(api.snapshot().frameProbeRunning, false);
+  cleanup();
+});
+
 test("MapLibre frame sampling fails closed when the renderer cannot remove a listener", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");

@@ -88,7 +88,7 @@ export type MapEvidenceSnapshot = {
     startedAt: number | null;
     stoppedAt: number | null;
     frameCount: number;
-    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "visibilitychange" | "cleanup" | "route-readiness-timeout" | null;
+    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "visibilitychange" | "cleanup" | "route-readiness-timeout" | "renderer-replacement" | null;
     totalCostMs: number;
   };
 };
@@ -210,6 +210,7 @@ type ProbeState = {
   mapLibreRenderListener: (() => void) | null;
   mapLibreRenderSnapshot: MapLibreRenderSnapshot | null;
   frameTransitionRendererToken: number | null;
+  frameTransitionRendererGeneration: number | null;
   frameTransitionRendererSnapshot: MapLibreRenderSnapshot | null;
   frameAwaitingRendererFrame: boolean;
   frameAwaitingRendererTimeout: ReturnType<typeof setTimeout> | null;
@@ -1403,6 +1404,7 @@ function detachMapLibreRenderListener(state: ProbeState) {
   state.mapLibreRenderToken = null;
   state.mapLibreRenderSnapshot = null;
   state.frameTransitionRendererToken = null;
+  state.frameTransitionRendererGeneration = null;
   state.frameTransitionRendererSnapshot = null;
   state.frameAwaitingRendererFrame = false;
   if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
@@ -1455,6 +1457,34 @@ function failAwaitingRendererFrame(state: ProbeState) {
   stopFrameProbeForState(state, "wall-clock-timeout");
 }
 
+function failRendererReplacement(state: ProbeState) {
+  if (
+    !isStateActive(state) ||
+    state.frameProbeStartedAt === null ||
+    state.frameProbeStoppedAt !== null ||
+    state.frameTransitionRendererGeneration === null
+  ) return;
+  state.frameAwaitingRendererFrame = false;
+  if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
+  state.frameAwaitingRendererTimeout = null;
+  if (state.totalFrameCount < 600) {
+    state.frameCount += 1;
+    state.totalFrameCount += 1;
+    const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+    appendFrame(state, startedAt, {
+      routeVisible: false,
+      routeErrorPx: null,
+      destinationErrorPx: null,
+      rendererErrorPx: null,
+      expectedSampleCount: 0,
+      renderedSampleCount: 0,
+      rendererGeneration: state.frameTransitionRendererGeneration,
+      failure: "missing-renderer-frame",
+    });
+  }
+  stopFrameProbeForState(state, "renderer-replacement");
+}
+
 function armFrameProbeForInputState(state: ProbeState): MapFrameProbeBoundary {
   if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
   state.frames = [];
@@ -1463,6 +1493,7 @@ function armFrameProbeForInputState(state: ProbeState): MapFrameProbeBoundary {
   state.frameProbeStoppedAt = null;
   state.frameProbeStopReason = null;
   state.frameTransitionRendererToken = state.mapLibreRenderToken;
+  state.frameTransitionRendererGeneration = state.mapLibreRenderGeneration;
   state.frameTransitionRendererSnapshot = cloneMapLibreRenderSnapshot(state.mapLibreRenderSnapshot);
   state.frameAwaitingRendererFrame = Boolean(state.mapLibreMap);
   state.frameAwaitingRendererTimeout = state.mapLibreMap
@@ -1523,6 +1554,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameProbeStopReason = null;
       state.frameProbeCostMs = 0;
       state.frameTransitionRendererToken = null;
+      state.frameTransitionRendererGeneration = null;
       state.frameTransitionRendererSnapshot = null;
       state.frameAwaitingRendererFrame = false;
       state.frameAwaitingRendererTimeout = null;
@@ -1536,6 +1568,7 @@ function createApi(state: ProbeState): MapEvidenceApi {
       state.frameProbeCostMs = 0;
       state.frameCount = 0;
       state.frameTransitionRendererToken = null;
+      state.frameTransitionRendererGeneration = null;
       state.frameTransitionRendererSnapshot = null;
       state.frameAwaitingRendererFrame = false;
       state.frameAwaitingRendererTimeout = null;
@@ -1674,6 +1707,7 @@ export function initializeMapEvidence(url: string): () => void {
     mapLibreRenderListener: null,
     mapLibreRenderSnapshot: null,
     frameTransitionRendererToken: null,
+    frameTransitionRendererGeneration: null,
     frameTransitionRendererSnapshot: null,
     frameAwaitingRendererFrame: false,
     frameAwaitingRendererTimeout: null,
@@ -1713,6 +1747,7 @@ export function registerLeafletMapForEvidence(map: LeafletMap): () => void {
 export function registerMapLibreForEvidence(map: MapLibreMap): () => void {
   const state = activeState;
   if (!isStateActive(state)) return () => undefined;
+  if (state.mapLibreMap) failRendererReplacement(state);
   detachMapLibreRenderListener(state);
   state.mapLibreMap = map;
   state.mapLibreRenderGeneration += 1;
@@ -1746,6 +1781,7 @@ export function registerMapLibreForEvidence(map: MapLibreMap): () => void {
   state.mapLibreRenderListener = onRender;
   return () => {
     if (isStateActive(state) && state.mapLibreMap === map) {
+      failRendererReplacement(state);
       detachMapLibreRenderListener(state);
       state.mapLibreMap = null;
     }
