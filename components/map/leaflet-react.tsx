@@ -27,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { addLayerToMap } from "@/lib/map/leaflet-layer";
 
 const MapContext = createContext<L.Map | null>(null);
 const LayerContext = createContext<L.Layer | null>(null);
@@ -97,10 +98,20 @@ export function ZoomControl({ position = "topleft" }: ZoomControlProps) {
 function useEventHandlers(
   target: L.Evented | null,
   eventHandlers?: LeafletEventHandlerFnMap,
+  initiallyAttached?: LeafletEventHandlerFnMap,
 ) {
+  const initialHandlers = useRef(initiallyAttached);
+
   useEffect(() => {
     if (!target || !eventHandlers) return;
-    target.on(eventHandlers);
+
+    const alreadyAttached = initialHandlers.current === eventHandlers;
+    if (!alreadyAttached) {
+      if (initialHandlers.current) target.off(initialHandlers.current);
+      target.on(eventHandlers);
+    }
+    initialHandlers.current = undefined;
+
     return () => {
       target.off(eventHandlers);
     };
@@ -122,12 +133,19 @@ export function TileLayer({ url, eventHandlers, ...options }: TileLayerProps) {
   const map = useMap();
   const initialUrl = useRef(url);
   const initialOptions = useRef(options);
+  const initialEventHandlers = useRef(eventHandlers);
   const [layer, setLayer] = useState<L.TileLayer | null>(null);
 
   useEffect(() => {
-    const instance = L.tileLayer(initialUrl.current, initialOptions.current).addTo(map);
+    const attachedEventHandlers = initialEventHandlers.current;
+    const instance = addLayerToMap(
+      L.tileLayer(initialUrl.current, initialOptions.current),
+      map,
+      attachedEventHandlers,
+    );
     setLayer(instance);
     return () => {
+      if (attachedEventHandlers) instance.off(attachedEventHandlers);
       instance.removeFrom(map);
     };
   }, [map]);
@@ -141,7 +159,7 @@ export function TileLayer({ url, eventHandlers, ...options }: TileLayerProps) {
     if (typeof options.opacity === "number") layer.setOpacity(options.opacity);
     if (typeof options.zIndex === "number") layer.setZIndex(options.zIndex);
   }, [layer, options.opacity, options.zIndex]);
-  useEventHandlers(layer, eventHandlers);
+  useEventHandlers(layer, eventHandlers, eventHandlers);
 
   return null;
 }

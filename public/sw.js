@@ -77,6 +77,15 @@ function isMapTileRequest(url) {
 }
 
 function isUsableTileResponse(response) {
+  // Opaque image responses may render online, but their status/body cannot be verified for caching.
+  return Boolean(
+    response &&
+    response.status !== 204 &&
+    response.ok
+  );
+}
+
+function isServableTileResponse(response) {
   return Boolean(
     response &&
     response.status !== 204 &&
@@ -391,8 +400,8 @@ self.addEventListener('fetch', (event) => {
 
           try {
             const networkResponse = await fetch(request);
-            if (isUsableTileResponse(networkResponse)) {
-              if (networkResponse.ok) {
+            if (isServableTileResponse(networkResponse)) {
+              if (isUsableTileResponse(networkResponse)) {
                 event.waitUntil(
                   cache
                     .put(request, networkResponse.clone())

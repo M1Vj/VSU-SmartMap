@@ -523,6 +523,112 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
   assert.equal(await offlineResponse.text(), "valid-v1-tile");
 });
 
+test("tile cache stores verifiable responses, keeps them offline, and rejects opaque entries", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const tileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const opaqueResponse = {
+    status: 0,
+    ok: false,
+    type: "opaque",
+    clone() {
+      return this;
+    },
+  };
+  const cacheEntries = new Map<string, Response | typeof opaqueResponse>();
+  let networkResponse: Response | typeof opaqueResponse = new Response("fresh-tile", { status: 200 });
+  let offline = false;
+  let deleteCount = 0;
+  let cachePutCount = 0;
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const cache = {
+    match: async (request: Request) =>
+      cacheEntries.get(request.url)?.clone(),
+    delete: async () => {
+      deleteCount += 1;
+      return true;
+    },
+    put: async (request: Request, response: Response) => {
+      cachePutCount += 1;
+      cacheEntries.set(request.url, response.clone());
+    },
+    keys: async () => [],
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => {
+      if (offline) throw new Error("offline");
+      return networkResponse;
+    },
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async () => {
+    waitUntilPromises.length = 0;
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(tileUrl),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      },
+    });
+    assert.ok(responsePromise);
+    const response = await responsePromise;
+    await Promise.all(waitUntilPromises);
+    return response;
+  };
+
+  const networkTile = await dispatchFetch();
+  assert.equal(networkTile.status, 200);
+  assert.equal(await networkTile.text(), "fresh-tile");
+  assert.equal(cachePutCount, 1);
+
+  offline = true;
+  const offlineTile = await dispatchFetch();
+  assert.equal(offlineTile.status, 200);
+  assert.equal(await offlineTile.text(), "fresh-tile");
+
+  offline = false;
+  networkResponse = opaqueResponse;
+  cacheEntries.delete(tileUrl);
+  const opaqueNetworkTile = await dispatchFetch();
+  assert.equal(opaqueNetworkTile, opaqueResponse);
+  assert.equal(cachePutCount, 1);
+
+  offline = true;
+  cacheEntries.set(tileUrl, opaqueResponse);
+  const opaqueOfflineTile = await dispatchFetch();
+  assert.equal(opaqueOfflineTile.status, 0);
+  assert.equal(deleteCount, 1);
+});
+
 test("uncached static JavaScript returns an executable offline error response", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const cache = {
