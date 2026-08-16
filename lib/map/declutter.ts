@@ -62,13 +62,10 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
     Math.max(FAN_OUT_MIN_ZOOM, zoomBucket),
   );
   const buildingDegrees = getMetersAsDegrees(MAX_GROUP_DISTANCE_METERS, lat);
-  const toleranceDegrees =
-    zoomBucket < FAN_OUT_MIN_ZOOM
-      ? overlapDegrees
-      : {
-          lat: Math.min(overlapDegrees.lat, buildingDegrees.lat),
-          lng: Math.min(overlapDegrees.lng, buildingDegrees.lng),
-        };
+  const toleranceDegrees = {
+    lat: Math.min(overlapDegrees.lat, buildingDegrees.lat),
+    lng: Math.min(overlapDegrees.lng, buildingDegrees.lng),
+  };
   const groups = groupOverlappingItems(items, toleranceDegrees, protectedIds);
 
   for (const group of groups) {
