@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "map-broad-route-popup.spec.ts",
+  testMatch: "map-broad-smoke.spec.ts",
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
@@ -10,7 +10,9 @@ export default defineConfig({
   outputDir: ".playwright-mcp/map-broad",
   reporter: process.env.CI ? "line" : "list",
   use: {
-    baseURL: process.env.MAP_E2E_BASE_URL ?? "http://localhost:3000",
+    ...(process.env.MAP_E2E_BASE_URL
+      ? { baseURL: process.env.MAP_E2E_BASE_URL }
+      : {}),
     channel: "chrome",
     trace: "on-first-retry",
     screenshot: "only-on-failure",

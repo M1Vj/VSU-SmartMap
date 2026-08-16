@@ -59,11 +59,10 @@ test("mobile floating map controls expose 44px hit areas without changing deskto
 });
 
 test("coarse-pointer tablets keep map controls at 44px while mouse desktop stays compact", async () => {
-  const [pageSource, filtersSource, wrapperSource, browserSource] = await Promise.all([
+  const [pageSource, filtersSource, wrapperSource] = await Promise.all([
     readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("./category-filters.tsx", import.meta.url), "utf8"),
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(
@@ -78,8 +77,6 @@ test("coarse-pointer tablets keep map controls at 44px while mouse desktop stays
     wrapperSource,
     /@media \(pointer: coarse\), \(any-pointer: coarse\)[\s\S]*?\.map-wrapper \.leaflet-control-zoom a[\s\S]*?min-width:\s*44px[\s\S]*?min-height:\s*44px/,
   );
-  assert.match(browserSource, /TOUCH_WIDTHS = new Set\(\[320, 390, 412, 768, 1024\]\)/);
-  assert.match(browserSource, /VIEWPORTS\.filter\(\(candidate\) => TOUCH_WIDTHS\.has\(candidate\.width\)\)/);
 });
 
 test("selected mobile popups keep Submit Location out of the action surface", async () => {

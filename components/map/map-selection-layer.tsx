@@ -10,7 +10,6 @@ import { focusConnectedMarker } from "@/lib/map/marker-focus";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
 import { shouldHandleMapSelectionEscape } from "@/lib/map/popup-lifecycle";
 import { markMapPerformance } from "@/lib/map/performance-marks";
-import { recordMapEvidenceEvent } from "@/lib/map/e2e-probe-bridge";
 import {
   createPointerActivation,
   isPrimaryPointerActivation,
@@ -32,16 +31,6 @@ const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-tooltip",
   ".leaflet-interactive",
 ].join(",");
-
-function rememberAcceptedActivation(activations: Set<string>, activationId: string) {
-  if (activations.has(activationId)) return false;
-  activations.add(activationId);
-  if (activations.size > 100) {
-    const oldest = activations.values().next().value;
-    if (oldest !== undefined) activations.delete(oldest);
-  }
-  return true;
-}
 
 class InteractionCallbackRegistry {
   private items: readonly MapItem[];
@@ -141,8 +130,6 @@ export function MapSelectionLayer({
   const backgroundPointerRef = useRef<PointerActivation | null>(null);
   const backgroundCompatibilityRef = useRef<CompatibilityActivationRecord | null>(null);
   const backgroundCancelledAtRef = useRef<number | null>(null);
-  const acceptedMarkerActivationsRef = useRef<Set<string>>(new Set());
-  const acceptedBackgroundActivationsRef = useRef<Set<string>>(new Set());
   const keyboardSelectedMarkerIdRef = useRef<string | null>(null);
   const escapeFocusFrameRef = useRef<number | null>(null);
   const selectedIdRef = useRef(selectedId);
@@ -168,8 +155,6 @@ export function MapSelectionLayer({
   );
 
   useEffect(() => () => {
-    acceptedMarkerActivationsRef.current.clear();
-    acceptedBackgroundActivationsRef.current.clear();
     if (escapeFocusFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(escapeFocusFrameRef.current);
     }
@@ -223,9 +208,6 @@ export function MapSelectionLayer({
   const handleMarkerActivate = useCallback((item: MapItem, activationId: string, modality: "mouse" | "touch" | "pen" | "keyboard") => {
     keyboardSelectedMarkerIdRef.current = modality === "keyboard" ? item.id : null;
     interactionGateway.dispatch({ type: "marker", itemId: item.id, activationId, modality });
-    if (rememberAcceptedActivation(acceptedMarkerActivationsRef.current, activationId)) {
-      recordMapEvidenceEvent("marker-activation", activationId, modality);
-    }
   }, [interactionGateway]);
   useEffect(() => {
     if (keyboardSelectedMarkerIdRef.current !== selectedId) {
@@ -246,7 +228,6 @@ export function MapSelectionLayer({
     target: HTMLElement | null,
     point: { lat: number; lng: number } | undefined,
     activationId: string,
-    modality: "mouse" | "touch" | "pen" | "keyboard" = "mouse",
   ) => {
     if (!target) {
       return;
@@ -257,9 +238,6 @@ export function MapSelectionLayer({
     }
 
     interactionGateway.dispatch({ type: "background", target: "background", activationId, point });
-    if (rememberAcceptedActivation(acceptedBackgroundActivationsRef.current, activationId)) {
-      recordMapEvidenceEvent("background-activation", activationId, modality);
-    }
   }, [interactionGateway]);
 
   useEffect(() => {
@@ -319,10 +297,9 @@ export function MapSelectionLayer({
       }
 
       const latlng = map.mouseEventToLatLng(event as unknown as MouseEvent);
-      const modality = activation.pointerType;
       backgroundCompatibilityRef.current = {
         activationId: activation.activationId,
-        modality,
+        modality: activation.pointerType,
         pointerId: event.pointerId,
         at: Date.now(),
       };
@@ -330,7 +307,6 @@ export function MapSelectionLayer({
         target,
         { lat: latlng.lat, lng: latlng.lng },
         activation.activationId,
-        modality,
       );
     };
 
@@ -374,9 +350,6 @@ export function MapSelectionLayer({
         target,
         { lat: latlng.lat, lng: latlng.lng },
         activationId,
-        pointerEvent.pointerType === "touch" || pointerEvent.pointerType === "pen"
-          ? pointerEvent.pointerType
-          : "mouse",
       );
     };
 

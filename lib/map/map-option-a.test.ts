@@ -85,17 +85,12 @@ test("marker popup lifecycle is viewport-independent and controller-owned", asyn
   assert.match(selectionSource, /shouldHandleMapSelectionEscape\(event\)/);
 });
 
-test("browser map contract covers touch tablet controls and exact keyboard marker restoration", async () => {
-  const browserSource = await readFile(
-    new URL("../../e2e/map-broad-route-popup.spec.ts", import.meta.url),
-    "utf8",
-  );
+test("marker focus and popup controls keep stable DOM contracts", async () => {
+  const markerSource = await readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
+  const popupSource = await readFile(new URL("../../components/map/map-marker-popup-shell.tsx", import.meta.url), "utf8");
 
-  assert.match(browserSource, /TOUCH_WIDTHS = new Set\(\[320, 390, 412, 768, 1024\]\)/);
-  assert.match(browserSource, /test\.describe\(`touch[\s\S]{0,2600}await assertVisibleMapControls\(page\)/);
-  assert.match(browserSource, /const markerId = await marker\.getAttribute\("data-map-item-id"\)/);
-  assert.match(browserSource, /locator\(`\[data-map-item-id="\$\{markerId\}"\]`\)/);
-  assert.match(browserSource, /data-map-popup-first-control='true'[\s\S]{0,160}toBeFocused/);
+  assert.match(markerSource, /element\.dataset\.mapItemId = item\.id/);
+  assert.match(popupSource, /data-map-popup-first-control="true"/);
 });
 
 test("navigation closes a popup only after the runtime accepts its intent", async () => {

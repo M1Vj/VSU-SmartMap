@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleMarker, Polyline, useMap } from "@/components/map/leaflet-react";
+import { useEffect, useMemo } from "react";
+import { CircleMarker, Polyline } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
-import type { LatLng, PathOptions, Polyline as LeafletPolyline } from "leaflet";
+import type { LatLng, PathOptions } from "leaflet";
 import { getDistance, isNodeClosed, calculateTime } from "@/lib/pathfinding/astar";
 import { getExternalPath } from "@/lib/pathfinding/external";
 import {
@@ -21,17 +21,9 @@ import type { MapEdge, MapNode, PathResult, TransportMode } from "@/lib/types/gr
 import {
   createRouteEngine,
   findPreparedNearestEdge,
-  getRouteGraphRevision,
   isPreparedNodeNavigable,
 } from "@/lib/pathfinding/route-engine";
 import type { NavigationOrigin, NavigationPoint } from "@/lib/map/map-runtime";
-import {
-  establishMapEvidenceCorrelation,
-  registerRouteForEvidence,
-  recordMapEvidenceEvent,
-  throwIfMapEvidenceRouteFailureRequested,
-  waitForMapEvidenceRouteDelay,
-} from "@/lib/map/e2e-probe-bridge";
 
 export interface NavigationRequestMetadata {
   destinationId: string | undefined;
@@ -105,13 +97,6 @@ export function NavigationLayer({
   navigationOrigin = null,
   reuseCommittedRoute = false,
 }: NavigationLayerProps) {
-  const map = useMap();
-  const routePolylineRef = useRef<LeafletPolyline>(null);
-  const [readyRoutePolyline, setReadyRoutePolyline] = useState<LeafletPolyline | null>(null);
-  const handleRoutePolylineReady = useCallback((polyline: LeafletPolyline | null) => {
-    routePolylineRef.current = polyline;
-    setReadyRoutePolyline(polyline);
-  }, []);
   const routeEngine = useMemo(() => createRouteEngine(), []);
   const requestMetadata = useMemo<NavigationRequestMetadata>(() => ({
     destinationId,
@@ -126,7 +111,6 @@ export function NavigationLayer({
         clear: () => undefined,
         publish: (result, requestId) => {
           if (requestId !== undefined) {
-            recordMapEvidenceEvent("navigation-feedback", requestId);
             onRouteCommitted?.(result, requestId, requestMetadata);
           }
         },
@@ -140,19 +124,15 @@ export function NavigationLayer({
           const message = error instanceof Error ? error.message : "No route found. External routing may be unavailable.";
           console.error("NavigationLayer: Process error", error);
           if (requestId !== undefined) {
-            recordMapEvidenceEvent("navigation-feedback", requestId);
             onRouteFailed?.(message, requestId);
           }
         },
         requestStarted: (requestId) => {
-          establishMapEvidenceCorrelation(navigationSessionId, requestId);
-          recordMapEvidenceEvent("route-request", requestId);
           onRouteRequestStarted?.(requestId, requestMetadata);
         },
       }),
     [
       requestMetadata,
-      navigationSessionId,
       onRouteCommitted,
       onRouteFailed,
       onRouteRequestStarted,
@@ -160,7 +140,7 @@ export function NavigationLayer({
   );
 
   useEffect(() => {
-    routeEngine.setGraph(nodes, edges, getRouteGraphRevision(nodes, edges));
+    routeEngine.setGraph(nodes, edges);
   }, [edges, nodes, routeEngine]);
 
   useEffect(() => {
@@ -329,8 +309,6 @@ export function NavigationLayer({
     };
 
     const resolveRoute = async (signal: AbortSignal): Promise<PathResult> => {
-      await waitForMapEvidenceRouteDelay(signal);
-      throwIfMapEvidenceRouteFailureRequested(signal);
       const start = { lat: startPoint.lat, lng: startPoint.lng };
       const end = { lat: endPoint.lat, lng: endPoint.lng };
       return resolveNavigationRoute({
@@ -372,13 +350,6 @@ export function NavigationLayer({
     [committedRoute?.path],
   );
 
-  useEffect(() => {
-    const path = committedRoute?.path;
-    const polyline = readyRoutePolyline;
-    if (!path || !polyline) return;
-    return registerRouteForEvidence({ map, polyline, path });
-  }, [committedRoute?.path, map, readyRoutePolyline]);
-
   if (!committedRoute) return null;
   const routeEndpoints = getRenderableRouteEndpoints(committedRoute.path);
   if (!routeEndpoints) return null;
@@ -386,8 +357,6 @@ export function NavigationLayer({
   return (
     <>
       <Polyline
-        ref={routePolylineRef}
-        onReady={handleRoutePolylineReady}
         positions={routePositions}
         pathOptions={ROUTE_PATH_OPTIONS}
       />

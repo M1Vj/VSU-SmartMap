@@ -19,7 +19,6 @@ export function createInteractionGateway(options: {
   onBackground?: (point?: { lat: number; lng: number }) => void;
 }) {
   const seenActivationIds = new Set<string>();
-  const activePointerIds = new Set<number>();
   const remember = (id: string) => {
     seenActivationIds.add(id);
     if (seenActivationIds.size > 128) {
@@ -45,13 +44,5 @@ export function createInteractionGateway(options: {
 
   return {
     dispatch,
-    pointerDown(pointerId: number) {
-      activePointerIds.add(pointerId);
-    },
-    pointerUp(pointerId: number, itemId: string, activationId: string, modality: MarkerActivation["modality"]) {
-      if (!activePointerIds.has(pointerId)) return;
-      activePointerIds.delete(pointerId);
-      dispatch({ type: "marker", itemId, activationId, modality });
-    },
   };
 }

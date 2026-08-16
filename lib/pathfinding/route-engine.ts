@@ -230,8 +230,7 @@ export function findPreparedPath(
 export function createRouteEngine() {
   let prepared: PreparedRouteGraph | null = null;
   return {
-    setGraph(nodes: readonly MapNode[], edges: readonly MapEdge[], _callerRevision?: string): boolean {
-      void _callerRevision;
+    setGraph(nodes: readonly MapNode[], edges: readonly MapEdge[]): boolean {
       const revision = getRouteGraphRevision(nodes, edges);
       if (prepared?.revision === revision) return false;
       prepared = prepareRouteGraph(nodes, edges, revision);

@@ -82,10 +82,8 @@ test("popup selection and changed search never own committed-route clearing", as
 
 test("route adapter allocates fresh IDs for calculations and forwards metadata", async () => {
   const source = await readFile(new URL("../../components/map/navigation-layer.tsx", import.meta.url), "utf8");
-  assert.match(
-    source,
-    /requestStarted: \(requestId\) => \{\s*establishMapEvidenceCorrelation\(navigationSessionId, requestId\);\s*recordMapEvidenceEvent\("route-request", requestId\);\s*onRouteRequestStarted\?\.\(requestId, requestMetadata\);\s*\}/,
-  );
+  assert.match(source, /requestStarted: \(requestId\) => \{\s*onRouteRequestStarted\?\.\(requestId, requestMetadata\);\s*\}/);
+  assert.doesNotMatch(source, /e2e-probe|MapEvidence/);
   assert.match(source, /onRouteRequestStarted\?\.\(requestId, requestMetadata\)/);
   assert.doesNotMatch(source, /resolve: resolveRoute,[\s\S]{0,120}requestId: navigationSessionId/);
   assert.doesNotMatch(source, /let requestSignal/);

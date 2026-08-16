@@ -5,7 +5,6 @@ import "@maplibre/maplibre-gl-leaflet";
 import L from "leaflet";
 import {
   MapContainer,
-  MapEvidenceLifecycle,
   TileLayer,
   ZoomControl,
   useMap,
@@ -18,7 +17,6 @@ import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/
 import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
-import { registerMapLibreForEvidence } from "@/lib/map/e2e-probe-bridge";
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
@@ -66,7 +64,6 @@ function OpenFreeMapVectorLayer({
     layer.addTo(map);
     const mapLibreMap = layer.getMaplibreMap();
     mapLibreMapRef.current = mapLibreMap;
-    const unregisterMapLibreEvidence = registerMapLibreForEvidence(mapLibreMap);
     const customizeVectorLayer = () => {
       hideNonPlaceTextLabels(mapLibreMap);
       add3dBuildingsLayer(mapLibreMap);
@@ -81,7 +78,6 @@ function OpenFreeMapVectorLayer({
     return () => {
       mapLibreMap.off("load", customizeVectorLayer);
       if (mapLibreMapRef.current === mapLibreMap) mapLibreMapRef.current = null;
-      unregisterMapLibreEvidence();
       layer.remove();
     };
   }, [map, mapLibreMapRef, styleUrl]);
@@ -267,7 +263,6 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         maxBoundsViscosity={1}
         className={className ?? "h-full w-full"}
       >
-        <MapEvidenceLifecycle />
         {mapStyle === "satellite" ? (
           satelliteFallbackActive ? (
             <TileLayer

@@ -33,10 +33,6 @@ import {
 } from "@/lib/map/pointer-activation";
 import { markMapPerformance } from "@/lib/map/performance-marks";
 import {
-  recordMapEvidenceEvent,
-  registerDestinationMarkerForEvidence,
-} from "@/lib/map/e2e-probe-bridge";
-import {
   computePopupAutoPanPadding,
   DEFAULT_POPUP_AUTO_PAN_PADDING,
   resetPopupAutoPanPaddingIfNeeded,
@@ -127,7 +123,6 @@ export const MapMarker = memo(function MapMarker({
   const selectedRef = useRef(isSelected);
   selectedRef.current = isSelected;
   const lastActivationModalityRef = useRef<MarkerPopupModality>("mouse");
-  const lastActivationIdRef = useRef<string | undefined>(undefined);
   const popupOpenFrameRef = useRef<number | null>(null);
   const popupOpenGenerationRef = useRef(0);
   const popupFocusFrameRef = useRef<number | null>(null);
@@ -193,13 +188,6 @@ export const MapMarker = memo(function MapMarker({
       },
       restoreMarkerFocus: requestMarkerRestoreFocus,
     });
-    if (closed && reason !== "action") {
-      recordMapEvidenceEvent(
-        "popup-close",
-        lastActivationIdRef.current,
-        lastActivationModalityRef.current,
-      );
-    }
     return closed;
   }, [cancelMarkerRestoreFocus, cancelPopupFocus, cancelPopupOpen, onDeselect, popupLifecycle, requestMarkerRestoreFocus]);
 
@@ -258,46 +246,14 @@ export const MapMarker = memo(function MapMarker({
     }
   }, [cancelPopupOpen, closePopup, isSelected, onMarkerTapOverride, popupLifecycle, requestPopupOpen]);
 
-  const destinationEvidenceRegistration = useMemo(() => {
-    if (!isRouteDestination) return null;
-    const iconAnchor = icon.options.iconAnchor;
-    const iconSize = icon.options.iconSize;
-    if (!iconAnchor || !iconSize) return null;
-    const [anchorX, anchorY] = Array.isArray(iconAnchor)
-      ? iconAnchor
-      : [iconAnchor.x, iconAnchor.y];
-    const [sizeX, sizeY] = Array.isArray(iconSize)
-      ? iconSize
-      : [iconSize.x, iconSize.y];
-    if (![anchorX, anchorY, sizeX, sizeY].every((value) => typeof value === "number" && Number.isFinite(value))) {
-      return null;
-    }
-    return {
-      coordinate: item.coordinates,
-      iconAnchor: [anchorX, anchorY] as const,
-      iconSize: [sizeX, sizeY] as const,
-    };
-  }, [icon, isRouteDestination, item.coordinates]);
-
-  useEffect(() => {
-    if (!readyMarker || !destinationEvidenceRegistration) return;
-    return registerDestinationMarkerForEvidence({ marker: readyMarker, ...destinationEvidenceRegistration });
-  }, [destinationEvidenceRegistration, readyMarker]);
-
   useEffect(() => {
     const element = readyMarker?.getElement();
     if (!element) return;
-    const evidenceKind = item.kind === "boarding_house" ? "boarding" : "facility";
     element.dataset.mapItemId = item.id;
-    element.dataset.mapItemKind = evidenceKind;
-    if (isRouteDestination) element.dataset.mapRouteDestination = "true";
-    else delete element.dataset.mapRouteDestination;
     return () => {
       if (element.dataset.mapItemId === item.id) delete element.dataset.mapItemId;
-      if (element.dataset.mapItemKind === evidenceKind) delete element.dataset.mapItemKind;
-      if (element.dataset.mapRouteDestination === "true") delete element.dataset.mapRouteDestination;
     };
-  }, [isRouteDestination, item.id, item.kind, readyMarker]);
+  }, [item.id, readyMarker]);
 
   useEffect(() => {
     if (hideTooltip) {
@@ -499,7 +455,6 @@ export const MapMarker = memo(function MapMarker({
       }
       const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
       const activationId = activation.activationId;
-      lastActivationIdRef.current = activationId;
       compatibilityActivationRef.current = { activationId, modality, pointerId: event.pointerId, at: Date.now() };
       const startedAt = markerPerformanceStartedAtRef.current ?? (
         typeof performance === "undefined" ? Date.now() : performance.now()
@@ -548,9 +503,7 @@ export const MapMarker = memo(function MapMarker({
   }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride, requestPopupOpen]);
 
   const handleDetails = useCallback(() => {
-    if (!closePopup("action")) return false;
-    recordMapEvidenceEvent("details", lastActivationIdRef.current, lastActivationModalityRef.current);
-    return true;
+    return closePopup("action");
   }, [closePopup]);
 
   const handleViewDetails = useCallback(() => {
@@ -559,19 +512,15 @@ export const MapMarker = memo(function MapMarker({
   }, [handleDetails, setFacilitySheetOpen]);
 
   const handleDirections = useCallback(() => {
-    const requestId = popupLifecycle.navigate(
+    return popupLifecycle.navigate(
       () => {
-        const requestId = onDirections?.(item);
-        return typeof requestId === "number" ? requestId : null;
+        const nextRequestId = onDirections?.(item);
+        return typeof nextRequestId === "number" ? nextRequestId : null;
       },
       {
         closePopup: () => markerRef.current?.closePopup(),
       },
     );
-    if (typeof requestId === "number") {
-      recordMapEvidenceEvent("navigate", requestId, lastActivationModalityRef.current);
-    }
-    return requestId;
   }, [item, onDirections, popupLifecycle]);
 
   const accessibleName =
@@ -623,7 +572,6 @@ export const MapMarker = memo(function MapMarker({
           compatibilityActivationRef.current = null;
           const activationId = compatibility?.activationId ?? `${item.id}:mouse:${original?.pointerId ?? "mouse"}:${original?.timeStamp ?? Date.now()}`;
           const modality = compatibility?.modality ?? (original?.pointerType === "touch" || original?.pointerType === "pen" ? original.pointerType : "mouse");
-          lastActivationIdRef.current = activationId;
           lastActivationModalityRef.current = modality;
           if (isSelected) requestPopupOpen(true);
           onMarkerActivate?.(item, activationId, modality);
@@ -641,7 +589,6 @@ export const MapMarker = memo(function MapMarker({
             original?.preventDefault();
             markerRef.current?.closeTooltip();
             const activationId = `${item.id}:keyboard:${original?.timeStamp ?? Date.now()}`;
-            lastActivationIdRef.current = activationId;
             lastActivationModalityRef.current = "keyboard";
             if (isSelected) requestPopupOpen(true);
             compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
@@ -673,11 +620,6 @@ export const MapMarker = memo(function MapMarker({
             markerRef.current?.closePopup();
             return;
           }
-          recordMapEvidenceEvent(
-            "popup-open",
-            lastActivationIdRef.current,
-            lastActivationModalityRef.current,
-          );
           popupLifecycle.opened(lastActivationModalityRef.current, () => {
             cancelPopupFocus();
             const focusFirstControl = () => {

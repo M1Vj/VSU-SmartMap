@@ -30,16 +30,6 @@ test("keyboard marker activation is not consumed by the map background", () => {
   assert.deepEqual(cleared, [1]);
 });
 
-test("pointer gateway treats mouse, touch, and pen compatibility activation as one pointer", () => {
-  const selected: string[] = [];
-  const gateway = createInteractionGateway({ onMarkerActivate: (id) => selected.push(id) });
-  gateway.pointerDown(4);
-  gateway.pointerUp(4, "facility-3", "pointer-4", "touch");
-  gateway.dispatch({ type: "marker", itemId: "facility-3", activationId: "pointer-4", modality: "mouse" });
-  gateway.dispatch({ type: "marker", itemId: "facility-3", activationId: "pointer-4", modality: "pen" });
-  assert.deepEqual(selected, ["facility-3"]);
-});
-
 test("manual-start touch placement and its compatibility click share one background activation", () => {
   const placements: Array<{ lat: number; lng: number }> = [];
   const cleared: number[] = [];

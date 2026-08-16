@@ -27,10 +27,6 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  initializeMapEvidence,
-  registerLeafletMapForEvidence,
-} from "@/lib/map/e2e-probe-bridge";
 
 const MapContext = createContext<L.Map | null>(null);
 const LayerContext = createContext<L.Layer | null>(null);
@@ -79,19 +75,6 @@ export function useMap(): L.Map {
   const map = useContext(MapContext);
   if (!map) throw new Error("Leaflet map components must be rendered inside MapContainer.");
   return map;
-}
-
-export function MapEvidenceLifecycle() {
-  const map = useMap();
-
-  useEffect(() => {
-    const url = typeof window === "undefined" ? "" : window.location.href;
-    return initializeMapEvidence(url);
-  }, []);
-
-  useEffect(() => registerLeafletMapForEvidence(map), [map]);
-
-  return null;
 }
 
 type ZoomControlProps = {

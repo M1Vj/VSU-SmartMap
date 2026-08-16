@@ -28,8 +28,8 @@ test("prepared graph indexes identifiers and adjacency once per revision", async
   assert.equal(prepared.revision, "graph-1");
 
   const engine = createRouteEngine();
-  assert.equal(engine.setGraph(nodes, edges, "graph-1"), true);
-  assert.equal(engine.setGraph(nodes, edges, "graph-1"), false);
+  assert.equal(engine.setGraph(nodes, edges), true);
+  assert.equal(engine.setGraph(nodes, edges), false);
   const result = await engine.route({ startNodeId: "a", endNodeId: "c", mode: "walking" });
   assert.equal(result?.path.map((node) => node.id).join(">"), "a>b>c");
 });
@@ -53,7 +53,7 @@ test("prepared destination snapping preserves directed-edge navigability", () =>
 
 test("route requests honour cancellation before committing work", async () => {
   const engine = createRouteEngine();
-  engine.setGraph(nodes, edges, "graph-1");
+  engine.setGraph(nodes, edges);
   const controller = new AbortController();
   controller.abort();
 
@@ -65,12 +65,11 @@ test("route requests honour cancellation before committing work", async () => {
 
 test("route requests keep the graph snapshot captured before an async yield", async () => {
   const engine = createRouteEngine();
-  engine.setGraph(nodes, edges, "graph-old");
+  engine.setGraph(nodes, edges);
   const pending = engine.route({ startNodeId: "a", endNodeId: "c", mode: "walking" });
   engine.setGraph(
     nodes,
     [{ id: "ac", source_id: "a", target_id: "c", weight: 1, bidirectional: true, type: "walkway" }],
-    "graph-new",
   );
 
   const result = await pending;
@@ -111,14 +110,13 @@ test("authoritative graph content revision invalidates coordinate, edge, and clo
   );
 });
 
-test("route engine does not trust a stale caller revision", () => {
+test("route engine invalidates graphs from canonical content", () => {
   const engine = createRouteEngine();
-  assert.equal(engine.setGraph(nodes, edges, "caller-revision"), true);
+  assert.equal(engine.setGraph(nodes, edges), true);
   assert.equal(
     engine.setGraph(
       [{ ...nodes[0], lat: nodes[0].lat + 0.01 }, ...nodes.slice(1)],
       edges,
-      "caller-revision",
     ),
     true,
   );
