@@ -293,6 +293,7 @@ export default function EditorMapContent({
         key={tiles.url}
         attribution={tiles.attribution}
         url={tiles.url}
+        crossOrigin="anonymous"
         maxZoom={MAP_MAX_ZOOM}
         maxNativeZoom={tiles.maxNativeZoom}
       />

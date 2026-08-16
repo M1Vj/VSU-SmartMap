@@ -126,6 +126,7 @@ export function LocationPickerMap({
           key={tiles.url}
           attribution={tiles.attribution}
           url={tiles.url}
+          crossOrigin="anonymous"
           maxZoom={MAP_MAX_ZOOM}
           maxNativeZoom={tiles.maxNativeZoom}
         />
@@ -133,11 +134,13 @@ export function LocationPickerMap({
           <>
             <TileLayer
               url={MAP_TILES.satelliteTransportUrl}
+              crossOrigin="anonymous"
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={tiles.maxNativeZoom}
             />
             <TileLayer
               url={MAP_TILES.satelliteLabelsUrl}
+              crossOrigin="anonymous"
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={tiles.maxNativeZoom}
             />

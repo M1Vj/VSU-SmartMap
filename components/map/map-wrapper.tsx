@@ -269,6 +269,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
               key="satellite-raster-fallback"
               attribution={MAP_TILES.satelliteFallbackAttribution}
               url={MAP_TILES.satelliteFallbackUrl}
+              crossOrigin="anonymous"
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
               updateWhenIdle={false}
@@ -279,6 +280,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
                 key={MAP_TILES.satelliteUrl}
                 attribution={MAP_TILES.satelliteAttribution}
                 url={MAP_TILES.satelliteUrl}
+                crossOrigin="anonymous"
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
                 updateWhenIdle={false}
@@ -286,12 +288,14 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
               />
               <TileLayer
                 url={MAP_TILES.satelliteTransportUrl}
+                crossOrigin="anonymous"
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
                 updateWhenIdle={false}
               />
               <TileLayer
                 url={MAP_TILES.satelliteLabelsUrl}
+                crossOrigin="anonymous"
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
                 updateWhenIdle={false}

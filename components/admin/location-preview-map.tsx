@@ -57,6 +57,7 @@ export function LocationPreviewMap({ coordinates }: LocationPreviewMapProps) {
           key={tiles.url}
           attribution={tiles.attribution}
           url={tiles.url}
+          crossOrigin="anonymous"
           maxZoom={MAP_MAX_ZOOM}
           maxNativeZoom={tiles.maxNativeZoom}
         />
@@ -64,11 +65,13 @@ export function LocationPreviewMap({ coordinates }: LocationPreviewMapProps) {
           <>
             <TileLayer
               url={MAP_TILES.satelliteTransportUrl}
+              crossOrigin="anonymous"
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={tiles.maxNativeZoom}
             />
             <TileLayer
               url={MAP_TILES.satelliteLabelsUrl}
+              crossOrigin="anonymous"
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={tiles.maxNativeZoom}
             />

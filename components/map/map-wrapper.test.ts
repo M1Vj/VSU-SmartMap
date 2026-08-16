@@ -96,3 +96,20 @@ test("the map keeps the vector mirror and tile layers current during live map mo
   assert.match(source, /resize:\s*\(\) => mapLibreMapRef\.current\?\.resize\(\)/);
   assert.match(source, /updateWhenIdle=\{false\}/);
 });
+
+test("all Leaflet raster tile layers request CORS-readable responses", async () => {
+  const sources = await Promise.all([
+    readMapWrapperSource(),
+    readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../admin/location-preview-map.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../admin/navigation/editor-map-content.tsx", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of sources) {
+    const tileLayers = source.match(/<TileLayer\b[\s\S]*?\/>/g) ?? [];
+    assert.ok(tileLayers.length > 0);
+    for (const tileLayer of tileLayers) {
+      assert.match(tileLayer, /crossOrigin="anonymous"/);
+    }
+  }
+});
