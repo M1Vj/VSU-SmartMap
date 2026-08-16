@@ -15,6 +15,7 @@ export interface RouteEndpoint {
 export const ROUTE_ENDPOINT_SNAP_TOLERANCE_METERS = 100;
 
 const MIN_ROUTE_SPAN_METERS = 1;
+const ENDPOINT_ASSIGNMENT_EPSILON_METERS = 1e-6;
 
 function isFiniteCoordinate(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
@@ -90,12 +91,26 @@ export function isValidPathResultForEndpoints(
     return false;
   }
 
+  if (
+    getDistance(expectedStart.lat, expectedStart.lng, expectedEnd.lat, expectedEnd.lng) <
+    MIN_ROUTE_SPAN_METERS
+  ) {
+    return false;
+  }
+
   const first = value.path[0];
   const last = value.path[value.path.length - 1];
-  if (
-    getDistance(first.lat, first.lng, expectedStart.lat, expectedStart.lng) > toleranceMeters ||
-    getDistance(last.lat, last.lng, expectedEnd.lat, expectedEnd.lng) > toleranceMeters
-  ) {
+  const firstToStart = getDistance(first.lat, first.lng, expectedStart.lat, expectedStart.lng);
+  const lastToEnd = getDistance(last.lat, last.lng, expectedEnd.lat, expectedEnd.lng);
+  if (firstToStart > toleranceMeters || lastToEnd > toleranceMeters) {
+    return false;
+  }
+
+  const forwardAssignment = firstToStart + lastToEnd;
+  const reverseAssignment =
+    getDistance(first.lat, first.lng, expectedEnd.lat, expectedEnd.lng) +
+    getDistance(last.lat, last.lng, expectedStart.lat, expectedStart.lng);
+  if (forwardAssignment + ENDPOINT_ASSIGNMENT_EPSILON_METERS >= reverseAssignment) {
     return false;
   }
 
