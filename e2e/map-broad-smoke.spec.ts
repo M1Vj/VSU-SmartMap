@@ -30,22 +30,15 @@ test.describe("Broad map interaction smoke", () => {
     }
   });
 
-  test.beforeEach(async ({ page }) => {
+  test("keeps controls, individual dots, and map interactions working in one session", async ({ page }) => {
     await page.setViewportSize(mobileViewport);
-  });
-
-  test("loads native controls and individual marker dots", async ({ page }) => {
     await openMap(page);
 
     await expect(page.locator(".leaflet-control-zoom-in")).toBeVisible();
     await expect(page.locator(".leaflet-control-zoom-out")).toBeVisible();
-    await expect(await firstMarker(page)).toBeVisible();
-  });
-
-  test("a physical drag updates marker positions without a zoom gesture", async ({ page }) => {
-    await openMap(page);
-
     const marker = await firstMarker(page);
+    await expect(marker).toBeVisible();
+
     const before = await markerCenter(page, marker);
     const map = page.locator(".leaflet-container");
     const mapBox = await map.boundingBox();
@@ -59,31 +52,20 @@ test.describe("Broad map interaction smoke", () => {
 
     const after = await markerCenter(page, marker);
     expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(20);
-  });
 
-  test("a real wheel gesture updates the Leaflet camera and keeps marker layers visible", async ({ page }) => {
-    await openMap(page);
-
-    const marker = await firstMarker(page);
-    const before = await markerCenter(page, marker);
-    const map = page.locator(".leaflet-container");
+    const beforeWheel = await markerCenter(page, marker);
     await map.hover();
     await page.mouse.wheel(0, -180);
 
     await expect.poll(
       async () => {
-        const after = await markerCenter(page, marker);
-        return Math.hypot(after.x - before.x, after.y - before.y);
+        const afterWheel = await markerCenter(page, marker);
+        return Math.hypot(afterWheel.x - beforeWheel.x, afterWheel.y - beforeWheel.y);
       },
       { timeout: 3_000 },
     ).toBeGreaterThan(2);
     await expect(page.locator(".leaflet-marker-icon[data-map-item-id]").first()).toBeVisible();
-  });
 
-  test("one marker tap opens an anchored quick-action popup", async ({ page }) => {
-    await openMap(page);
-
-    const marker = await firstMarker(page);
     await marker.click();
     const popup = page.locator('[data-map-control="marker-popup"]');
     await expect(popup).toBeVisible();
