@@ -35,11 +35,10 @@ export type SpreadCoLocatedItem<T extends DeclutterableItem> = {
 };
 
 /**
- * Display-only radial fan-out for markers that OVERLAP ON SCREEN at the given
- * zoom bucket. Grouping distance is derived from pixels (pin width), not fixed
- * meters, so buildings a few meters apart — which stack completely at campus
- * zoom levels — separate too. True coordinates are preserved for routing,
- * deep links, and flyTo.
+ * Display-only radial fan-out for markers that overlap on screen at the given
+ * zoom bucket. Overview markers stay at their source coordinates so every dot
+ * remains individually selectable. True coordinates are preserved for
+ * routing, deep links, and flyTo.
  */
 export function spreadCoLocatedItems<T extends DeclutterableItem>(
   items: readonly T[],
@@ -53,6 +52,8 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
   }));
 
   const zoomBucket = Math.floor(zoom);
+  if (zoomBucket < FAN_OUT_MIN_ZOOM) return output;
+
   const protectedIds = options.protectedIds ?? EMPTY_PROTECTED_IDS;
   const lat = averageLatitude(items);
   const overlapDegrees = getPixelsAsDegrees(
@@ -72,21 +73,6 @@ export function spreadCoLocatedItems<T extends DeclutterableItem>(
 
   for (const group of groups) {
     const declutterableMembers = group.filter(({ item }) => !protectedIds.has(item.id));
-
-    if (zoomBucket < FAN_OUT_MIN_ZOOM) {
-      if (declutterableMembers.length < 2) {
-        continue;
-      }
-
-      const centroid = getCentroid(declutterableMembers.map(({ item }) => item.coordinates));
-      for (const member of declutterableMembers) {
-        output[member.index] = {
-          ...output[member.index],
-          displayCoordinates: centroid,
-        };
-      }
-      continue;
-    }
 
     if (declutterableMembers.length < 2) {
       continue;

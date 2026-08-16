@@ -3,12 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 const baseUrl = process.env.MAP_E2E_BASE_URL;
 const mobileViewport = { width: 390, height: 844 };
 
-function skipWithoutBaseUrl() {
-  test.skip(!baseUrl, "MAP_E2E_BASE_URL is not configured");
-}
-
 async function openMap(page: Page) {
-  skipWithoutBaseUrl();
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".leaflet-control-zoom")).toBeVisible({ timeout: 15_000 });
@@ -16,12 +11,9 @@ async function openMap(page: Page) {
 
 async function firstMarker(page: Page) {
   const markers = page.locator(".leaflet-marker-icon[data-map-item-id]");
-  try {
-    await expect.poll(() => markers.count(), { timeout: 15_000 }).toBeGreaterThan(0);
-  } catch {
-    test.skip(true, "map item fixtures are unavailable on this runtime");
-    throw new Error("map item fixtures are unavailable on this runtime");
-  }
+  await expect
+    .poll(() => markers.count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
   return markers.first();
 }
 
@@ -32,6 +24,12 @@ async function markerCenter(page: Page, marker: ReturnType<Page["locator"]>) {
 }
 
 test.describe("Broad map interaction smoke", () => {
+  test.beforeAll(() => {
+    if (!baseUrl) {
+      throw new Error("MAP_E2E_BASE_URL must point to a running Broad map deployment");
+    }
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(mobileViewport);
   });

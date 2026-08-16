@@ -86,17 +86,19 @@ test("preserves the original item coordinates", () => {
   assert.deepEqual(source[1].coordinates, { lat: 10.745000001, lng: 124.792000001 });
 });
 
-test("keeps co-located groups at their centroid below fan-out zoom", () => {
+test("keeps exact co-located items as separate source-coordinate entries below fan-out zoom", () => {
   const source = [
     item("department", 10.745, 124.792),
-    item("college", 10.745000001, 124.792000001),
+    item("college", 10.745, 124.792),
   ];
 
   const spread = spreadCoLocatedItems(source, 15);
 
-  assert.deepEqual(spread[0].displayCoordinates, spread[1].displayCoordinates);
-  assert.equal(spread[0].displayCoordinates.lat, 10.7450000005);
-  assert.equal(spread[0].displayCoordinates.lng, 124.7920000005);
+  assert.equal(spread.length, source.length);
+  assert.deepEqual(
+    spread.map(({ displayCoordinates }) => displayCoordinates),
+    source.map(({ coordinates }) => coordinates),
+  );
 });
 
 test("keeps one stable render entry per source item below fan-out zoom", () => {
@@ -199,10 +201,9 @@ test("never groups separate buildings into a detached ring", () => {
   assert.deepEqual(spread[2].displayCoordinates, source[2].coordinates);
 });
 
-test("dot zoom keeps merging nearby buildings into one centroid dot", () => {
-  // Regression: the anti-ring 12m cap must not apply below fan-out zoom —
-  // zoomed out, overlapping dots should still consolidate to a centroid,
-  // then separate to their true spots once pins return at zoom 16.
+test("overview keeps nearby buildings at distinct source coordinates", () => {
+  // Overview keeps every item individually selectable at its true source
+  // coordinate; fan-out is only used once pins return at zoom 16.
   const source = [
     item("building-a", 10.745, 124.792),
     item("building-b", 10.745, 124.79235),
@@ -210,12 +211,10 @@ test("dot zoom keeps merging nearby buildings into one centroid dot", () => {
   ];
 
   const atDotZoom = spreadCoLocatedItems(source, 15);
-  const distinct = new Set(
-    atDotZoom.map(({ displayCoordinates }) =>
-      `${displayCoordinates.lat.toFixed(8)},${displayCoordinates.lng.toFixed(8)}`,
-    ),
+  assert.deepEqual(
+    atDotZoom.map(({ displayCoordinates }) => displayCoordinates),
+    source.map(({ coordinates }) => coordinates),
   );
-  assert.equal(distinct.size, 1);
 
   const atPinZoom = spreadCoLocatedItems(source, 16);
   assert.deepEqual(atPinZoom[0].displayCoordinates, source[0].coordinates);
