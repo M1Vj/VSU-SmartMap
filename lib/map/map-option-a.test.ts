@@ -11,7 +11,10 @@ test("Option A keeps status and actions clear of the anchored popup surface", as
   assert.match(pageSource, /data-map-action-dock/);
   assert.doesNotMatch(pageSource, /MapBottomCard|mapBottomCardHeight|--map-mini-card-height/);
   assert.doesNotMatch(pageSource, /onHeightChange=\{setMapBottomCardHeight\}/);
-  assert.match(pageSource, /left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.doesNotMatch(
+    pageSource,
+    /className="left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]"/,
+  );
   assert.match(pageSource, /pointer-events-none fixed inset-x-0 bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\]/);
   const statusStart = pageSource.indexOf("data-map-status-hud");
   const actionStart = pageSource.indexOf("data-map-action-dock");
