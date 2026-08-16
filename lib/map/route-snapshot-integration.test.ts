@@ -16,7 +16,6 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /shouldRestoreCommittedRouteForSelectedItem\([\s\S]{0,500}restoreCommittedRoute\(\)/);
   assert.match(source, /onSelect=\{\(item\) => \{[\s\S]{0,700}restoreCommittedRoute\(item\.id\)/);
   assert.match(source, /type: "navigation\/restored"/);
-  assert.match(source, /clearMapPerformanceRequest\(pendingRequestId\)/);
   assert.match(source, /const restored = runtime\.dispatch\([\s\S]{0,260}if \(restored === current\) return false;/);
   assert.match(source, /setNavStart\(\s*committed\.start/);
   assert.match(source, /setNavEnd\(\s*committed\.end/);
@@ -127,9 +126,6 @@ test("route request identity stays coordinator-owned after calculation starts", 
   assert.match(coordinatorSource, /requestId: options\.requestId \?\? \+\+nextRequestId/);
   assert.match(coordinatorSource, /callbacks\.requestStarted\?\.\(request\.requestId\)/);
   assert.match(pageSource, /type: "navigation\/requested"[\s\S]{0,260}requestId/);
-  assert.match(pageSource, /beginMapPerformanceRequest\(\s*requestId/);
-  assert.match(pageSource, /commitMapPerformanceRequest\(requestId\)/);
-  assert.match(pageSource, /failMapPerformanceRequest\(requestId\)/);
 });
 
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {
@@ -139,13 +135,6 @@ test("selection gateway keeps its seen activation set across parent rerenders", 
   assert.match(source, /interactionCallbacksRef/);
   assert.match(source, /const \[interactionGateway\] = useState\(/);
   assert.match(source, /createInteractionGateway/);
-});
-
-test("map-ready timing starts at Leaflet readiness and ends after a rendered frame", async () => {
-  const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
-  assert.match(source, /map\.whenReady\(/);
-  assert.match(source, /requestAnimationFrame\(/);
-  assert.match(source, /cancelAnimationFrame\(/);
 });
 
 test("background map interaction has one pointer/compatibility gateway", async () => {

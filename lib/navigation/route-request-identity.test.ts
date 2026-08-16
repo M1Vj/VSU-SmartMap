@@ -2,12 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PathResult } from "@/lib/types/graph";
 import {
-  beginMapPerformanceRequest,
-  clearMapPerformanceEvents,
-  commitMapPerformanceRequest,
-  getMapPerformanceEvents,
-} from "@/lib/map/performance-marks";
-import {
   createInitialMapRuntimeState,
   mapRuntimeReducer,
   type MapRuntimeState,
@@ -23,8 +17,7 @@ const route: PathResult = {
   estimatedTime: 2,
 };
 
-test("coordinator request identity is propagated to runtime, stale guards, and perf marks", async () => {
-  clearMapPerformanceEvents();
+test("coordinator request identity is propagated to runtime and stale guards", async () => {
   const state = { current: createInitialMapRuntimeState() };
   state.current = mapRuntimeReducer(state.current, {
     type: "navigation/requested",
@@ -53,7 +46,6 @@ test("coordinator request identity is propagated to runtime, stale guards, and p
         requestId,
         route: result,
       });
-      commitMapPerformanceRequest(requestId, 25);
     },
     loading: () => undefined,
     success: (_message, toastId) => { successToastIds.push(toastId); },
@@ -72,7 +64,6 @@ test("coordinator request identity is propagated to runtime, stale guards, and p
           start: { lat: 10, lng: 10 },
           end: { lat: 10.1, lng: 10.1 },
         });
-        beginMapPerformanceRequest(requestId, 0, false);
       }
       state.current = mapRuntimeReducer(state.current, { type: "navigation/resolving", requestId });
     },
@@ -95,8 +86,4 @@ test("coordinator request identity is propagated to runtime, stale guards, and p
   assert.equal(state.current.navigation.committed?.route.totalDistance, 225);
   assert.equal(state.current.navigation.pendingRequestId, null);
   assert.equal(successToastIds.length, 1);
-  assert.deepEqual(
-    getMapPerformanceEvents().map((event) => event.requestId),
-    [startedRequestIds[1]],
-  );
 });

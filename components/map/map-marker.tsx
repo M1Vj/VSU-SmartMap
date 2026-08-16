@@ -31,7 +31,6 @@ import {
   type PointerActivation,
   type PointerActivationEvent,
 } from "@/lib/map/pointer-activation";
-import { markMapPerformance } from "@/lib/map/performance-marks";
 import {
   computePopupAutoPanPadding,
   DEFAULT_POPUP_AUTO_PAN_PADDING,
@@ -118,8 +117,6 @@ export const MapMarker = memo(function MapMarker({
   } | null>(null);
   const pointerActivationRef = useRef<PointerActivation | null>(null);
   const cancelledPointerAtRef = useRef<number | null>(null);
-  const markerPerformanceStartedAtRef = useRef<number | null>(null);
-  const pendingMarkerPerformanceRef = useRef<number | null>(null);
   const selectedRef = useRef(isSelected);
   selectedRef.current = isSelected;
   const lastActivationModalityRef = useRef<MarkerPopupModality>("mouse");
@@ -259,17 +256,6 @@ export const MapMarker = memo(function MapMarker({
       markerRef.current?.closeTooltip();
     }
   }, [hideTooltip, icon]);
-
-  useEffect(() => {
-    if (!isSelected || pendingMarkerPerformanceRef.current === null) return;
-    const startedAt = pendingMarkerPerformanceRef.current;
-    pendingMarkerPerformanceRef.current = null;
-    markMapPerformance(
-      "marker-activation",
-      startedAt,
-      typeof performance === "undefined" ? Date.now() : performance.now(),
-    );
-  }, [isSelected]);
 
   useEffect(() => {
     if (!isSelected || onMarkerTapOverride) {
@@ -427,11 +413,8 @@ export const MapMarker = memo(function MapMarker({
     const handlePointerDown = (event: PointerEvent) => {
       if (!isPrimaryPointerActivation(event as PointerActivationEvent)) {
         pointerActivationRef.current = null;
-        markerPerformanceStartedAtRef.current = null;
         return;
       }
-      markerPerformanceStartedAtRef.current =
-        typeof performance === "undefined" ? Date.now() : performance.now();
       pointerActivationRef.current = createPointerActivation(item.id, event as PointerActivationEvent);
       element.setPointerCapture?.(event.pointerId);
     };
@@ -443,7 +426,6 @@ export const MapMarker = memo(function MapMarker({
         !isPrimaryPointerActivation(event as PointerActivationEvent) ||
         !isPointerTap(activation, event as PointerActivationEvent)
       ) {
-        markerPerformanceStartedAtRef.current = null;
         cancelledPointerAtRef.current = Date.now();
         element.releasePointerCapture?.(event.pointerId);
         return;
@@ -451,19 +433,6 @@ export const MapMarker = memo(function MapMarker({
       const modality = event.pointerType === "touch" || event.pointerType === "pen" ? event.pointerType : "mouse";
       const activationId = activation.activationId;
       compatibilityActivationRef.current = { activationId, modality, pointerId: event.pointerId, at: Date.now() };
-      const startedAt = markerPerformanceStartedAtRef.current ?? (
-        typeof performance === "undefined" ? Date.now() : performance.now()
-      );
-      markerPerformanceStartedAtRef.current = null;
-      if (onMarkerTapOverride || isSelected) {
-        markMapPerformance(
-          "marker-activation",
-          startedAt,
-          typeof performance === "undefined" ? Date.now() : performance.now(),
-        );
-      } else {
-        pendingMarkerPerformanceRef.current = startedAt;
-      }
       markerRef.current?.closeTooltip();
       lastActivationModalityRef.current = modality;
       if (isSelected) requestPopupOpen(true);
@@ -472,13 +441,11 @@ export const MapMarker = memo(function MapMarker({
     };
     const handlePointerCancel = () => {
       pointerActivationRef.current = null;
-      markerPerformanceStartedAtRef.current = null;
       cancelledPointerAtRef.current = Date.now();
     };
     const handleLostPointerCapture = () => {
       if (pointerActivationRef.current) {
         pointerActivationRef.current = null;
-        markerPerformanceStartedAtRef.current = null;
         cancelledPointerAtRef.current = Date.now();
       }
     };
@@ -493,7 +460,6 @@ export const MapMarker = memo(function MapMarker({
       element.removeEventListener("pointercancel", handlePointerCancel);
       element.removeEventListener("lostpointercapture", handleLostPointerCapture);
       pointerActivationRef.current = null;
-      markerPerformanceStartedAtRef.current = null;
     };
   }, [icon, isSelected, item, onMarkerActivate, onMarkerTapOverride, requestPopupOpen]);
 
@@ -587,16 +553,6 @@ export const MapMarker = memo(function MapMarker({
             lastActivationModalityRef.current = "keyboard";
             if (isSelected) requestPopupOpen(true);
             compatibilityActivationRef.current = { activationId, modality: "keyboard", pointerId: null, at: Date.now() };
-            const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
-            if (onMarkerTapOverride || isSelected) {
-              markMapPerformance(
-                "marker-activation",
-                startedAt,
-                typeof performance === "undefined" ? Date.now() : performance.now(),
-              );
-            } else {
-              pendingMarkerPerformanceRef.current = startedAt;
-            }
             onMarkerActivate?.(item, activationId, "keyboard");
             if (onMarkerActivate) return;
             if (onMarkerTapOverride) {

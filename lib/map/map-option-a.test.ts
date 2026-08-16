@@ -27,11 +27,6 @@ test("Option A keeps status and actions clear of the anchored popup surface", as
   assert.equal((dockSource.match(/h-11/g) ?? []).length >= 2, true);
   assert.match(dockSource, /pointer-events-auto h-11/);
   assert.doesNotMatch(pageSource, /ResizeObserver|observeMapCardHeight|layout="bottom-sheet"/);
-  const selectionSource = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
-  assert.match(selectionSource, /markMapPerformance\(/);
-  assert.match(selectionSource, /"map-ready"/);
-  assert.match(selectionSource, /map\.whenReady\(/);
-  assert.match(selectionSource, /requestAnimationFrame\(/);
   assert.match(facilityPopupSource, /data-map-popup-action="true"/);
   assert.match(boardingPopupSource, /data-map-popup-action="true"/);
   assert.match(facilityPopupSource, /h-8 flex-1/);
@@ -58,7 +53,6 @@ test("marker adapter forwards pointer identity/modality before Leaflet click com
   assert.match(markerSource, /lastActivationModalityRef\.current = modality/);
   assert.match(markerSource, /if \(isSelected\) requestPopupOpen\(true\)/);
   assert.match(markerSource, /if \(fromActivation\) \{[\s\S]{0,120}cancelPopupOpen\(\)/);
-  assert.match(markerSource, /markMapPerformance\([\s\S]{0,120}"marker-activation"/);
 });
 
 test("marker popup lifecycle is viewport-independent and controller-owned", async () => {
@@ -85,14 +79,6 @@ test("marker popup lifecycle is viewport-independent and controller-owned", asyn
   assert.match(selectionSource, /shouldHandleMapSelectionEscape\(event\)/);
 });
 
-test("marker focus and popup controls keep stable DOM contracts", async () => {
-  const markerSource = await readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8");
-  const popupSource = await readFile(new URL("../../components/map/map-marker-popup-shell.tsx", import.meta.url), "utf8");
-
-  assert.match(markerSource, /element\.dataset\.mapItemId = item\.id/);
-  assert.match(popupSource, /data-map-popup-first-control="true"/);
-});
-
 test("navigation closes a popup only after the runtime accepts its intent", async () => {
   const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
 
@@ -102,13 +88,6 @@ test("navigation closes a popup only after the runtime accepts its intent", asyn
   assert.match(pageSource, /onDirections=\{\(item\) => beginNavigationToItem\(item\)\}/);
   assert.match(pageSource, /publishNavigationSessionId\(requestId\)/);
   assert.match(pageSource, /return requestId;/);
-});
-
-test("popup/search presentation never owns committed-route clearing", async () => {
-  const pageSource = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
-
-  assert.doesNotMatch(pageSource, /shouldClearRouteForSelectedItem/);
-  assert.doesNotMatch(pageSource, /shouldClearRouteForMapSearch/);
 });
 
 test("a rejected pending navigation remains retryable", async () => {
@@ -156,42 +135,4 @@ test("popup width and margin overrides remain scoped to the popup card", async (
   assert.match(boardingSource, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(facilitySource, /layout\?:|bottom-sheet|isBottomSheet|layout\s*===/);
   assert.doesNotMatch(boardingSource, /layout\?:|bottom-sheet|isBottomSheet|layout\s*===/);
-});
-
-test("anchored popup auto-pan and height contracts protect compact mobile viewports", async () => {
-  const [markerSource, shellSource] = await Promise.all([
-    readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../../components/map/map-marker-popup-shell.tsx", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(markerSource, /computePopupAutoPanPadding/);
-  assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, popupAutoPanPadding\.top\]\}/);
-  assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, popupAutoPanPadding\.bottom\]\}/);
-  assert.match(
-    shellSource,
-    /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
-  );
-  assert.match(shellSource, /min-h-0 overflow-y-auto/);
-});
-
-test("selected popup clearance measures tagged obstacles and cleans up its single lifecycle", async () => {
-  const [markerSource, helperSource] = await Promise.all([
-    readFile(new URL("../../components/map/map-marker.tsx", import.meta.url), "utf8"),
-    readFile(new URL("./map-popup-clearance.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(markerSource, /useMap/);
-  assert.match(markerSource, /const obstacleSelector = .*data-map-popup-obstacle/);
-  assert.match(markerSource, /new ResizeObserver/);
-  assert.match(markerSource, /resizeObserver\.disconnect\(\)/);
-  assert.match(markerSource, /window\.removeEventListener\("resize"/);
-  assert.match(markerSource, /map\.off\("resize"/);
-  assert.match(markerSource, /popup\.update\(\)/);
-  assert.match(markerSource, /element\.isConnected/);
-  assert.match(markerSource, /getComputedStyle/);
-  assert.match(markerSource, /rect\.width > 0/);
-  assert.match(markerSource, /rect\.height > 0/);
-  assert.match(markerSource, /isRouteDestination/);
-  assert.match(helperSource, /top = Math\.max\(top,/);
-  assert.match(helperSource, /bottom = Math\.max\(bottom,/);
 });

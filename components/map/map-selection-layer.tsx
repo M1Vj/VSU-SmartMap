@@ -9,7 +9,6 @@ import { MapMarkers } from "./map-markers";
 import { focusConnectedMarker } from "@/lib/map/marker-focus";
 import { createInteractionGateway } from "@/lib/map/interaction-gateway";
 import { shouldHandleMapSelectionEscape } from "@/lib/map/popup-lifecycle";
-import { markMapPerformance } from "@/lib/map/performance-marks";
 import {
   createPointerActivation,
   isPrimaryPointerActivation,
@@ -78,12 +77,11 @@ export function MapSelectionLayer({
   const escapeFocusFrameRef = useRef<number | null>(null);
   const selectedIdRef = useRef(selectedId);
   const onClearSelectionRef = useRef(onClearSelection);
+  // Stable Leaflet listeners read these refs so prop updates do not rebuild the gateway.
+  // eslint-disable-next-line react-hooks/refs
   selectedIdRef.current = selectedId;
+  // eslint-disable-next-line react-hooks/refs
   onClearSelectionRef.current = onClearSelection;
-  const mapReadyStartedAtRef = useRef(
-    typeof performance === "undefined" ? Date.now() : performance.now(),
-  );
-  const mapReadyMarkedRef = useRef(false);
   const [zoom, setZoom] = useState(() => map.getZoom());
   const interactionCallbacksRef = useRef<InteractionCallbacks>({
     items,
@@ -93,6 +91,7 @@ export function MapSelectionLayer({
     onMapClick,
     onDirections,
   });
+  // eslint-disable-next-line react-hooks/refs
   interactionCallbacksRef.current = {
     items,
     onSelect,
@@ -127,12 +126,15 @@ export function MapSelectionLayer({
   const dispatchDirections = useCallback((item: MapItem) => {
     return interactionCallbacksRef.current.onDirections?.(item) ?? null;
   }, []);
+  // The gateway owns its dedupe set for the lifetime of this map layer.
+  /* eslint-disable react-hooks/refs -- stable gateway callbacks intentionally read current refs. */
   const [interactionGateway] = useState(
     () => createInteractionGateway({
       onMarkerActivate: dispatchMarkerSelection,
       onBackground: dispatchBackground,
     }),
   );
+  /* eslint-enable react-hooks/refs */
 
   useEffect(() => () => {
     if (escapeFocusFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
@@ -141,41 +143,6 @@ export function MapSelectionLayer({
     escapeFocusFrameRef.current = null;
     keyboardSelectedMarkerIdRef.current = null;
   }, []);
-
-  useEffect(() => {
-    if (mapReadyMarkedRef.current) return;
-    let cancelled = false;
-    let frameId: number | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const markReadyAfterFrame = () => {
-      if (cancelled || mapReadyMarkedRef.current) return;
-      mapReadyMarkedRef.current = true;
-      markMapPerformance(
-        "map-ready",
-        mapReadyStartedAtRef.current,
-        typeof performance === "undefined" ? Date.now() : performance.now(),
-      );
-    };
-
-    const handleReady = () => {
-      if (typeof requestAnimationFrame === "function") {
-        frameId = requestAnimationFrame(markReadyAfterFrame);
-      } else {
-        timeoutId = setTimeout(markReadyAfterFrame, 0);
-      }
-    };
-
-    map.whenReady(handleReady);
-    return () => {
-      cancelled = true;
-      map.off("load", handleReady);
-      if (frameId !== null && typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(frameId);
-      }
-      if (timeoutId !== null) clearTimeout(timeoutId);
-    };
-  }, [map]);
 
   const getCurrentView = useCallback(() => ({
     center: {

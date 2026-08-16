@@ -44,13 +44,6 @@ import {
   getRouteFacingEndpoint,
 } from "@/lib/map/map-runtime";
 import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
-import {
-  beginMapPerformanceRequest,
-  commitMapPerformanceRequest,
-  clearMapPerformanceRequest,
-  failMapPerformanceRequest,
-} from "@/lib/map/performance-marks";
-
 const MapSelectionLayer = dynamic(
   () => import("@/components/map/map-selection-layer").then((m) => m.MapSelectionLayer),
   { ssr: false },
@@ -682,11 +675,6 @@ function MapView({
     publishNavigationSessionId(requestId);
     setNavMode(persistedNavigationMode);
     setReuseCommittedRouteAfterRestore(false);
-    beginMapPerformanceRequest(
-      requestId,
-      typeof performance === "undefined" ? Date.now() : performance.now(),
-      false,
-    );
   }, [
     hasHydrated,
     navEnd,
@@ -715,9 +703,6 @@ function MapView({
 
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
-    const pendingRequestId = runtime.getState().navigation.pendingRequestId;
-    if (pendingRequestId != null) clearMapPerformanceRequest(pendingRequestId);
-    clearMapPerformanceRequest(navigationSessionId);
     clearNavigation();
     setReuseCommittedRouteAfterRestore(false);
     setManualLocationRequestPending(false);
@@ -744,7 +729,6 @@ function MapView({
     });
     if (restored === current) return false;
 
-    clearMapPerformanceRequest(pendingRequestId);
     dismissRouteFoundAnnouncement(navigationSessionId);
     if (committed.start && committed.end) {
       setNavigationRoute({
@@ -834,7 +818,7 @@ function MapView({
   const handleRouteCommitted = useCallback((route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => {
     const before = runtime.getState();
     if (before.navigation.pendingRequestId !== requestId || !metadata.destinationId) return;
-    const next = runtime.dispatch({
+    runtime.dispatch({
       type: "navigation/committed",
       requestId,
       route,
@@ -846,9 +830,6 @@ function MapView({
         end: metadata.end,
       },
     });
-    if (next.navigation.pendingRequestId === null && next.navigation.committed?.route === route) {
-      commitMapPerformanceRequest(requestId);
-    }
   }, [runtime]);
 
   const handleRouteFailed = useCallback((message: string, requestId: number) => {
@@ -856,7 +837,6 @@ function MapView({
     if (before.navigation.pendingRequestId !== requestId) return;
     const next = runtime.dispatch({ type: "navigation/failed", requestId, message });
     if (next.navigation.pendingRequestId === null && next.navigation.phase === "failed") {
-      failMapPerformanceRequest(requestId);
       const committed = next.navigation.committed;
       if (committed?.start && committed.end) {
         setNavigationRoute({
@@ -889,8 +869,6 @@ function MapView({
     if (current.navigation.pendingRequestId !== requestId) {
       const destinationId = metadata.destinationId ?? current.navigation.request?.destinationId ?? current.navigation.destinationId;
       if (!destinationId) return;
-      const previousRequestId = current.navigation.pendingRequestId;
-      if (previousRequestId !== null) clearMapPerformanceRequest(previousRequestId);
       runtime.dispatch({
         type: "navigation/requested",
         requestId,
@@ -900,11 +878,6 @@ function MapView({
         start: metadata.start,
         end: metadata.end,
       });
-      beginMapPerformanceRequest(
-        requestId,
-        typeof performance === "undefined" ? Date.now() : performance.now(),
-        current.navigation.committed !== null,
-      );
     }
 
     runtime.dispatch({
@@ -929,7 +902,6 @@ function MapView({
   }, [routeAnnouncementTracker]);
 
   const beginNavigationToItem = useCallback((item: MapItem): number | null => {
-    const requestStartedAt = typeof performance === "undefined" ? Date.now() : performance.now();
     const decision = resolveNavigationStart(position);
 
     const previousSessionId = navigationSessionIdRef.current;
@@ -955,12 +927,6 @@ function MapView({
     publishNavigationSessionId(requestId);
     dismissRouteFoundAnnouncement(previousSessionId);
     setReuseCommittedRouteAfterRestore(false);
-    beginMapPerformanceRequest(
-      requestId,
-      requestStartedAt,
-      next.navigation.committed !== null,
-    );
-
     if (decision.mode === "live") {
       setNavigationRoute({
         navStart: { lat: decision.start.lat, lng: decision.start.lng } as LatLng,

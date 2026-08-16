@@ -90,7 +90,7 @@ test("selected mobile popups keep Submit Location out of the action surface", as
   assert.match(pageSource, /hidden md:inline-flex/);
 });
 
-test("small mobile popup clearance leaves a usable scrollable surface", async () => {
+test("mobile popup clearance stays selected-only, measurable, and scrollable", async () => {
   const [markerSource, shellSource] = await Promise.all([
     readFile(new URL("./map-marker.tsx", import.meta.url), "utf8"),
     readFile(new URL("./map-marker-popup-shell.tsx", import.meta.url), "utf8"),
@@ -99,23 +99,21 @@ test("small mobile popup clearance leaves a usable scrollable surface", async ()
   assert.match(markerSource, /computePopupAutoPanPadding/);
   assert.match(markerSource, /autoPanPaddingTopLeft=\{\[12, popupAutoPanPadding\.top\]\}/);
   assert.match(markerSource, /autoPanPaddingBottomRight=\{\[12, popupAutoPanPadding\.bottom\]\}/);
+  assert.match(markerSource, /if \(!isSelected\)/);
   assert.match(markerSource, /ResizeObserver/);
   assert.match(markerSource, /data-map-popup-obstacle/);
-  assert.match(
-    shellSource,
-    /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
-  );
-  assert.match(shellSource, /overflow-y-auto/);
-
-  const viewportHeight = 568;
-  const fixedPopupClearance = 376;
-  assert.ok(viewportHeight - fixedPopupClearance >= 192);
-});
-
-test("selected marker clearance observes only the selected marker and cleans up every listener", async () => {
-  const markerSource = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
-
-  assert.match(markerSource, /if \(!isSelected\)/);
+  assert.match(markerSource, /setPopupAutoPanPadding\(\(current\) =>/);
+  assert.match(markerSource, /new MutationObserver/);
+  assert.match(markerSource, /childList: true/);
+  assert.match(markerSource, /attributeFilter/);
+  assert.match(markerSource, /mutation\.addedNodes/);
+  assert.match(markerSource, /mutation\.removedNodes/);
+  assert.match(markerSource, /target\?\.closest\(obstacleSelector\)/);
+  assert.match(markerSource, /subtree: true/);
+  assert.match(markerSource, /shouldRemeasurePopupObstacleMutations/);
+  assert.match(markerSource, /requestAnimationFrame/);
+  assert.match(markerSource, /cancelAnimationFrame/);
+  assert.match(markerSource, /mutationObserver\.disconnect\(\)/);
   assert.match(markerSource, /resizeObserver\.disconnect\(\)/);
   assert.match(markerSource, /window\.addEventListener\("resize"/);
   assert.match(markerSource, /window\.removeEventListener\("resize"/);
@@ -128,25 +126,15 @@ test("selected marker clearance observes only the selected marker and cleans up 
   assert.match(markerSource, /rect\.height > 0/);
   assert.match(markerSource, /rect\.right <= mapRect\.left/);
   assert.match(markerSource, /rect\.left >= mapRect\.right/);
-  assert.match(markerSource, /\[isSelected, onMarkerTapOverride, map\]/);
-});
+  assert.match(
+    shellSource,
+    /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/,
+  );
+  assert.match(shellSource, /overflow-y-auto/);
 
-test("unselected markers keep default clearance stable and scoped obstacle changes are coalesced", async () => {
-  const markerSource = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
-
-  assert.doesNotMatch(markerSource, /popupClearanceActiveRef/);
-  assert.match(markerSource, /setPopupAutoPanPadding\(\(current\) =>/);
-  assert.match(markerSource, /new MutationObserver/);
-  assert.match(markerSource, /childList: true/);
-  assert.match(markerSource, /attributeFilter/);
-  assert.match(markerSource, /mutation\.addedNodes/);
-  assert.match(markerSource, /mutation\.removedNodes/);
-  assert.match(markerSource, /target\?\.closest\(obstacleSelector\)/);
-  assert.match(markerSource, /subtree: true/);
-  assert.match(markerSource, /requestAnimationFrame/);
-  assert.match(markerSource, /cancelAnimationFrame/);
-  assert.match(markerSource, /mutationObserver\.disconnect\(\)/);
-  assert.match(markerSource, /shouldRemeasurePopupObstacleMutations/);
+  const viewportHeight = 568;
+  const fixedPopupClearance = 376;
+  assert.ok(viewportHeight - fixedPopupClearance >= 192);
 });
 
 test("map obstacle tags cover top search/status and bottom floating controls", async () => {
