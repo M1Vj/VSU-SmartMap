@@ -88,7 +88,7 @@ export type MapEvidenceSnapshot = {
     startedAt: number | null;
     stoppedAt: number | null;
     frameCount: number;
-    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "visibilitychange" | "cleanup" | null;
+    stopReason: "explicit" | "max-frames" | "wall-clock-timeout" | "visibilitychange" | "cleanup" | "route-readiness-timeout" | null;
     totalCostMs: number;
   };
 };
@@ -1334,6 +1334,13 @@ function scheduleFrame(state: ProbeState) {
       scheduleFrame(state);
       return;
     }
+    if (state.route && state.route.readinessSettled && !state.route.ready) {
+      state.frameCount += 1;
+      state.totalFrameCount += 1;
+      recordFrame(state);
+      stopFrameProbeForState(state, "route-readiness-timeout");
+      return;
+    }
     if (state.frameAwaitingRendererFrame) {
       if (!hasRendererAdvancedSinceInput(state)) {
         scheduleFrame(state);
@@ -1752,6 +1759,7 @@ export function registerRouteForEvidence(input: {
 }): () => void {
   const state = activeState;
   if (!isStateActive(state)) return () => undefined;
+  if (state.route) cancelRouteReadiness(state.route);
   const inputFailure: MapFrameSampleFailure | null = input.path.length > 256 ? "sampling-capped" : null;
   const route: RegisteredRoute = {
     ...input,

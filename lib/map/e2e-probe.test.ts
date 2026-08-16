@@ -1242,7 +1242,10 @@ test("satellite oracle rejects stale and target raster tiles with inconsistent f
   const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(readiness[0]);
   readiness[1](0);
-  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null }>; frameProbe: { stopReason: string | null } };
+  };
   api.startFrameProbe();
   const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(frame[0]);
@@ -1394,7 +1397,10 @@ test("route readiness fails closed when the live MapLibre canvas dimensions are 
   const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(readiness[0]);
   readiness[1](0);
-  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null }>; frameProbe: { stopReason: string | null } };
+  };
   api.startFrameProbe();
   const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(frame[0]);
@@ -1441,12 +1447,16 @@ test("route readiness requires a rendered MapLibre frame token before arming", (
   assert.ok(deadline);
   timerCallbacks.delete(deadline[0]);
   deadline[1]();
-  const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null }>; frameProbe: { stopReason: string | null } };
+  };
   api.startFrameProbe();
   const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(frame[0]);
   frame[1](16);
   assert.equal(api.snapshot().frames.at(-1)?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frameProbe.stopReason, "route-readiness-timeout");
   cleanup();
 });
 
