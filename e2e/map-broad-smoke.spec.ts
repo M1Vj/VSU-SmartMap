@@ -4,7 +4,7 @@ const baseUrl = process.env.MAP_E2E_BASE_URL;
 const mobileViewport = { width: 390, height: 844 };
 
 async function openMap(page: Page) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/", { waitUntil: "commit" });
   await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".leaflet-control-zoom")).toBeVisible({ timeout: 15_000 });
 }
