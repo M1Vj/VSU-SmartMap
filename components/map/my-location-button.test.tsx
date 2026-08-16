@@ -16,6 +16,7 @@ test("My Location keeps the familiar compact square inside a 44px hit target", (
   assert.match(markup, /data-map-control="my-location"/);
   assert.match(markup, /h-11 w-11/);
   assert.match(markup, /h-\[30px\] w-\[30px\]/);
+  assert.match(markup, /absolute bottom-0 left-0/);
   assert.match(markup, /rounded-sm/);
   assert.doesNotMatch(markup, /left-\[12px\]|bottom-\[/);
 });

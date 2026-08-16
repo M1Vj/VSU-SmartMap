@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("mobile map controls use fixed safe-area offsets with anchored popups", async () => {
-  const [mapPageSource, locationButtonSource] =
+test("My Location keeps its root-font-aware safe-area offset and visible anchor", async () => {
+  const [mapPageSource, locationControlSource, locationButtonSource] =
     await Promise.all([
       readFile(
         new URL("../../app/(student)/page.tsx", import.meta.url),
         "utf8",
       ),
+      readFile(new URL("./user-location-control.tsx", import.meta.url), "utf8"),
       readFile(new URL("./my-location-button.tsx", import.meta.url), "utf8"),
     ]);
 
@@ -17,8 +18,12 @@ test("mobile map controls use fixed safe-area offsets with anchored popups", asy
     /MapBottomCard|mapBottomCardHeight|--map-mini-card-height|onHeightChange=\{setMapBottomCardHeight\}/,
   );
   assert.match(
+    locationControlSource,
+    /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
+  );
+  assert.doesNotMatch(
     mapPageSource,
-    /left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
+    /className="left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]"/,
   );
   assert.match(
     mapPageSource,
@@ -147,6 +152,6 @@ test("map obstacle tags cover top search/status and bottom floating controls", a
   assert.ok((pageSource.match(/data-map-popup-obstacle="bottom"/g) ?? []).length >= 4);
   assert.match(
     pageSource,
-    /data-map-popup-obstacle="bottom"[\s\S]{0,220}left-\[12px\] bottom-\[calc\(160px\+env\(safe-area-inset-bottom\)\)\][\s\S]{0,220}h-11 w-11/,
+    /data-map-popup-obstacle="bottom"[\s\S]{0,220}left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\][\s\S]{0,220}h-11 w-11/,
   );
 });

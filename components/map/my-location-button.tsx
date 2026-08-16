@@ -35,7 +35,7 @@ export function MyLocationButton({
       <span
         aria-hidden="true"
         className={cn(
-          "flex h-[30px] w-[30px] min-w-[30px] items-center justify-center rounded-sm bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm transition-colors duration-200",
+          "absolute bottom-0 left-0 flex h-[30px] w-[30px] min-w-[30px] items-center justify-center rounded-sm bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm transition-colors duration-200",
           "group-hover:bg-accent group-hover:text-accent-foreground",
           isTracking && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background",
         )}

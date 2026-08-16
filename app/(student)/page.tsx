@@ -1034,7 +1034,6 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              className="left-[12px] bottom-[calc(160px+env(safe-area-inset-bottom))] md:bottom-[80px]"
               destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 
@@ -1046,7 +1045,7 @@ function MapView({
           <div
             aria-hidden="true"
             data-map-popup-obstacle="bottom"
-            className="pointer-events-none absolute left-[12px] bottom-[calc(160px+env(safe-area-inset-bottom))] h-11 w-11 md:bottom-[80px]"
+            className="pointer-events-none absolute left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] h-11 w-11 md:bottom-[80px]"
           />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (
