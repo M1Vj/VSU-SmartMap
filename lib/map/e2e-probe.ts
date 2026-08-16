@@ -57,6 +57,7 @@ export type MapFrameSample = {
   visualRouteSpanPx: number | null;
   visualRouteScale: number | null;
   rendererFrameToken: number | null;
+  rendererGeneration: number | null;
   probeCostMs: number;
   zoom: number | null;
   animatingZoom: boolean;
@@ -92,12 +93,17 @@ export type MapEvidenceSnapshot = {
   };
 };
 
+export type MapFrameProbeBoundary = {
+  generation: number;
+  token: number | null;
+};
+
 export type MapEvidenceApi = {
   snapshot: () => MapEvidenceSnapshot;
   events: () => readonly MapEvidenceEvent[];
   reset: () => void;
   startFrameProbe: () => void;
-  armFrameProbeForInput: () => void;
+  armFrameProbeForInput: () => MapFrameProbeBoundary;
   markFrameProbeBoundary: () => void;
   stopFrameProbe: () => void;
   setRouteDelayMs: (delayMs: number) => void;
@@ -138,6 +144,10 @@ type RegisteredRoute = {
   readinessFailure: MapFrameSampleFailure | null;
   settleFrameId: number | null;
   settleTimeout: ReturnType<typeof setTimeout> | null;
+  readinessRetryTimeout: ReturnType<typeof setTimeout> | null;
+  readinessDeadlineTimeout: ReturnType<typeof setTimeout> | null;
+  readinessAttempts: number;
+  readinessDeadlineAt: number;
 };
 
 type RegisteredDestination = {
@@ -995,7 +1005,9 @@ function hasFiniteAffineTransform(transform: AffineTransform | null | undefined)
 }
 
 function routeReadinessFailure(state: ProbeState, route: RegisteredRoute): MapFrameSampleFailure | null {
-  if (route.readinessFailure) return route.readinessFailure;
+  if (route.readinessFailure && (route.readinessSettled || route.readinessAttempts === 0)) {
+    return route.readinessFailure;
+  }
   if (route.path.length < 2) return "missing-route-path";
   if (!routeMatchesAuthoritativePath(route)) return "route-not-synced";
 
@@ -1027,13 +1039,51 @@ function routeReadinessFailure(state: ProbeState, route: RegisteredRoute): MapFr
   return null;
 }
 
+const RETRYABLE_ROUTE_READINESS_FAILURES = new Set<MapFrameSampleFailure>([
+  "missing-destination",
+  "missing-destination-element",
+  "missing-renderer-frame",
+]);
+
+const ROUTE_READINESS_DEADLINE_MS = 1_500;
+const ROUTE_READINESS_MAX_ATTEMPTS = 90;
+
+function evidenceNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function finishRouteReadiness(
+  state: ProbeState,
+  route: RegisteredRoute,
+  failure: MapFrameSampleFailure | null,
+) {
+  if (!isStateActive(state) || state.route !== route) return;
+  if (route.settleFrameId !== null && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(route.settleFrameId);
+  }
+  if (route.settleTimeout !== null) clearTimeout(route.settleTimeout);
+  route.readinessFailure = failure;
+  route.ready = failure === null;
+  route.readinessSettled = true;
+  if (route.readinessRetryTimeout !== null) clearTimeout(route.readinessRetryTimeout);
+  if (route.readinessDeadlineTimeout !== null) clearTimeout(route.readinessDeadlineTimeout);
+  route.readinessRetryTimeout = null;
+  route.readinessDeadlineTimeout = null;
+  route.settleFrameId = null;
+  route.settleTimeout = null;
+}
+
 function cancelRouteReadiness(route: RegisteredRoute) {
   if (route.settleFrameId !== null && typeof cancelAnimationFrame === "function") {
     cancelAnimationFrame(route.settleFrameId);
   }
   if (route.settleTimeout !== null) clearTimeout(route.settleTimeout);
+  if (route.readinessRetryTimeout !== null) clearTimeout(route.readinessRetryTimeout);
+  if (route.readinessDeadlineTimeout !== null) clearTimeout(route.readinessDeadlineTimeout);
   route.settleFrameId = null;
   route.settleTimeout = null;
+  route.readinessRetryTimeout = null;
+  route.readinessDeadlineTimeout = null;
 }
 
 function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
@@ -1041,10 +1091,30 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
     route.settleFrameId = null;
     route.settleTimeout = null;
     if (!isStateActive(state) || state.route !== route) return;
-    route.readinessSettled = true;
-    route.readinessFailure = routeReadinessFailure(state, route);
-    route.ready = route.readinessFailure === null;
+    const failure = routeReadinessFailure(state, route);
+    if (!failure) {
+      finishRouteReadiness(state, route, null);
+      return;
+    }
+    route.readinessFailure = failure;
+    route.ready = false;
+    const now = evidenceNow();
+    if (
+      RETRYABLE_ROUTE_READINESS_FAILURES.has(failure) &&
+      now < route.readinessDeadlineAt &&
+      route.readinessAttempts < ROUTE_READINESS_MAX_ATTEMPTS
+    ) {
+      route.readinessSettled = false;
+      route.readinessAttempts += 1;
+      route.readinessRetryTimeout = setTimeout(() => {
+        route.readinessRetryTimeout = null;
+        scheduleRouteReadiness(state, route);
+      }, 16);
+      return;
+    }
+    finishRouteReadiness(state, route, failure);
   };
+  if (route.readinessSettled) return;
   if (typeof requestAnimationFrame === "function") route.settleFrameId = requestAnimationFrame(settle);
   else route.settleTimeout = setTimeout(settle, 0);
 }
@@ -1052,8 +1122,8 @@ function scheduleRouteReadiness(state: ProbeState, route: RegisteredRoute) {
 function appendFrame(
   state: ProbeState,
   startedAt: number,
-  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken"> &
-    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken">>,
+  sample: Omit<MapFrameSample, "frameIndex" | "at" | "probeCostMs" | "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken" | "rendererGeneration"> &
+    Partial<Pick<MapFrameSample, "zoom" | "animatingZoom" | "visualRouteSpanPx" | "visualRouteScale" | "rendererFrameToken" | "rendererGeneration">>,
 ) {
   const at = typeof performance === "undefined" ? Date.now() : performance.now();
   const measurementCostMs = Math.max(0, at - startedAt);
@@ -1071,6 +1141,7 @@ function appendFrame(
     visualRouteSpanPx: sample.visualRouteSpanPx ?? null,
     visualRouteScale: sample.visualRouteScale ?? null,
     rendererFrameToken: sample.rendererFrameToken ?? (state.mapLibreMap ? state.mapLibreRenderToken : null),
+    rendererGeneration: sample.rendererGeneration ?? (state.mapLibreMap ? state.mapLibreRenderGeneration : null),
   });
 }
 
@@ -1313,7 +1384,12 @@ function detachMapLibreRenderListener(state: ProbeState) {
     const mapWithEvents = state.mapLibreRenderMap as MapLibreMap & {
       off?: (type: string, listener: () => void) => void;
     };
-    mapWithEvents.off?.("render", state.mapLibreRenderListener);
+    try {
+      mapWithEvents.off?.("render", state.mapLibreRenderListener);
+    } catch {
+      // A non-conforming renderer must not prevent the probe from clearing its
+      // own listener and frame state. The evidence surface fails closed.
+    }
   }
   state.mapLibreRenderMap = null;
   state.mapLibreRenderListener = null;
@@ -1372,7 +1448,7 @@ function failAwaitingRendererFrame(state: ProbeState) {
   stopFrameProbeForState(state, "wall-clock-timeout");
 }
 
-function armFrameProbeForInputState(state: ProbeState) {
+function armFrameProbeForInputState(state: ProbeState): MapFrameProbeBoundary {
   if (state.frameAwaitingRendererTimeout !== null) clearTimeout(state.frameAwaitingRendererTimeout);
   state.frames = [];
   state.frameCount = 0;
@@ -1385,6 +1461,10 @@ function armFrameProbeForInputState(state: ProbeState) {
   state.frameAwaitingRendererTimeout = state.mapLibreMap
     ? setTimeout(() => failAwaitingRendererFrame(state), 1_000)
     : null;
+  return {
+    generation: state.mapLibreRenderGeneration,
+    token: state.mapLibreRenderToken,
+  };
 }
 
 function createApi(state: ProbeState): MapEvidenceApi {
@@ -1459,8 +1539,8 @@ function createApi(state: ProbeState): MapEvidenceApi {
       scheduleFrame(state);
     },
     armFrameProbeForInput: () => {
-      if (!isActive()) return;
-      armFrameProbeForInputState(state);
+      if (!isActive()) return { generation: 0, token: null };
+      return armFrameProbeForInputState(state);
     },
     markFrameProbeBoundary: () => {
       if (!isActive()) return;
@@ -1681,8 +1761,21 @@ export function registerRouteForEvidence(input: {
     readinessFailure: inputFailure,
     settleFrameId: null,
     settleTimeout: null,
+    readinessRetryTimeout: null,
+    readinessDeadlineTimeout: null,
+    readinessAttempts: 0,
+    readinessDeadlineAt: evidenceNow() + ROUTE_READINESS_DEADLINE_MS,
   };
   state.route = route;
+  route.readinessDeadlineTimeout = setTimeout(() => {
+    route.readinessDeadlineTimeout = null;
+    if (!isStateActive(state) || state.route !== route || route.readinessSettled) return;
+    finishRouteReadiness(
+      state,
+      route,
+      routeReadinessFailure(state, route) ?? route.readinessFailure ?? "missing-route-baseline",
+    );
+  }, ROUTE_READINESS_DEADLINE_MS);
   scheduleRouteReadiness(state, route);
   return () => {
     if (isStateActive(state) && state.route === route) {
@@ -1707,6 +1800,15 @@ export function registerDestinationMarkerForEvidence(input: {
     iconSize: { x: input.iconSize[0], y: input.iconSize[1] },
   };
   state.destination = destination;
+  if (
+    state.route &&
+    !state.route.readinessSettled &&
+    state.route.settleFrameId === null &&
+    state.route.settleTimeout === null &&
+    state.route.readinessRetryTimeout === null
+  ) {
+    scheduleRouteReadiness(state, state.route);
+  }
   return () => {
     if (isStateActive(state) && state.destination === destination) state.destination = null;
   };

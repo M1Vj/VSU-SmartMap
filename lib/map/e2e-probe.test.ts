@@ -234,6 +234,7 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(probeSource, /getAffineTransformScale/);
   assert.match(probeSource, /sampleRenderedPolylineScreenSpace/);
   assert.match(probeSource, /rendererFrameToken/);
+  assert.match(probeSource, /rendererGeneration/);
   assert.match(probeSource, /armFrameProbeForInput/);
   assert.match(probeSource, /mapLibreRenderSnapshot/);
   assert.match(probeSource, /mapLibreRenderGeneration/);
@@ -262,6 +263,9 @@ test("production map components cross the lazy bridge instead of statically load
   assert.match(browserSpec, /visualRouteScales/);
   assert.match(browserSpec, /armFrameProbeForInput/);
   assert.match(browserSpec, /rendererFrameTokens/);
+  assert.match(browserSpec, /rendererGenerations/);
+  assert.match(browserSpec, /boundary\.generation/);
+  assert.match(browserSpec, /boundaryToken/);
   assert.match(browserSpec, /getComputedStyle/);
   assert.match(browserSpec, /getScreenCTM/);
   assert.match(browserSpec, /transform:\s*computed\.transform/);
@@ -1433,16 +1437,90 @@ test("route readiness requires a rendered MapLibre frame token before arming", (
   const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(readiness[0]);
   readiness[1](0);
+  const deadline = timerCallbacks.entries().next().value as [number, () => void] | undefined;
+  assert.ok(deadline);
+  timerCallbacks.delete(deadline[0]);
+  deadline[1]();
   const api = fakeWindow.__VSU_MAP_E2E__ as { startFrameProbe: () => void; snapshot: () => { frames: Array<{ failure: string | null }> } };
   api.startFrameProbe();
   const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(frame[0]);
   frame[1](16);
-  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
+  assert.equal(api.snapshot().frames.at(-1)?.failure, "missing-renderer-frame");
   cleanup();
 });
 
-test("MapLibre frame token rejects logical project and SVG advances while the canvas render lags", () => {
+test("route readiness retries a late destination baseline and cleans its retry work", () => {
+  installFakeBrowser();
+  const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
+  const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
+  const mapRect = { left: 0, top: 0, width: 200, height: 100 };
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 100,
+    width: 200,
+    height: 100,
+    getBoundingClientRect: () => mapRect,
+  };
+  const listeners = new Set<() => void>();
+  const map = { getContainer: () => ({ getBoundingClientRect: () => mapRect }) };
+  const renderer = {
+    getCanvas: () => canvas,
+    getContainer: () => ({ clientWidth: 200, clientHeight: 100 }),
+    on: (type: string, listener: () => void) => {
+      if (type === "render") listeners.add(listener);
+    },
+    off: (type: string, listener: () => void) => {
+      if (type === "render") listeners.delete(listener);
+    },
+    project: function ([lng]: [number]) {
+      if (!this) throw new Error("renderer receiver missing");
+      return { x: 20 + lng * 10, y: 40 };
+    },
+  };
+  const polyline = {
+    getLatLngs: () => path,
+    getElement: () => ({
+      getTotalLength: () => 100,
+      getPointAtLength: (length: number) => ({ x: length, y: 40 }),
+      getScreenCTM: () => ({ a: 1, b: 0, c: 0, d: 1, e: 20, f: 0 }),
+    }),
+  };
+  let markerElement: object | null = null;
+  const marker = { getElement: () => markerElement };
+  registerLeafletMapForEvidence(map as never);
+  registerMapLibreForEvidence(renderer as never);
+  for (const listener of listeners) listener();
+  registerRouteForEvidence({ map: map as never, polyline: polyline as never, path });
+  const readiness = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(readiness[0]);
+  readiness[1](0);
+  assert.ok(timerCallbacks.size >= 2);
+  registerDestinationMarkerForEvidence({ marker: marker as never, coordinate: path[1], iconAnchor: [5, 20], iconSize: [10, 20] });
+  markerElement = { getBoundingClientRect: () => ({ left: 115, top: 20, width: 10, height: 20 }) };
+  const retry = [...timerCallbacks.entries()].at(-1);
+  assert.ok(retry);
+  timerCallbacks.delete(retry[0]);
+  retry[1]();
+  const settled = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(settled[0]);
+  settled[1](16);
+  const api = fakeWindow.__VSU_MAP_E2E__ as {
+    startFrameProbe: () => void;
+    snapshot: () => { frames: Array<{ failure: string | null; routeVisible: boolean }> };
+  };
+  api.startFrameProbe();
+  const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(frame[0]);
+  frame[1](32);
+  assert.equal(api.snapshot().frames[0]?.failure, null);
+  assert.equal(api.snapshot().frames[0]?.routeVisible, true);
+  cleanup();
+  assert.equal(rafCallbacks.size, 0);
+  assert.equal(timerCallbacks.size, 0);
+});
+
+test("MapLibre frame token rejects logical project and SVG advances without a new render", () => {
   installFakeBrowser();
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const path = [{ lat: 0, lng: 0 }, { lat: 0, lng: 10 }];
@@ -1485,21 +1563,21 @@ test("MapLibre frame token rejects logical project and SVG advances while the ca
   readiness[1](0);
   const api = fakeWindow.__VSU_MAP_E2E__ as {
     startFrameProbe: () => void;
-    markFrameProbeBoundary: () => void;
+    stopFrameProbe: () => void;
     snapshot: () => { frames: Array<{ failure: string | null; rendererFrameToken: number | null }> };
   };
   api.startFrameProbe();
-  api.markFrameProbeBoundary();
+  const alignedFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
+  rafCallbacks.delete(alignedFrame[0]);
+  alignedFrame[1](16);
+  assert.equal(api.snapshot().frames[0]?.failure, null);
+  api.stopFrameProbe();
   logicalOffset = 20;
+  api.startFrameProbe();
   const staleFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(staleFrame[0]);
-  staleFrame[1](16);
-  assert.equal(api.snapshot().frames.length, 0);
-  renderListener?.();
-  const liveFrame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
-  rafCallbacks.delete(liveFrame[0]);
-  liveFrame[1](32);
-  assert.equal(api.snapshot().frames[0]?.failure, null);
+  staleFrame[1](32);
+  assert.equal(api.snapshot().frames.at(-1)?.failure, "missing-renderer-frame");
   cleanup();
 });
 
@@ -1618,9 +1696,9 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   const cleanup = initializeMapEvidence("http://localhost:3000/?mapEvidence=1");
   const api = fakeWindow.__VSU_MAP_E2E__ as {
     startFrameProbe: () => void;
-    armFrameProbeForInput: () => void;
+    armFrameProbeForInput: () => { generation: number; token: number | null };
     stopFrameProbe: () => void;
-    snapshot: () => { frames: Array<{ failure: string | null; rendererFrameToken: number | null }> };
+    snapshot: () => { frames: Array<{ failure: string | null; rendererFrameToken: number | null; rendererGeneration: number | null }> };
   };
   const listeners = new Set<() => void>();
   let offCalls = 0;
@@ -1655,19 +1733,23 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   registerMapLibreForEvidence(makeRenderer() as never);
   emitRender();
   api.startFrameProbe();
-  api.armFrameProbeForInput();
+  const firstBoundary = api.armFrameProbeForInput();
+  assert.deepEqual(firstBoundary, { generation: 1, token: 1 });
   emitRender();
   const first = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(first[0]);
   first[1](0);
   api.stopFrameProbe();
   const firstToken = api.snapshot().frames[0]?.rendererFrameToken;
+  const firstGeneration = api.snapshot().frames[0]?.rendererGeneration;
   assert.equal(firstToken, 2);
+  assert.equal(firstGeneration, firstBoundary.generation);
 
   registerMapLibreForEvidence(makeRenderer() as never);
   assert.equal(offCalls, 1);
   api.startFrameProbe();
-  api.armFrameProbeForInput();
+  const secondBoundary = api.armFrameProbeForInput();
+  assert.deepEqual(secondBoundary, { generation: 2, token: null });
   const stale = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(stale[0]);
   stale[1](16);
@@ -1677,6 +1759,7 @@ test("MapLibre renderer generations require a fresh render and clean up accepted
   rafCallbacks.delete(live[0]);
   live[1](32);
   assert.equal(api.snapshot().frames.at(-1)?.rendererFrameToken, 3);
+  assert.equal(api.snapshot().frames.at(-1)?.rendererGeneration, secondBoundary.generation);
   assert.ok((api.snapshot().frames.at(-1)?.rendererFrameToken ?? 0) > (firstToken ?? 0));
   api.stopFrameProbe();
   cleanup();
@@ -1703,6 +1786,9 @@ test("MapLibre frame sampling fails closed when the renderer cannot remove a lis
     on: (type: string, listener: () => void) => {
       if (type === "render") listeners.add(listener);
     },
+    off: () => {
+      throw new Error("renderer listener teardown failed");
+    },
     project: ([lng]: [number]) => ({ x: 20 + lng * 10, y: 40 }),
   };
   registerLeafletMapForEvidence({} as never);
@@ -1712,8 +1798,8 @@ test("MapLibre frame sampling fails closed when the renderer cannot remove a lis
   const frame = rafCallbacks.entries().next().value as [number, FrameRequestCallback];
   rafCallbacks.delete(frame[0]);
   frame[1](0);
-  assert.equal(api.snapshot().frames[0]?.failure, "missing-renderer-frame");
-  cleanup();
+  assert.equal(api.snapshot().frames[0]?.failure, "missing-route");
+  assert.doesNotThrow(cleanup);
 });
 
 test("MapLibre frame sampling stays bounded across repeated probe sessions", () => {
