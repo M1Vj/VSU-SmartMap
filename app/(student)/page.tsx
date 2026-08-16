@@ -1045,7 +1045,8 @@ function MapView({
           <div
             aria-hidden="true"
             data-map-popup-obstacle="bottom"
-            className="pointer-events-none absolute left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] h-11 w-11 md:bottom-[80px]"
+            data-map-location-obstacle="true"
+            className="pointer-events-none absolute left-[12px] bottom-[calc(5rem+112px+env(safe-area-inset-bottom))] h-11 w-11 min-[769px]:bottom-[80px]"
           />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (

@@ -19,7 +19,7 @@ test("My Location keeps its root-font-aware safe-area offset and visible anchor"
   );
   assert.match(
     locationControlSource,
-    /left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\] md:bottom-\[80px\]/,
+    /left-\[12px\] bottom-\[calc\(5rem\+112px\+env\(safe-area-inset-bottom\)\)\] min-\[769px\]:bottom-\[80px\]/,
   );
   assert.doesNotMatch(
     mapPageSource,
@@ -30,7 +30,10 @@ test("My Location keeps its root-font-aware safe-area offset and visible anchor"
     /pointer-events-none fixed inset-x-0 bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\] z-\[1000\] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8/,
   );
   assert.match(locationButtonSource, /h-11 w-11 min-w-11/);
-  assert.match(locationButtonSource, /h-\[30px\] w-\[30px\].*rounded-sm/);
+  assert.match(
+    locationButtonSource,
+    /h-11 w-11 min-w-11[\s\S]*?min-\[769px\]:h-\[30px\] min-\[769px\]:w-\[30px\] min-\[769px\]:min-w-\[30px\].*rounded-sm/,
+  );
   assert.doesNotMatch(locationButtonSource, /left-\[12px\].*bottom-\[/);
 });
 
@@ -152,6 +155,37 @@ test("map obstacle tags cover top search/status and bottom floating controls", a
   assert.ok((pageSource.match(/data-map-popup-obstacle="bottom"/g) ?? []).length >= 4);
   assert.match(
     pageSource,
-    /data-map-popup-obstacle="bottom"[\s\S]{0,220}left-\[12px\] bottom-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\][\s\S]{0,220}h-11 w-11/,
+    /data-map-location-obstacle="true"[\s\S]{0,220}left-\[12px\] bottom-\[calc\(5rem\+112px\+env\(safe-area-inset-bottom\)\)\][\s\S]{0,220}h-11 w-11[\s\S]{0,80}min-\[769px\]:bottom-\[80px\]/,
   );
+});
+
+test("My Location stays above the native zoom stack at mobile widths", async () => {
+  const [wrapperSource, locationControlSource, locationButtonSource] = await Promise.all([
+    readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./user-location-control.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./my-location-button.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(
+    wrapperSource,
+    /\.map-wrapper \[data-map-control="my-location"\] > span[\s\S]*?width:\s*44px[\s\S]*?height:\s*44px/,
+  );
+  assert.match(
+    wrapperSource,
+    /@media \(min-width: 769px\) and \(pointer: coarse\)[\s\S]*?\[data-map-control="my-location"\][\s\S]*?bottom:\s*calc\(112px \+ env\(safe-area-inset-bottom\)\)/,
+  );
+  assert.match(
+    locationControlSource,
+    /bottom-\[calc\(5rem\+112px\+env\(safe-area-inset-bottom\)\)\] min-\[769px\]:bottom-\[80px\]/,
+  );
+  assert.match(
+    locationButtonSource,
+    /h-11 w-11 min-w-11[\s\S]*?min-\[769px\]:h-\[30px\]/,
+  );
+
+  const mobileLeafletMargin = 90;
+  const nativeZoomStack = 92;
+  const minimumGap = 10;
+  assert.equal(mobileLeafletMargin + nativeZoomStack + minimumGap, 192);
+  assert.ok(192 > mobileLeafletMargin + nativeZoomStack);
 });

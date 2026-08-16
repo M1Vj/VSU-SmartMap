@@ -254,6 +254,21 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
             min-height: 44px;
             line-height: 44px;
           }
+
+          .map-wrapper [data-map-control="my-location"] > span {
+            width: 44px;
+            min-width: 44px;
+            height: 44px;
+            min-height: 44px;
+          }
+        }
+
+        @media (min-width: 769px) and (pointer: coarse),
+          (min-width: 769px) and (any-pointer: coarse) {
+          .map-wrapper [data-map-control="my-location"],
+          .map-wrapper [data-map-location-obstacle="true"] {
+            bottom: calc(112px + env(safe-area-inset-bottom));
+          }
         }
       `}</style>
       <MapContainer
