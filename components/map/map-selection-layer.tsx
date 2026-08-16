@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
@@ -27,6 +27,8 @@ const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-tooltip",
   ".leaflet-interactive",
 ].join(",");
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type MapSelectionLayerProps = {
   items: readonly MapItem[];
@@ -77,11 +79,6 @@ export function MapSelectionLayer({
   const escapeFocusFrameRef = useRef<number | null>(null);
   const selectedIdRef = useRef(selectedId);
   const onClearSelectionRef = useRef(onClearSelection);
-  // Stable Leaflet listeners read these refs so prop updates do not rebuild the gateway.
-  // eslint-disable-next-line react-hooks/refs
-  selectedIdRef.current = selectedId;
-  // eslint-disable-next-line react-hooks/refs
-  onClearSelectionRef.current = onClearSelection;
   const [zoom, setZoom] = useState(() => map.getZoom());
   const interactionCallbacksRef = useRef<InteractionCallbacks>({
     items,
@@ -91,15 +88,18 @@ export function MapSelectionLayer({
     onMapClick,
     onDirections,
   });
-  // eslint-disable-next-line react-hooks/refs
-  interactionCallbacksRef.current = {
-    items,
-    onSelect,
-    onMarkerTapOverride,
-    onClearSelection,
-    onMapClick,
-    onDirections,
-  };
+  useIsomorphicLayoutEffect(() => {
+    selectedIdRef.current = selectedId;
+    onClearSelectionRef.current = onClearSelection;
+    interactionCallbacksRef.current = {
+      items,
+      onSelect,
+      onMarkerTapOverride,
+      onClearSelection,
+      onMapClick,
+      onDirections,
+    };
+  }, [items, onClearSelection, onDirections, onMapClick, onMarkerTapOverride, onSelect, selectedId]);
 
   const dispatchMarkerSelection = useCallback((itemId: string) => {
     const {

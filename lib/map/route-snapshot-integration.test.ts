@@ -131,7 +131,8 @@ test("route request identity stays coordinator-owned after calculation starts", 
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {
   const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /class InteractionCallbackRegistry/);
-  assert.doesNotMatch(source, /useIsomorphicLayoutEffect|useLayoutEffect/);
+  assert.match(source, /const useIsomorphicLayoutEffect =/);
+  assert.match(source, /useIsomorphicLayoutEffect\(\(\) => \{[\s\S]{0,360}selectedIdRef\.current = selectedId[\s\S]{0,240}interactionCallbacksRef\.current =/);
   assert.match(source, /interactionCallbacksRef/);
   assert.match(source, /const \[interactionGateway\] = useState\(/);
   assert.match(source, /createInteractionGateway/);
