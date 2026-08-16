@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useEffect, useRef, useCallback, useState } from "react";
+import { memo, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useState } from "react";
 import { Marker, Tooltip, Popup, useMap } from "@/components/map/leaflet-react";
 import { divIcon, type DivIcon, type Marker as LeafletMarker } from "leaflet";
 import {
@@ -39,6 +39,8 @@ import {
   type PopupAutoPanPadding,
   type PopupObstacleRect,
 } from "@/lib/map/map-popup-clearance";
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type MapMarkerProps = {
   item: MapItem;
@@ -116,7 +118,9 @@ export const MapMarker = memo(function MapMarker({
   const pointerActivationRef = useRef<PointerActivation | null>(null);
   const cancelledPointerAtRef = useRef<number | null>(null);
   const selectedRef = useRef(isSelected);
-  selectedRef.current = isSelected;
+  useIsomorphicLayoutEffect(() => {
+    selectedRef.current = isSelected;
+  }, [isSelected]);
   const lastActivationModalityRef = useRef<MarkerPopupModality>("mouse");
   const popupOpenFrameRef = useRef<number | null>(null);
   const popupOpenGenerationRef = useRef(0);
@@ -220,7 +224,6 @@ export const MapMarker = memo(function MapMarker({
     const marker = markerRef.current;
     if (!marker) return;
 
-    selectedRef.current = isSelected;
     marker.closeTooltip();
 
     if (isSelected && !onMarkerTapOverride) requestPopupOpen();

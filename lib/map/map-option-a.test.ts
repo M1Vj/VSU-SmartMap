@@ -63,7 +63,8 @@ test("marker popup lifecycle is viewport-independent and controller-owned", asyn
   assert.doesNotMatch(markerSource, /\{!isMobile && \(/);
   assert.match(markerSource, /<MapMarkerPopupShell/);
   assert.match(markerSource, /shouldDeselectAfterPopupClose/);
-  assert.match(markerSource, /selectedRef\.current = isSelected/);
+  assert.match(markerSource, /const useIsomorphicLayoutEffect = typeof window === "undefined" \? useEffect : useLayoutEffect;/);
+  assert.match(markerSource, /useIsomorphicLayoutEffect\(\(\) => \{\s*selectedRef\.current = isSelected;\s*\}, \[isSelected\]\);/);
   assert.doesNotMatch(markerSource, /marker\.on\("popupclose"/);
   assert.match(markerSource, /data-map-popup-first-control/);
   assert.match(markerSource, /autoPanPaddingBottomRight/);
