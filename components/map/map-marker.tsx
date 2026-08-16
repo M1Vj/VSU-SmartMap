@@ -42,7 +42,6 @@ import {
 
 type MapMarkerProps = {
   item: MapItem;
-  displayCoordinates?: MapItem["coordinates"];
   isSelected?: boolean;
   isRouteDestination?: boolean;
   forceMinimized?: boolean;
@@ -56,7 +55,6 @@ type MapMarkerProps = {
 
 export const MapMarker = memo(function MapMarker({
   item,
-  displayCoordinates = item.coordinates,
   isSelected = false,
   isRouteDestination = false,
   forceMinimized = false,
@@ -106,7 +104,7 @@ export const MapMarker = memo(function MapMarker({
     });
   }, [item, isSelected, isMinimized, showSideLabel]);
 
-  const position: [number, number] = [displayCoordinates.lat, displayCoordinates.lng];
+  const position: [number, number] = [item.coordinates.lat, item.coordinates.lng];
   const markerRef = useRef<LeafletMarker>(null);
   const [readyMarker, setReadyMarker] = useState<LeafletMarker | null>(null);
   const compatibilityActivationRef = useRef<{

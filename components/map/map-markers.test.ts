@@ -3,15 +3,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./map-markers.tsx", import.meta.url), "utf8");
+const markerSource = readFileSync(new URL("./map-marker.tsx", import.meta.url), "utf8");
 
-test("renders every overview item through an individual marker", () => {
-  assert.match(source, /import \{ spreadCoLocatedItems \} from "@\/lib\/map\/declutter";/);
-  assert.match(
-    source,
-    /const spreadItems = useMemo\(\s*\(\) => spreadCoLocatedItems\(items, zoomBucket, \{ protectedIds \}\)/,
-  );
-  assert.match(source, /spreadItems\.map\(\(\{ item, displayCoordinates \}\) =>/);
+test("renders every item at its source coordinates without a rewrite path", () => {
+  assert.match(source, /items\.map\(\(item\) => \(/);
+  assert.match(source, /item=\{item\}/);
+  assert.doesNotMatch(source, /spreadCoLocatedItems|zoomBucket|centroid|fan.?out|groupOverlappingItems/);
+  assert.doesNotMatch(source, /displayCoordinates/);
   assert.doesNotMatch(source, /MapMarkerCluster|marker-clusters|renderType|cluster/);
+});
+
+test("derives every Leaflet marker position from its item coordinates", () => {
+  assert.match(markerSource, /const position: \[number, number\] = \[item\.coordinates\.lat, item\.coordinates\.lng\];/);
+  assert.doesNotMatch(markerSource, /displayCoordinates/);
 });
 
 test("keeps selection, route, and activation callbacks on every marker", () => {
@@ -25,21 +29,8 @@ test("keeps selection, route, and activation callbacks on every marker", () => {
   );
 });
 
-test("passes protected marker IDs into declutter", () => {
-  assert.match(source, /const protectedIds = useMemo\(\(\) => \{/);
-  assert.match(source, /if \(minimizeNonDestinationMarkers \|\| onMarkerTapOverride\) \{/);
-  assert.match(source, /if \(selectedId != null\) ids\.add\(selectedId\);/);
-  assert.match(source, /if \(routeDestinationId != null\) ids\.add\(routeDestinationId\);/);
-  assert.match(source, /spreadCoLocatedItems\(items, zoomBucket, \{\s*protectedIds\s*\}\)/);
-});
-
-test("seeds declutter protections from the page-owned runtime marker set", () => {
-  assert.match(source, /protectedMarkerIds\?: ReadonlySet<string>;/);
-  assert.match(
-    source,
-    /const protectedIds = useMemo\(\(\) => \{\s*const ids = new Set<string>\(protectedMarkerIds \?\? \[\]\);/,
-  );
-  assert.match(source, /protectedMarkerIds,/);
+test("does not thread a dead protected marker registry into rendering", () => {
+  assert.doesNotMatch(source, /protectedMarkerIds|protectedIds|useMemo/);
 });
 
 test("propagates an accepted navigation ID through the marker registry", () => {

@@ -1,7 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
-import { spreadCoLocatedItems } from "@/lib/map/declutter";
+import { memo } from "react";
 import type { MapItem } from "@/lib/types/map";
 import { MapMarker } from "./map-marker";
 
@@ -10,7 +9,6 @@ type MapMarkersProps = {
   selectedId?: string | null;
   routeDestinationId?: string | null;
   minimizeNonDestinationMarkers?: boolean;
-  protectedMarkerIds?: ReadonlySet<string>;
   zoom: number;
   onSelect?: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
@@ -24,7 +22,6 @@ export const MapMarkers = memo(function MapMarkers({
   selectedId,
   routeDestinationId,
   minimizeNonDestinationMarkers = false,
-  protectedMarkerIds,
   zoom,
   onSelect,
   onMarkerTapOverride,
@@ -32,29 +29,12 @@ export const MapMarkers = memo(function MapMarkers({
   onDeselect,
   onDirections,
 }: MapMarkersProps) {
-  const zoomBucket = Math.min(20, Math.max(15, Math.floor(zoom)));
-  const protectedIds = useMemo(() => {
-    const ids = new Set<string>(protectedMarkerIds ?? []);
-    if (minimizeNonDestinationMarkers || onMarkerTapOverride) {
-      items.forEach((item) => ids.add(item.id));
-      return ids;
-    }
-    if (selectedId != null) ids.add(selectedId);
-    if (routeDestinationId != null) ids.add(routeDestinationId);
-    return ids;
-  }, [items, minimizeNonDestinationMarkers, onMarkerTapOverride, protectedMarkerIds, routeDestinationId, selectedId]);
-  const spreadItems = useMemo(
-    () => spreadCoLocatedItems(items, zoomBucket, { protectedIds }),
-    [items, protectedIds, zoomBucket],
-  );
-
   return (
     <>
-      {spreadItems.map(({ item, displayCoordinates }) => (
+      {items.map((item) => (
         <MapMarker
           key={item.id}
           item={item}
-          displayCoordinates={displayCoordinates}
           onSelect={onSelect}
           onMarkerTapOverride={onMarkerTapOverride}
           onMarkerActivate={onMarkerActivate}

@@ -35,7 +35,6 @@ type MapSelectionLayerProps = {
   selectedId: string | null;
   routeDestinationId?: string | null;
   minimizeNonDestinationMarkers?: boolean;
-  protectedMarkerIds?: ReadonlySet<string>;
   onSelect: (item: MapItem) => void;
   onMarkerTapOverride?: (item: MapItem) => void;
   onDirections?: (item: MapItem) => number | null;
@@ -60,7 +59,6 @@ export function MapSelectionLayer({
   selectedId,
   routeDestinationId = null,
   minimizeNonDestinationMarkers = false,
-  protectedMarkerIds,
   onSelect,
   onMarkerTapOverride,
   onDirections,
@@ -405,7 +403,6 @@ export function MapSelectionLayer({
       selectedId={selectedId}
       routeDestinationId={routeDestinationId}
       minimizeNonDestinationMarkers={minimizeNonDestinationMarkers}
-      protectedMarkerIds={protectedMarkerIds}
       zoom={zoom}
         onSelect={handleMarkerSelect}
         onMarkerActivate={handleMarkerActivate}
