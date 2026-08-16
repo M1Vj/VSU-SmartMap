@@ -383,7 +383,7 @@ test("a failed invalid replacement keeps the committed route destination-owned a
     message: failure instanceof Error ? failure.message : "provider unavailable",
   });
 
-  assert.strictEqual(state.navigation.committedRoute, committedRoute);
+  assert.strictEqual(state.navigation.committed?.route, committedRoute);
   assert.equal(state.navigation.committed?.destinationId, "facility-a");
   assert.equal(state.presentation.controls.primaryAction, "clear");
   assert.equal(state.presentation.controls.canReportRoute, true);

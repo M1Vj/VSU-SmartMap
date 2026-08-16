@@ -128,7 +128,6 @@ export const MapMarker = memo(function MapMarker({
   const popupFocusFrameRef = useRef<number | null>(null);
   const markerRestoreFrameRef = useRef<number | null>(null);
   const markerRestoreGenerationRef = useRef(0);
-  const popupClearanceActiveRef = useRef(false);
   const [popupAutoPanPadding, setPopupAutoPanPadding] = useState<PopupAutoPanPadding>(
     DEFAULT_POPUP_AUTO_PAN_PADDING,
   );
@@ -274,15 +273,11 @@ export const MapMarker = memo(function MapMarker({
 
   useEffect(() => {
     if (!isSelected || onMarkerTapOverride) {
-      if (!popupClearanceActiveRef.current) return;
-      popupClearanceActiveRef.current = false;
       setPopupAutoPanPadding((current) =>
         resetPopupAutoPanPaddingIfNeeded(current),
       );
       return;
     }
-
-    popupClearanceActiveRef.current = true;
 
     const mapContainer = map.getContainer();
     const obstacleSelector = '[data-map-popup-obstacle="top"], [data-map-popup-obstacle="bottom"]';
@@ -414,7 +409,7 @@ export const MapMarker = memo(function MapMarker({
       window.removeEventListener("resize", handleWindowResize);
       map.off("resize", handleMapResize);
     };
-  }, [isSelected, isRouteDestination, onMarkerTapOverride, map]);
+  }, [isSelected, onMarkerTapOverride, map]);
 
   useEffect(() => {
     const popup = readyMarker?.getPopup();

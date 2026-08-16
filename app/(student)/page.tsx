@@ -9,7 +9,6 @@ import type { Facility } from "@/lib/types/facility";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
 import type { BoardingHouseMapItem, MapItem } from "@/lib/types/map";
 import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
-import { getBoardingHouseSummaries } from "@/lib/supabase/queries/boarding-houses";
 import {
   getPublicBoardingHouseSummaries,
   keepPublicBoardingHouses,
@@ -43,7 +42,6 @@ import { cn } from "@/lib/utils";
 import {
   createMapRuntimeController,
   getRouteFacingEndpoint,
-  getPresentedNavigationSnapshot,
 } from "@/lib/map/map-runtime";
 import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
 import {
@@ -72,6 +70,8 @@ const ManualStartPin = dynamic(
   () => import("@/components/map/manual-start-pin").then((m) => m.ManualStartPin),
   { ssr: false },
 );
+
+const DIRECTIONS_UNAVAILABLE_MESSAGE = "Directions are unavailable right now. The map still works.";
 
 export default function HomePage() {
   return (
@@ -238,7 +238,7 @@ function MapTab() {
 
         if (!cached?.length && isOfflineCacheSession()) {
           setError("Map data has not been cached on this device yet. Reconnect once to save the campus map for offline use.");
-          setNavigationGraphError("Directions are unavailable right now. The map still works.");
+          setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
           setItems([]);
           setFiltered([]);
           setIsLoading(false);
@@ -274,14 +274,14 @@ function MapTab() {
                setNavigationGraphError(null);
                await setCachedNavigationGraph(nodesRes.data, edgesRes.data);
              } else if (!cachedGraphAvailable) {
-               setNavigationGraphError("Directions are unavailable right now. The map still works.");
-               toast.error("Directions are unavailable right now. The map still works.");
+               setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
+               toast.error(DIRECTIONS_UNAVAILABLE_MESSAGE);
              }
            } catch (e) {
              console.warn("Failed to sync navigation graph", e);
              if (!cachedGraphAvailable) {
-               setNavigationGraphError("Directions are unavailable right now. The map still works.");
-               toast.error("Directions are unavailable right now. The map still works.");
+               setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
+               toast.error(DIRECTIONS_UNAVAILABLE_MESSAGE);
              }
            }
         };
@@ -539,9 +539,8 @@ function MapView({
   }, []);
   const pendingNavigation = runtimeState.navigation.request;
   const committedNavigation = runtimeState.navigation.committed;
-  const presentedNavigation = getPresentedNavigationSnapshot(runtimeState);
   const routeRequestDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? undefined;
-  const routeDestinationId = committedNavigation?.destinationId ?? presentedNavigation?.destinationId ?? null;
+  const routeDestinationId = committedNavigation?.destinationId ?? pendingNavigation?.destinationId ?? null;
   const routeSelectionDestinationId = runtimeState.navigation.selectionDestinationId;
   const routeFacingEnd = getRouteFacingEndpoint(runtimeState, navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null);
   const navigationOrigin = pendingNavigation?.origin ?? committedNavigation?.origin ?? runtimeState.navigation.origin;
@@ -562,7 +561,7 @@ function MapView({
     pendingNavigation?.destinationId,
     runtimeState.selectedItemId,
   ]);
-  const committedRoute = committedNavigation?.route ?? runtimeState.navigation.committedRoute;
+  const committedRoute = committedNavigation?.route;
   const hasCommittedOverlay = Boolean(committedRoute);
   const shouldReuseCommittedRoute =
     reuseCommittedRouteAfterRestore &&
@@ -581,8 +580,9 @@ function MapView({
     statusText: runtimeState.presentation.controls.statusText,
   };
   const reportContext = useMemo(() => {
-    const destination = [...filtered, ...(selectedBoardingHouse ? [selectedBoardingHouse] : [])]
-      .find((item) => item.id === committedNavigation?.destinationId);
+    const destinationId = committedNavigation?.destinationId;
+    const destination = filtered.find((item) => item.id === destinationId) ??
+      (selectedBoardingHouse?.id === destinationId ? selectedBoardingHouse : undefined);
     return {
       fromText:
         committedNavigation?.origin === "live"
@@ -602,30 +602,37 @@ function MapView({
   }, [committedNavigation, filtered, navMode, selectedBoardingHouse]);
 
   const resolveManualStart = useCallback((point: NavigationPoint, origin: "manual" | "live") => {
-    if (!isManualStartPending) return false;
     const current = runtime.getState();
+    if (current.navigation.phase !== "acquiring") return false;
     const pendingRequestId = current.navigation.pendingRequestId;
     const request = current.navigation.request;
     if (pendingRequestId == null) return false;
     if (!request || !request.end) return false;
-    setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
     const next = runtime.dispatch({
       type: "navigation/resolving",
       requestId: pendingRequestId,
       origin,
       start: { lat: point.lat, lng: point.lng },
     });
-    if (next !== current && next.navigation.pendingRequestId === pendingRequestId) {
-      setNavigationRoute({
-        navStart: { lat: point.lat, lng: point.lng } as LatLng,
-        navEnd: { lat: request.end.lat, lng: request.end.lng } as LatLng,
-        destinationId: request.destinationId,
-        mode: request.mode,
-        origin,
-      });
-    }
-    return true;
-  }, [isManualStartPending, runtime, setNavStart, setNavigationRoute]);
+    const accepted =
+      next !== current &&
+      next.navigation.pendingRequestId === pendingRequestId &&
+      next.navigation.request?.requestId === pendingRequestId &&
+      (next.navigation.phase === "resolving" || next.navigation.phase === "refreshing") &&
+      next.navigation.request.start?.lat === point.lat &&
+      next.navigation.request.start?.lng === point.lng;
+    if (!accepted) return false;
+
+    setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
+    setNavigationRoute({
+      navStart: { lat: point.lat, lng: point.lng } as LatLng,
+      navEnd: { lat: request.end.lat, lng: request.end.lng } as LatLng,
+      destinationId: request.destinationId,
+      mode: request.mode,
+      origin,
+    });
+    return accepted;
+  }, [runtime, setNavStart, setNavigationRoute]);
 
   useEffect(() => {
     if (selectedId && selectedId !== runtimeState.selectedItemId) {

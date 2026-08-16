@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMap } from "@/components/map/leaflet-react";
 import { getViewAfterDeselect, type MapViewState } from "@/lib/map/selection-view";
 import { getMapCameraPolicy } from "@/lib/navigation/map-camera-policy";
@@ -20,9 +20,6 @@ import {
   type PointerActivationEvent,
 } from "@/lib/map/pointer-activation";
 
-const useIsomorphicLayoutEffect =
-  typeof window === "undefined" ? useEffect : useLayoutEffect;
-
 const MAP_INTERACTIVE_SELECTOR = [
   "[data-map-control]",
   ".leaflet-control",
@@ -31,69 +28,6 @@ const MAP_INTERACTIVE_SELECTOR = [
   ".leaflet-tooltip",
   ".leaflet-interactive",
 ].join(",");
-
-class InteractionCallbackRegistry {
-  private items: readonly MapItem[];
-  private onSelect: (item: MapItem) => void;
-  private onMarkerTapOverride?: (item: MapItem) => void;
-  private onClearSelection?: () => void;
-  private onMapClick?: (point: { lat: number; lng: number }) => void;
-  private onDirections?: (item: MapItem) => number | null;
-
-  constructor({
-    items,
-    onSelect,
-    onMarkerTapOverride,
-    onClearSelection,
-    onMapClick,
-    onDirections,
-  }: Pick<MapSelectionLayerProps, "items" | "onSelect" | "onMarkerTapOverride" | "onClearSelection" | "onMapClick" | "onDirections">) {
-    this.items = items;
-    this.onSelect = onSelect;
-    this.onMarkerTapOverride = onMarkerTapOverride;
-    this.onClearSelection = onClearSelection;
-    this.onMapClick = onMapClick;
-    this.onDirections = onDirections;
-  }
-
-  update({
-    items,
-    onSelect,
-    onMarkerTapOverride,
-    onClearSelection,
-    onMapClick,
-    onDirections,
-  }: Pick<MapSelectionLayerProps, "items" | "onSelect" | "onMarkerTapOverride" | "onClearSelection" | "onMapClick" | "onDirections">) {
-    this.items = items;
-    this.onSelect = onSelect;
-    this.onMarkerTapOverride = onMarkerTapOverride;
-    this.onClearSelection = onClearSelection;
-    this.onMapClick = onMapClick;
-    this.onDirections = onDirections;
-  }
-
-  marker(itemId: string) {
-    const item = this.items.find((candidate) => candidate.id === itemId);
-    if (!item) return;
-    if (this.onMarkerTapOverride) {
-      this.onMarkerTapOverride(item);
-      return;
-    }
-    this.onSelect(item);
-  }
-
-  background(point?: { lat: number; lng: number }) {
-    if (point && this.onMapClick) {
-      this.onMapClick(point);
-      return;
-    }
-    this.onClearSelection?.();
-  }
-
-  directions(item: MapItem) {
-    return this.onDirections?.(item) ?? null;
-  }
-}
 
 type MapSelectionLayerProps = {
   items: readonly MapItem[];
@@ -109,6 +43,16 @@ type MapSelectionLayerProps = {
   flyZoom?: number;
   navigationOwnsViewport?: boolean;
 };
+
+type InteractionCallbacks = Pick<
+  MapSelectionLayerProps,
+  | "items"
+  | "onSelect"
+  | "onMarkerTapOverride"
+  | "onClearSelection"
+  | "onMapClick"
+  | "onDirections"
+>;
 
 export function MapSelectionLayer({
   items,
@@ -141,16 +85,52 @@ export function MapSelectionLayer({
   );
   const mapReadyMarkedRef = useRef(false);
   const [zoom, setZoom] = useState(() => map.getZoom());
-  const [interactionRegistry] = useState(
-    () => new InteractionCallbackRegistry({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections }),
-  );
-  useIsomorphicLayoutEffect(() => {
-    interactionRegistry.update({ items, onSelect, onMarkerTapOverride, onClearSelection, onMapClick, onDirections });
-  }, [interactionRegistry, items, onClearSelection, onDirections, onMapClick, onMarkerTapOverride, onSelect]);
+  const interactionCallbacksRef = useRef<InteractionCallbacks>({
+    items,
+    onSelect,
+    onMarkerTapOverride,
+    onClearSelection,
+    onMapClick,
+    onDirections,
+  });
+  interactionCallbacksRef.current = {
+    items,
+    onSelect,
+    onMarkerTapOverride,
+    onClearSelection,
+    onMapClick,
+    onDirections,
+  };
+
+  const dispatchMarkerSelection = useCallback((itemId: string) => {
+    const {
+      items: currentItems,
+      onSelect: select,
+      onMarkerTapOverride: override,
+    } = interactionCallbacksRef.current;
+    const item = currentItems.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    if (override) {
+      override(item);
+      return;
+    }
+    select(item);
+  }, []);
+  const dispatchBackground = useCallback((point?: { lat: number; lng: number }) => {
+    const { onMapClick, onClearSelection } = interactionCallbacksRef.current;
+    if (point && onMapClick) {
+      onMapClick(point);
+      return;
+    }
+    onClearSelection?.();
+  }, []);
+  const dispatchDirections = useCallback((item: MapItem) => {
+    return interactionCallbacksRef.current.onDirections?.(item) ?? null;
+  }, []);
   const [interactionGateway] = useState(
     () => createInteractionGateway({
-      onMarkerActivate: (itemId) => interactionRegistry.marker(itemId),
-      onBackground: (point) => interactionRegistry.background(point),
+      onMarkerActivate: dispatchMarkerSelection,
+      onBackground: dispatchBackground,
     }),
   );
 
@@ -215,14 +195,14 @@ export function MapSelectionLayer({
     }
   }, [selectedId]);
   const handleMarkerSelect = useCallback((item: MapItem) => {
-    interactionRegistry.marker(item.id);
-  }, [interactionRegistry]);
+    dispatchMarkerSelection(item.id);
+  }, [dispatchMarkerSelection]);
   const handleMarkerDeselect = useCallback(() => {
-    interactionRegistry.background();
-  }, [interactionRegistry]);
+    dispatchBackground();
+  }, [dispatchBackground]);
   const handleMarkerDirections = useCallback((item: MapItem) => {
-    return interactionRegistry.directions(item);
-  }, [interactionRegistry]);
+    return dispatchDirections(item);
+  }, [dispatchDirections]);
 
   const handlePlainMapInteraction = useCallback((
     target: HTMLElement | null,

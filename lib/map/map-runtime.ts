@@ -45,7 +45,6 @@ export interface MapRuntimeState {
     /** Item selection that owns the current navigation flow, including a failed replacement. */
     selectionDestinationId: string | null;
     pendingRequestId: number | null;
-    committedRoute: PathResult | null;
     request: NavigationRequestSnapshot | null;
     committed: CommittedNavigationSnapshot | null;
     error: string | null;
@@ -94,28 +93,21 @@ export type MapRuntimeEvent =
 export function createInitialMapRuntimeState(
   mode: TransportMode = "walking",
 ): MapRuntimeState {
+  const navigation: MapRuntimeState["navigation"] = {
+    phase: "idle",
+    origin: null,
+    mode,
+    destinationId: null,
+    selectionDestinationId: null,
+    pendingRequestId: null,
+    request: null,
+    committed: null,
+    error: null,
+  };
   return {
     selectedItemId: null,
-    navigation: {
-      phase: "idle",
-      origin: null,
-      mode,
-      destinationId: null,
-      selectionDestinationId: null,
-      pendingRequestId: null,
-      committedRoute: null,
-      request: null,
-      committed: null,
-      error: null,
-    },
-    presentation: derivePresentation({
-      phase: "idle",
-      destinationId: null,
-      committedRoute: null,
-      request: null,
-      committed: null,
-      error: null,
-    }),
+    navigation,
+    presentation: derivePresentation(navigation),
   };
 }
 
@@ -126,13 +118,13 @@ function isCurrentRequest(state: MapRuntimeState, requestId: number): boolean {
 function derivePresentation(
   input: Pick<
     MapRuntimeState["navigation"],
-    "phase" | "destinationId" | "committedRoute" | "error" | "request" | "committed"
+    "phase" | "destinationId" | "error" | "request" | "committed"
   >,
 ): MapRuntimeState["presentation"] {
   const presentedDestination =
     input.committed?.destinationId ?? input.request?.destinationId ?? input.destinationId;
   const hasDestination = Boolean(presentedDestination);
-  const hasRoute = Boolean(input.committed?.route ?? input.committedRoute);
+  const hasRoute = Boolean(input.committed?.route);
   const routeMode: MarkerMode = hasDestination || hasRoute ? "destination-focused" : "default";
 
   return {
@@ -168,7 +160,6 @@ export function mapRuntimeReducer(
       destinationId: null,
       selectionDestinationId: null,
       pendingRequestId: null,
-      committedRoute: null,
       request: null,
       committed: null,
       error: null,
@@ -194,13 +185,12 @@ export function mapRuntimeReducer(
       selectionDestinationId: committed.destinationId,
       pendingRequestId: null,
       request: null,
-      committedRoute: committed.route,
       error: null,
     };
     return { ...state, navigation, presentation: derivePresentation(navigation) };
   }
   if (event.type === "navigation/requested") {
-    const hasCommittedRoute = state.navigation.committedRoute !== null;
+    const hasCommittedRoute = state.navigation.committed !== null;
     const navigation = {
       ...state.navigation,
       phase: event.awaitingStart
@@ -228,8 +218,8 @@ export function mapRuntimeReducer(
   if (event.type === "navigation/acquiring" || event.type === "navigation/resolving") {
     if (!isCurrentRequest(state, event.requestId)) return state;
     const phase = event.type === "navigation/acquiring"
-      ? (state.navigation.committedRoute ? "refreshing" : "acquiring")
-      : (state.navigation.committedRoute ? "refreshing" : "resolving");
+      ? (state.navigation.committed ? "refreshing" : "acquiring")
+      : (state.navigation.committed ? "refreshing" : "resolving");
     const navigation = {
       ...state.navigation,
       phase: phase as NavigationPhase,
@@ -269,7 +259,6 @@ export function mapRuntimeReducer(
       ...state.navigation,
       phase: "active" as const,
       pendingRequestId: null,
-      committedRoute: event.route,
       destinationId: snapshot.destinationId,
       selectionDestinationId: snapshot.destinationId,
       origin: snapshot.origin,

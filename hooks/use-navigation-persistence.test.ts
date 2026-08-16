@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   EMPTY_NAVIGATION_STATE,
@@ -72,4 +73,9 @@ test("disabled storage cannot turn cleanup into a persistence error", () => {
     if (previousStorage === undefined) Reflect.deleteProperty(globalObject, "localStorage");
     else Object.defineProperty(globalObject, "localStorage", { configurable: true, value: previousStorage });
   }
+});
+
+test("the persistence hook keeps route timestamps internal", async () => {
+  const source = await readFile(new URL("./use-navigation-persistence.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /routeStartTime: navigationState\.routeStartTime/);
 });

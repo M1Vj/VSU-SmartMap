@@ -138,9 +138,8 @@ export function findPreparedNearestEdge(
   lat: number,
   lng: number,
   mode: TransportMode,
-): { nearestPoint: { lat: number; lng: number }; nearestEdge: MapEdge | null; distance: number } {
+): { nearestEdge: MapEdge | null; distance: number } {
   let minDistance = Infinity;
-  let nearestPoint = { lat, lng };
   let nearestEdge: MapEdge | null = null;
   for (const edge of graph.edges) {
     if (!canTraverse(edge, mode, graph.nodeById)) continue;
@@ -151,11 +150,10 @@ export function findPreparedNearestEdge(
     const distance = getDistance(lat, lng, pointOnEdge.lat, pointOnEdge.lng);
     if (distance < minDistance) {
       minDistance = distance;
-      nearestPoint = pointOnEdge;
       nearestEdge = edge;
     }
   }
-  return { nearestPoint, nearestEdge, distance: minDistance };
+  return { nearestEdge, distance: minDistance };
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

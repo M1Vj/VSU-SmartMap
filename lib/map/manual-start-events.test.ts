@@ -11,6 +11,7 @@ test("every manual-start completion dispatches the exact pending request", async
   assert.match(source, /const resolveManualStart = useCallback/);
   assert.match(source, /const pendingRequestId = runtime\.getState\(\)\.navigation\.pendingRequestId/);
   assert.match(source, /if \(pendingRequestId == null\) return/);
+  assert.match(source, /const accepted =\s*next !== current[\s\S]{0,1000}return accepted;/);
   assert.match(source, /if \(resolveManualStart\(routeStart, "live"\)\) setManualLocationRequestPending\(false\)/);
   assert.match(source, /if \(resolveManualStart\(VSU_MAIN_GATE, "manual"\)\) setManualLocationRequestPending\(false\)/);
 });

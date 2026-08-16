@@ -128,13 +128,13 @@ test("selected marker clearance observes only the selected marker and cleans up 
   assert.match(markerSource, /rect\.height > 0/);
   assert.match(markerSource, /rect\.right <= mapRect\.left/);
   assert.match(markerSource, /rect\.left >= mapRect\.right/);
-  assert.match(markerSource, /\[isSelected, isRouteDestination/);
+  assert.match(markerSource, /\[isSelected, onMarkerTapOverride, map\]/);
 });
 
 test("unselected markers keep default clearance stable and scoped obstacle changes are coalesced", async () => {
   const markerSource = await readFile(new URL("./map-marker.tsx", import.meta.url), "utf8");
 
-  assert.match(markerSource, /popupClearanceActiveRef/);
+  assert.doesNotMatch(markerSource, /popupClearanceActiveRef/);
   assert.match(markerSource, /setPopupAutoPanPadding\(\(current\) =>/);
   assert.match(markerSource, /new MutationObserver/);
   assert.match(markerSource, /childList: true/);

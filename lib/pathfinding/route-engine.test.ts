@@ -38,7 +38,9 @@ test("prepared graph exposes snapping indexes without rescanning route input arr
   const prepared = prepareRouteGraph(nodes, edges, "graph-1");
   assert.equal(isPreparedNodeNavigable(prepared, "a", "walking"), true);
   assert.equal(isPreparedNodeNavigable(prepared, "a", "driving"), false);
-  assert.equal(findPreparedNearestEdge(prepared, 10, 10.0004, "walking")?.nearestEdge?.id, "ab");
+  const nearest = findPreparedNearestEdge(prepared, 10, 10.0004, "walking");
+  assert.equal(nearest.nearestEdge?.id, "ab");
+  assert.equal("nearestPoint" in nearest, false);
 });
 
 test("prepared destination snapping preserves directed-edge navigability", () => {

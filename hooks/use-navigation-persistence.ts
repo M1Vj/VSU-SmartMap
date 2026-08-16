@@ -170,7 +170,6 @@ export function useNavigationPersistence() {
     mode: navigationState.mode,
     origin: navigationState.origin,
     setNavigationRoute,
-    routeStartTime: navigationState.routeStartTime,
     clearNavigation,
   };
 }

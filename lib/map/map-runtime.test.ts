@@ -28,7 +28,8 @@ test("runtime derives one presentation state for every navigation phase", () => 
   for (const event of events) state = mapRuntimeReducer(state, event);
 
   assert.equal(state.navigation.phase, "active");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal("committedRoute" in state.navigation, false);
+  assert.equal(state.navigation.committed?.route, route);
   assert.equal(state.navigation.selectionDestinationId, "facility-1");
   assert.equal(state.presentation.markerMode, "destination-focused");
   assert.equal(state.presentation.controls.primaryAction, "clear");
@@ -56,7 +57,7 @@ test("stale route results cannot replace the committed route", () => {
     route: { ...route, totalDistance: 999 },
   });
 
-  assert.equal(stale.navigation.committedRoute?.totalDistance, 150);
+  assert.equal(stale.navigation.committed?.route.totalDistance, 150);
   assert.equal(stale.navigation.pendingRequestId, 2);
   assert.equal(stale.navigation.phase, "refreshing");
 });
@@ -99,7 +100,7 @@ test("clear explicitly retires the committed route instead of inferring from an 
   state = mapRuntimeReducer(state, { type: "navigation/cleared" });
 
   assert.equal(state.navigation.phase, "cleared");
-  assert.equal(state.navigation.committedRoute, null);
+  assert.equal(state.navigation.committed, null);
   assert.equal(state.navigation.destinationId, null);
   assert.equal(state.presentation.markerMode, "default");
 });
@@ -120,7 +121,7 @@ test("refresh and failure preserve the committed overlay and destination-focused
     origin: "live",
   });
   assert.equal(state.navigation.phase, "refreshing");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.committed?.route, route);
   assert.equal(state.presentation.markerMode, "destination-focused");
 
   state = mapRuntimeReducer(state, {
@@ -129,7 +130,7 @@ test("refresh and failure preserve the committed overlay and destination-focused
     message: "provider unavailable",
   });
   assert.equal(state.navigation.phase, "failed");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.committed?.route, route);
   assert.equal(state.navigation.selectionDestinationId, "facility-1");
   assert.equal(state.navigation.error, "provider unavailable");
   assert.equal(state.presentation.markerMode, "destination-focused");
@@ -143,7 +144,7 @@ test("adapter resolving event cannot hide a committed route during refresh", () 
   state = mapRuntimeReducer(state, { type: "navigation/requested", requestId: 2, destinationId: "facility-1", origin: "live" });
   state = mapRuntimeReducer(state, { type: "navigation/resolving", requestId: 2 });
   assert.equal(state.navigation.phase, "refreshing");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.committed?.route, route);
 });
 
 test("manual start resolution keeps the exact request and updates origin", () => {
@@ -443,7 +444,7 @@ test("awaiting a replacement start keeps manual controls available over the comm
 
   assert.equal(state.navigation.phase, "acquiring");
   assert.equal(state.navigation.committed?.destinationId, "facility-a");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.committed?.route, route);
   assert.equal(state.presentation.controls.primaryAction, "clear");
   assert.equal(state.presentation.controls.canReportRoute, true);
   assert.equal(state.presentation.controls.statusText, "Waiting for your location...");
@@ -455,5 +456,5 @@ test("awaiting a replacement start keeps manual controls available over the comm
     start: { lat: 9, lng: 9 },
   });
   assert.equal(state.navigation.phase, "refreshing");
-  assert.equal(state.navigation.committedRoute, route);
+  assert.equal(state.navigation.committed?.route, route);
 });

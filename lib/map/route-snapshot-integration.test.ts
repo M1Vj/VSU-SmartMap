@@ -4,7 +4,6 @@ import test from "node:test";
 
 test("map page presents committed route metadata while a replacement request is pending", async () => {
   const source = await readFile(new URL("../../app/(student)/page.tsx", import.meta.url), "utf8");
-  assert.match(source, /getPresentedNavigationSnapshot/);
   assert.match(source, /committedNavigation/);
   assert.match(source, /reportContext/);
   assert.match(source, /routeRequestDestinationId/);
@@ -30,6 +29,10 @@ test("map page presents committed route metadata while a replacement request is 
   assert.match(source, /destination=\{routeFacingEnd\}/);
   assert.match(source, /hasDestination: Boolean\(routeFacingEnd\)/);
   assert.match(source, /navigationOrigin=\{navigationOrigin\}/);
+  assert.doesNotMatch(source, /getBoardingHouseSummaries/);
+  assert.doesNotMatch(source, /runtimeState\.navigation\.committedRoute/);
+  assert.doesNotMatch(source, /getPresentedNavigationSnapshot/);
+  assert.match(source, /const routeDestinationId = committedNavigation\?\.destinationId \?\? pendingNavigation\?\.destinationId \?\? null/);
 });
 
 test("map page hydrates valid persisted navigation and restores committed metadata after replacement failure", async () => {
@@ -131,8 +134,9 @@ test("route request identity stays coordinator-owned after calculation starts", 
 
 test("selection gateway keeps its seen activation set across parent rerenders", async () => {
   const source = await readFile(new URL("../../components/map/map-selection-layer.tsx", import.meta.url), "utf8");
-  assert.match(source, /class InteractionCallbackRegistry/);
-  assert.match(source, /useIsomorphicLayoutEffect/);
+  assert.doesNotMatch(source, /class InteractionCallbackRegistry/);
+  assert.doesNotMatch(source, /useIsomorphicLayoutEffect|useLayoutEffect/);
+  assert.match(source, /interactionCallbacksRef/);
   assert.match(source, /const \[interactionGateway\] = useState\(/);
   assert.match(source, /createInteractionGateway/);
 });
