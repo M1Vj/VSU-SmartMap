@@ -15,7 +15,8 @@ test("map zoom options use Leaflet's supported native input lifecycle", () => {
     keyboard: true,
     zoomSnap: 0,
     zoomDelta: 0.25,
-    wheelDebounceTime: 40,
+    wheelDebounceTime: 16,
+    wheelPxPerZoomLevel: 120,
   });
 });
 

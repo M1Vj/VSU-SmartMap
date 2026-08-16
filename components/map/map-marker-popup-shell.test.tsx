@@ -23,7 +23,16 @@ test("renders a labelled non-modal popup shell with a reachable close control", 
   assert.match(markup, /h-11 w-11/);
   assert.match(markup, /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/);
   assert.match(markup, /overflow-y-auto/);
+  assert.match(markup, /data-map-popup-surface="true"/);
   assert.ok(568 - 376 >= 192);
+});
+
+test("popup surface stops pointer and click events before they reach the marker", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./map-marker-popup-shell.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /onPointerDown=\{stopMapPopupPropagation\}/);
+  assert.match(source, /onClick=\{stopMapPopupPropagation\}/);
 });
 
 test("Escape is owned by the popup while other keys pass through", () => {

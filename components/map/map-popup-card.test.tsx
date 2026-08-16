@@ -16,7 +16,7 @@ const facility = {
   createdAt: "2026-01-01T00:00:00.000Z",
 } as Facility;
 
-test("facility popup actions use explicit 44px button semantics", () => {
+test("facility popup actions stay compact on desktop and expose a coarse-pointer hit target", () => {
   const markup = renderToStaticMarkup(
     <MapPopupCard
       facility={facility}
@@ -28,8 +28,8 @@ test("facility popup actions use explicit 44px button semantics", () => {
   const buttons = markup.match(/<button\b[^>]*>/g) ?? [];
   assert.equal(buttons.length, 2);
   assert.equal(buttons.every((button) => /type="button"/.test(button)), true);
-  assert.equal(buttons.every((button) => /h-auto/.test(button) && /min-h-11/.test(button)), true);
-  assert.equal(buttons.every((button) => /min-w-\[6\.5rem\]/.test(button)), true);
+  assert.equal(buttons.every((button) => /data-map-popup-action="true"/.test(button)), true);
+  assert.equal(buttons.every((button) => /h-8/.test(button) && /text-xs/.test(button)), true);
   assert.match(markup, /Details/);
   assert.match(markup, /Navigate/);
   assert.match(markup, /pr-10/);
@@ -39,11 +39,11 @@ test("facility popup no longer contains bottom-sheet or fake loading behavior", 
   const source = await readFile(new URL("./map-popup-card.tsx", import.meta.url), "utf8");
   assert.match(source, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
-  assert.match(source, /className="flex w-full flex-wrap gap-2"/);
-  assert.equal((source.match(/min-w-\[6\.5rem\] flex-1/g) ?? []).length, 2);
-  assert.equal((source.match(/h-auto min-h-11/g) ?? []).length, 2);
-  assert.equal((source.match(/whitespace-normal/g) ?? []).length, 2);
-  assert.equal((source.match(/leading-tight/g) ?? []).length, 3);
+  assert.match(source, /className="flex gap-2"/);
+  assert.equal((source.match(/data-map-popup-action="true"/g) ?? []).length, 2);
+  assert.equal((source.match(/h-8 flex-1/g) ?? []).length, 2);
+  assert.doesNotMatch(source, /min-h-11|min-w-\[6\.5rem\]|whitespace-normal/);
+  assert.equal((source.match(/leading-tight/g) ?? []).length, 1);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

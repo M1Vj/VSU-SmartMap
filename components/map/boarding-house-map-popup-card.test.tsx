@@ -51,7 +51,7 @@ const listing = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 } as BoardingHouseSummary;
 
-test("boarding popup keeps Details as a semantic link and Navigate as a 44px button", () => {
+test("boarding popup keeps Details as a semantic link and stays compact on desktop", () => {
   const markup = renderToStaticMarkup(
     <BoardingHouseMapPopupCard listing={listing} onDirections={() => null} />,
   );
@@ -60,12 +60,11 @@ test("boarding popup keeps Details as a semantic link and Navigate as a 44px but
   const links = markup.match(/<a\b[^>]*>/g) ?? [];
   assert.equal(buttons.length, 1);
   assert.match(buttons[0], /type="button"/);
-  assert.match(buttons[0], /h-auto/);
-  assert.match(buttons[0], /min-h-11/);
-  assert.match(buttons[0], /min-w-\[6\.5rem\]/);
+  assert.match(buttons[0], /data-map-popup-action="true"/);
+  assert.match(buttons[0], /h-8/);
   assert.match(markup, /<a\b[^>]*href="\/boarding-houses\/boarding-1"/);
-  assert.match(markup, /<a\b[^>]*class="[^"\n]*h-auto[^"\n]*min-h-11/);
-  assert.equal(links.every((link) => /min-w-\[6\.5rem\]/.test(link)), true);
+  assert.match(markup, /<a\b[^>]*data-map-popup-action="true"/);
+  assert.match(markup, /<a\b[^>]*class="[^"\n]*h-8/);
   assert.match(markup, /pr-10/);
 });
 
@@ -76,15 +75,14 @@ test("boarding popup has no bottom-sheet or timer-based action behavior", async 
   );
   assert.match(source, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
-  assert.match(source, /className="flex w-full flex-wrap gap-2"/);
-  assert.match(source, /<Link[^>]*className="min-w-\[6\.5rem\] flex-1 whitespace-normal text-center leading-tight"/);
-  assert.match(
-    source,
-    /h-auto min-h-11 min-w-\[6\.5rem\] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight bg-blue-600/,
-  );
-  assert.equal((source.match(/h-auto min-h-11/g) ?? []).length, 2);
-  assert.equal((source.match(/whitespace-normal/g) ?? []).length, 3);
-  assert.equal((source.match(/leading-tight/g) ?? []).length >= 2, true);
+  assert.match(source, /className="flex gap-2"/);
+  assert.match(source, /<Link[^>]*data-map-popup-action="true"/);
+  assert.match(source, /data-map-popup-action="true"/);
+  assert.match(source, /h-8 flex-1 gap-2 bg-blue-600 text-xs/);
+  assert.equal((source.match(/data-map-popup-action="true"/g) ?? []).length, 2);
+  assert.equal((source.match(/h-8 flex-1/g) ?? []).length >= 2, true);
+  assert.doesNotMatch(source, /min-h-11|min-w-\[6\.5rem\]|whitespace-normal/);
+  assert.equal((source.match(/leading-tight/g) ?? []).length >= 1, true);
   assert.doesNotMatch(source, /isBottomSheet/);
   assert.doesNotMatch(source, /layout\s*===/);
   assert.doesNotMatch(source, /layout\s*\?(?!:)/);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, Polyline, useMap } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
-import type { LatLng, Polyline as LeafletPolyline } from "leaflet";
+import type { LatLng, PathOptions, Polyline as LeafletPolyline } from "leaflet";
 import { getDistance, isNodeClosed, calculateTime } from "@/lib/pathfinding/astar";
 import { getExternalPath } from "@/lib/pathfinding/external";
 import {
@@ -63,6 +63,25 @@ interface NavigationLayerProps {
   navigationOrigin?: NavigationOrigin | null;
   reuseCommittedRoute?: boolean;
 }
+
+const ROUTE_PATH_OPTIONS: PathOptions = {
+  color: "#3b82f6",
+  weight: 5,
+  opacity: 0.9,
+  className: "map-route-line",
+};
+const ROUTE_START_PATH_OPTIONS: PathOptions = {
+  color: "green",
+  fillColor: "green",
+  fillOpacity: 1,
+  className: "map-route-start",
+};
+const ROUTE_END_PATH_OPTIONS: PathOptions = {
+  color: "red",
+  fillColor: "red",
+  fillOpacity: 1,
+  className: "map-route-end",
+};
 
 export function NavigationLayer({
   startPoint,
@@ -348,6 +367,11 @@ export function NavigationLayer({
     });
   }, [startPoint, endPoint, nodes, edges, mode, waitingForUserLocation, acquiringStart, enabled, reuseCommittedRoute, destinationId, navigationSessionId, hasRouteFoundAnnouncement, claimRouteFoundAnnouncement, registerRouteFoundAnnouncement, releaseRouteFoundAnnouncement, coordinator, routeEngine]);
 
+  const routePositions = useMemo(
+    () => committedRoute?.path.map((node) => [node.lat, node.lng] as [number, number]) ?? [],
+    [committedRoute?.path],
+  );
+
   useEffect(() => {
     const path = committedRoute?.path;
     const polyline = readyRoutePolyline;
@@ -364,18 +388,18 @@ export function NavigationLayer({
       <Polyline
         ref={routePolylineRef}
         onReady={handleRoutePolylineReady}
-        positions={committedRoute.path.map((node) => [node.lat, node.lng])}
-        pathOptions={{ color: "#3b82f6", weight: 5, opacity: 0.9, className: "map-route-line" }}
+        positions={routePositions}
+        pathOptions={ROUTE_PATH_OPTIONS}
       />
       <CircleMarker
         center={[routeEndpoints.start.lat, routeEndpoints.start.lng]}
         radius={6}
-        pathOptions={{ color: "green", fillColor: "green", fillOpacity: 1, className: "map-route-start" }}
+        pathOptions={ROUTE_START_PATH_OPTIONS}
       />
       <CircleMarker
         center={[routeEndpoints.end.lat, routeEndpoints.end.lng]}
         radius={6}
-        pathOptions={{ color: "red", fillColor: "red", fillOpacity: 1, className: "map-route-end" }}
+        pathOptions={ROUTE_END_PATH_OPTIONS}
       />
     </>
   );

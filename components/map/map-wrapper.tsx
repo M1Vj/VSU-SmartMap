@@ -11,10 +11,11 @@ import {
   useMap,
 } from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useApp } from "@/lib/context/app-context";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
+import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
 import { registerMapLibreForEvidence } from "@/lib/map/e2e-probe-bridge";
@@ -42,18 +43,29 @@ function DeveloperAttribution() {
   return null;
 }
 
-function OpenFreeMapVectorLayer({ styleUrl }: { styleUrl: string }) {
+function OpenFreeMapVectorLayer({
+  styleUrl,
+  mapLibreMapRef,
+}: {
+  styleUrl: string;
+  mapLibreMapRef: MutableRefObject<MapLibreMap | null>;
+}) {
   const map = useMap();
 
   useEffect(() => {
-    const layer = L.maplibreGL({
+    const layerOptions = {
       style: styleUrl as StyleSpecification | string,
       pitch: MAP_TILES.pitch,
       bearing: MAP_TILES.bearing,
-    });
+      // Keep the visual mirror close to the browser frame rate while Leaflet
+      // remains the sole owner of map gestures.
+      updateInterval: 16,
+    } as Parameters<typeof L.maplibreGL>[0] & { updateInterval: number };
+    const layer = L.maplibreGL(layerOptions);
 
     layer.addTo(map);
     const mapLibreMap = layer.getMaplibreMap();
+    mapLibreMapRef.current = mapLibreMap;
     const unregisterMapLibreEvidence = registerMapLibreForEvidence(mapLibreMap);
     const customizeVectorLayer = () => {
       hideNonPlaceTextLabels(mapLibreMap);
@@ -68,10 +80,11 @@ function OpenFreeMapVectorLayer({ styleUrl }: { styleUrl: string }) {
 
     return () => {
       mapLibreMap.off("load", customizeVectorLayer);
+      if (mapLibreMapRef.current === mapLibreMap) mapLibreMapRef.current = null;
       unregisterMapLibreEvidence();
       layer.remove();
     };
-  }, [map, styleUrl]);
+  }, [map, mapLibreMapRef, styleUrl]);
 
   return null;
 }
@@ -79,6 +92,61 @@ function OpenFreeMapVectorLayer({ styleUrl }: { styleUrl: string }) {
 // Campus pins/tooltips are the labels on campus, so basemap POI and street
 // text stays hidden — but place names (barangays, towns) stay visible so
 // off-campus areas like boarding-house neighborhoods remain identifiable.
+function MapViewportSync({
+  mapLibreMapRef,
+}: {
+  mapLibreMapRef: MutableRefObject<MapLibreMap | null>;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    const requestFrame = (callback: () => void) =>
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame(callback)
+        : window.setTimeout(callback, 0);
+    const cancelFrame = (frameId: number) => {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+      else window.clearTimeout(frameId);
+    };
+    const viewportSync = createMapViewportSyncScheduler({
+      requestFrame,
+      cancelFrame,
+      invalidateSize: () => map.invalidateSize({ pan: false, debounceMoveend: true }),
+      resize: () => mapLibreMapRef.current?.resize(),
+      repaint: () => mapLibreMapRef.current?.triggerRepaint(),
+    });
+    const handleWindowResize = () => viewportSync.schedule(true);
+    const handleMapResize = () => viewportSync.schedule();
+    const handleMapMove = () => viewportSync.schedule();
+    const handleZoomAnimation = () => viewportSync.schedule();
+    const handleZoomEnd = () => viewportSync.schedule();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => viewportSync.schedule(true));
+
+    resizeObserver?.observe(container);
+    if (!resizeObserver) window.addEventListener("resize", handleWindowResize);
+    map.on("resize", handleMapResize);
+    map.on("move", handleMapMove);
+    map.on("zoomanim", handleZoomAnimation);
+    map.on("zoomend", handleZoomEnd);
+
+    return () => {
+      resizeObserver?.disconnect();
+      if (!resizeObserver) window.removeEventListener("resize", handleWindowResize);
+      map.off("resize", handleMapResize);
+      map.off("move", handleMapMove);
+      map.off("zoomanim", handleZoomAnimation);
+      map.off("zoomend", handleZoomEnd);
+      viewportSync.dispose();
+    };
+  }, [map, mapLibreMapRef]);
+
+  return null;
+}
+
 function hideNonPlaceTextLabels(mapLibreMap: MapLibreMap) {
   mapLibreMap.getStyle().layers?.forEach((layer) => {
     if (layer.type !== "symbol") return;
@@ -125,6 +193,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   const [mounted, setMounted] = useState(false);
   const [satelliteFallbackActive, setSatelliteFallbackActive] = useState(false);
   const satelliteTileFallbackState = useRef(createTileFallbackState());
+  const mapLibreMapRef = useRef<MapLibreMap | null>(null);
 
   const handleSatelliteTileError = useCallback(() => {
     const nextState = recordTileError(satelliteTileFallbackState.current);
@@ -207,6 +276,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
               url={MAP_TILES.satelliteFallbackUrl}
               maxZoom={MAP_MAX_ZOOM}
               maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+              updateWhenIdle={false}
             />
           ) : (
             <>
@@ -216,23 +286,31 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
                 url={MAP_TILES.satelliteUrl}
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+                updateWhenIdle={false}
                 eventHandlers={{ tileerror: handleSatelliteTileError }}
               />
               <TileLayer
                 url={MAP_TILES.satelliteTransportUrl}
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+                updateWhenIdle={false}
               />
               <TileLayer
                 url={MAP_TILES.satelliteLabelsUrl}
                 maxZoom={MAP_MAX_ZOOM}
                 maxNativeZoom={MAP_TILES.maxNativeZoom ?? MAP_MAX_ZOOM}
+                updateWhenIdle={false}
               />
             </>
           )
         ) : (
-          <OpenFreeMapVectorLayer key={mapStyleUrl} styleUrl={mapStyleUrl} />
+          <OpenFreeMapVectorLayer
+            key={mapStyleUrl}
+            styleUrl={mapStyleUrl}
+            mapLibreMapRef={mapLibreMapRef}
+          />
         )}
+        <MapViewportSync mapLibreMapRef={mapLibreMapRef} />
         <DeveloperAttribution />
         <ZoomControl position="bottomleft" />
         {children}

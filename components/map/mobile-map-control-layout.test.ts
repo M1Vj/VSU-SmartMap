@@ -24,7 +24,9 @@ test("mobile map controls use fixed safe-area offsets with anchored popups", asy
     mapPageSource,
     /pointer-events-none fixed inset-x-0 bottom-\[calc\(120px\+env\(safe-area-inset-bottom,0px\)\)\] z-\[1000\] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8/,
   );
-  assert.match(locationButtonSource, /h-11 w-11 min-w-11 rounded-full md:bottom-\[80px\]/);
+  assert.match(locationButtonSource, /h-11 w-11 min-w-11/);
+  assert.match(locationButtonSource, /h-\[30px\] w-\[30px\].*rounded-sm/);
+  assert.doesNotMatch(locationButtonSource, /left-\[12px\].*bottom-\[/);
 });
 
 test("map controls are excluded from background gesture arbitration", async () => {

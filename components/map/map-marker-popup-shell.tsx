@@ -19,6 +19,10 @@ export function handleMapPopupKeyDown(
   onClose();
 }
 
+export function stopMapPopupPropagation(event: { stopPropagation: () => void }) {
+  event.stopPropagation();
+}
+
 export function MapMarkerPopupShell({
   label,
   onClose,
@@ -30,8 +34,11 @@ export function MapMarkerPopupShell({
       aria-modal="false"
       aria-label={`${label} quick actions`}
       data-map-control="marker-popup"
+      data-map-popup-surface="true"
       className="relative flex max-h-[min(60dvh,calc(100dvh-376px),22rem)] w-[min(260px,calc(100vw-1.5rem))] flex-col overflow-hidden"
       onKeyDown={(event) => handleMapPopupKeyDown(event, onClose)}
+      onPointerDown={stopMapPopupPropagation}
+      onClick={stopMapPopupPropagation}
     >
       <button
         type="button"

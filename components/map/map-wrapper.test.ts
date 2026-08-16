@@ -81,8 +81,18 @@ test("all map surfaces use one native bottom-left zoom control without private s
     assert.equal(surface.match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
   }
 
-  assert.doesNotMatch(
+  assert.match(
     css,
-    /\.leaflet-zoom-anim\s+\.leaflet-zoom-animated\s*\{[\s\S]*?transition:/,
+    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.03s ease-out/,
   );
+});
+
+test("the map keeps the vector mirror and tile layers current during live map movement", async () => {
+  const source = await readMapWrapperSource();
+
+  assert.match(source, /function MapViewportSync\(/);
+  assert.match(source, /new ResizeObserver/);
+  assert.match(source, /map\.invalidateSize\(\{ pan: false, debounceMoveend: true \}\)/);
+  assert.match(source, /resize:\s*\(\) => mapLibreMapRef\.current\?\.resize\(\)/);
+  assert.match(source, /updateWhenIdle=\{false\}/);
 });

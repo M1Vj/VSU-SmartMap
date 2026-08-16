@@ -106,7 +106,10 @@ test("navigation keeps destination geometry honest and renders only the committe
   assert.match(source, /if \(!committedRoute\) return null/);
   assert.match(source, /const routeEndpoints = getRenderableRouteEndpoints\(committedRoute\.path\)/);
   assert.match(source, /if \(!routeEndpoints\) return null/);
-  assert.match(source, /positions=\{committedRoute\.path\.map/);
+  assert.match(source, /const routePositions = useMemo\(/);
+  assert.match(source, /positions=\{routePositions\}/);
+  assert.match(source, /const ROUTE_PATH_OPTIONS/);
+  assert.match(source, /pathOptions=\{ROUTE_PATH_OPTIONS\}/);
   assert.doesNotMatch(source, /positions=\{path\.map/);
   assert.doesNotMatch(source, /committedRoute\.path\[0\]/);
   assert.doesNotMatch(source, /committedRoute\.path\[committedRoute\.path\.length - 1\]/);

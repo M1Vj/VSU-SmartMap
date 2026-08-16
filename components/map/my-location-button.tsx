@@ -25,26 +25,31 @@ export function MyLocationButton({
       size="icon"
       onClick={onLocate}
       className={cn(
-        "absolute left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] z-[1000] bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm",
-        "hover:bg-accent hover:text-accent-foreground",
-        "transition-colors duration-200",
-        "h-11 w-11 min-w-11 rounded-full md:bottom-[80px]",
-        isTracking && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background",
+        "group absolute z-[1000] flex h-11 w-11 min-w-11 items-center justify-center border-0 bg-transparent p-0 shadow-none hover:bg-transparent",
         className
       )}
       aria-label={isTracking ? "Tracking your location" : "Show my location"}
       data-tour="map-locate"
       data-map-control="my-location"
     >
-      {isAcquiring ? (
-        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-      ) : hasHeading ? (
-        <Navigation className="h-4 w-4 text-blue-500 fill-blue-500" />
-      ) : isTracking ? (
-        <Crosshair className="h-4 w-4 text-blue-500" />
-      ) : (
-        <Crosshair className="h-4 w-4" />
-      )}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex h-[30px] w-[30px] min-w-[30px] items-center justify-center rounded-sm bg-background/95 shadow-lg ring-1 ring-black/5 backdrop-blur-sm transition-colors duration-200",
+          "group-hover:bg-accent group-hover:text-accent-foreground",
+          isTracking && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background",
+        )}
+      >
+        {isAcquiring ? (
+          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+        ) : hasHeading ? (
+          <Navigation className="h-4 w-4 fill-blue-500 text-blue-500" />
+        ) : isTracking ? (
+          <Crosshair className="h-4 w-4 text-blue-500" />
+        ) : (
+          <Crosshair className="h-4 w-4" />
+        )}
+      </span>
     </Button>
   );
 }

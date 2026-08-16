@@ -180,6 +180,17 @@ select:focus-visible,
   will-change: transform;
 }
 
+.map-wrapper .leaflet-zoom-anim .leaflet-zoom-animated {
+  transition: transform 0.03s ease-out !important;
+}
+
+@media (pointer: coarse), (any-pointer: coarse) {
+  .map-popup-card [data-map-popup-action="true"] {
+    min-height: 44px;
+    min-width: 6.5rem;
+  }
+}
+
 .vsu-pin svg,
 .vsu-pin-dot svg {
   backface-visibility: hidden;

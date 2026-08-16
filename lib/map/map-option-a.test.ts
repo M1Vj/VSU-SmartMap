@@ -32,8 +32,10 @@ test("Option A keeps status and actions clear of the anchored popup surface", as
   assert.match(selectionSource, /"map-ready"/);
   assert.match(selectionSource, /map\.whenReady\(/);
   assert.match(selectionSource, /requestAnimationFrame\(/);
-  assert.match(facilityPopupSource, /h-auto min-h-11 min-w-\[6\.5rem\] flex-1/);
-  assert.match(boardingPopupSource, /h-auto min-h-11 min-w-\[6\.5rem\] flex-1/);
+  assert.match(facilityPopupSource, /data-map-popup-action="true"/);
+  assert.match(boardingPopupSource, /data-map-popup-action="true"/);
+  assert.match(facilityPopupSource, /h-8 flex-1/);
+  assert.match(boardingPopupSource, /h-8 flex-1/);
   assert.match(facilityPopupSource, /onDirections\?: \(\) => number \| null;/);
   assert.match(boardingPopupSource, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(facilityPopupSource, /layout\?:|bottom-sheet/);

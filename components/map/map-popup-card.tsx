@@ -46,12 +46,13 @@ export function MapPopupCard({
         </div>
       </div>
 
-      <div className="flex w-full flex-wrap gap-2">
+      <div className="flex gap-2">
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="h-auto min-h-11 min-w-[6.5rem] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight"
+          data-map-popup-action="true"
+          className="h-8 flex-1 gap-2 text-xs"
           onClick={onViewDetails}
         >
           <Info className="h-3 w-3" aria-hidden />
@@ -60,7 +61,8 @@ export function MapPopupCard({
         <Button
           type="button"
           size="sm"
-          className="h-auto min-h-11 min-w-[6.5rem] flex-1 gap-2 whitespace-normal px-3 py-2 text-center text-xs leading-tight bg-blue-600 text-white hover:bg-blue-700"
+          data-map-popup-action="true"
+          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
           onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />
