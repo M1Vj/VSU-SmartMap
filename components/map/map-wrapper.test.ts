@@ -31,6 +31,21 @@ test("mobile attribution meets the top edge of the fixed student navigation", as
   assert.doesNotMatch(source, /4\.5625rem/);
 });
 
+test("mobile attribution stays compact while retaining the legal links", async () => {
+  const source = await readMapWrapperSource();
+  const mobileStylesStart = source.indexOf("@media (max-width: 768px)");
+  const coarseStylesStart = source.indexOf("@media (pointer: coarse)");
+  assert.ok(mobileStylesStart >= 0 && coarseStylesStart > mobileStylesStart);
+
+  const mobileStyles = source.slice(mobileStylesStart, coarseStylesStart);
+  assert.match(
+    mobileStyles,
+    /\.map-wrapper \.leaflet-control-attribution\s*\{[\s\S]*font-size:\s*0\.625rem[\s\S]*line-height:\s*1\.2[\s\S]*padding:\s*0 0\.25rem/,
+  );
+  assert.match(source, /DEVELOPER_ATTRIBUTION/);
+  assert.match(source, /Developed by Vj F Mabansag/);
+});
+
 test("the map wrapper does not automatically fit route bounds", async () => {
   const source = await readMapWrapperSource();
 

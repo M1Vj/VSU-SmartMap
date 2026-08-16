@@ -225,6 +225,12 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
             margin-bottom: calc(var(--student-mobile-nav-height) + env(safe-area-inset-bottom, 0px));
           }
 
+          .map-wrapper .leaflet-control-attribution {
+            font-size: 0.625rem;
+            line-height: 1.2;
+            padding: 0 0.25rem;
+          }
+
           .map-wrapper .leaflet-control-zoom a {
             display: flex;
             align-items: center;
