@@ -20,7 +20,7 @@ export function MapPopupCard({
   const meta = getCategoryMeta(facility.category);
 
   return (
-    <div className="flex min-w-[200px] max-w-[240px] flex-col gap-3 p-3">
+    <div className="flex w-full min-w-[200px] max-w-[260px] flex-col gap-3 p-3">
       <div className="flex items-start gap-3 pr-10">
         {facility.imageUrl && (
           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-muted">

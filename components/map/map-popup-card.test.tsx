@@ -39,6 +39,7 @@ test("facility popup no longer contains bottom-sheet or fake loading behavior", 
   const source = await readFile(new URL("./map-popup-card.tsx", import.meta.url), "utf8");
   assert.match(source, /onDirections\?: \(\) => number \| null;/);
   assert.doesNotMatch(source, /layout\?:|bottom-sheet/);
+  assert.match(source, /w-full min-w-\[200px\] max-w-\[260px\]/);
   assert.match(source, /className="flex gap-2"/);
   assert.equal((source.match(/data-map-popup-action="true"/g) ?? []).length, 2);
   assert.equal((source.match(/h-8 flex-1/g) ?? []).length, 2);
