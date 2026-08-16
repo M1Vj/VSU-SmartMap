@@ -29,6 +29,7 @@ test("facility popup actions stay compact on desktop and expose a coarse-pointer
   assert.equal(buttons.length, 2);
   assert.equal(buttons.every((button) => /type="button"/.test(button)), true);
   assert.equal(buttons.every((button) => /data-map-popup-action="true"/.test(button)), true);
+  assert.equal(buttons.every((button) => /min-w-0/.test(button)), true);
   assert.equal(buttons.every((button) => /h-8/.test(button) && /text-xs/.test(button)), true);
   assert.match(markup, /Details/);
   assert.match(markup, /Navigate/);

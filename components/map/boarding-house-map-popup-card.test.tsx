@@ -62,9 +62,11 @@ test("boarding popup keeps Details as a semantic link and stays compact on deskt
   assert.match(buttons[0], /type="button"/);
   assert.match(buttons[0], /data-map-popup-action="true"/);
   assert.match(buttons[0], /h-8/);
+  assert.match(buttons[0], /min-w-0/);
   assert.match(markup, /<a\b[^>]*href="\/boarding-houses\/boarding-1"/);
   assert.match(markup, /<a\b[^>]*data-map-popup-action="true"/);
   assert.match(markup, /<a\b[^>]*class="[^"\n]*h-8/);
+  assert.match(markup, /<a\b[^>]*class="[^"\n]*min-w-0/);
   assert.match(markup, /pr-10/);
 });
 

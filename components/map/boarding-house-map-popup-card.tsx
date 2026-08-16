@@ -87,12 +87,12 @@ export function BoardingHouseMapPopupCard({
           asChild
           size="sm"
           variant="outline"
-          className="h-8 flex-1 gap-2 text-xs"
+          className="h-8 flex-1 gap-2 text-xs min-w-0"
         >
           <Link
             href={`/boarding-houses/${listing.slug}`}
             data-map-popup-action="true"
-            className="flex h-8 flex-1 items-center justify-center gap-2 text-center text-xs leading-tight"
+            className="flex h-8 flex-1 items-center justify-center gap-2 text-center text-xs leading-tight min-w-0"
             onClick={() => onDetails?.()}
           >
             <Info className="h-3 w-3" aria-hidden />
@@ -103,7 +103,7 @@ export function BoardingHouseMapPopupCard({
           type="button"
           size="sm"
           data-map-popup-action="true"
-          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700 min-w-0"
           onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />

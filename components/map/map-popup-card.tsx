@@ -52,7 +52,7 @@ export function MapPopupCard({
           size="sm"
           variant="outline"
           data-map-popup-action="true"
-          className="h-8 flex-1 gap-2 text-xs"
+          className="h-8 flex-1 gap-2 text-xs min-w-0"
           onClick={onViewDetails}
         >
           <Info className="h-3 w-3" aria-hidden />
@@ -62,7 +62,7 @@ export function MapPopupCard({
           type="button"
           size="sm"
           data-map-popup-action="true"
-          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
+          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700 min-w-0"
           onClick={() => onDirections?.()}
         >
           <Route className="h-3 w-3" aria-hidden />

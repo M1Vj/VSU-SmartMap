@@ -49,7 +49,7 @@ export function MapMarkerPopupShell({
       >
         <X className="h-5 w-5" aria-hidden />
       </button>
-      <div className="min-h-0 overflow-y-auto pr-1">{children}</div>
+      <div className="min-h-0 overflow-y-auto">{children}</div>
     </section>
   );
 }

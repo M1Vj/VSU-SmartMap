@@ -22,7 +22,8 @@ test("renders a labelled non-modal popup shell with a reachable close control", 
   assert.match(markup, /data-map-popup-first-control="true"/);
   assert.match(markup, /h-11 w-11/);
   assert.match(markup, /max-h-\[min\(60dvh,calc\(100dvh-376px\),22rem\)\]/);
-  assert.match(markup, /overflow-y-auto/);
+  assert.match(markup, /class="min-h-0 overflow-y-auto"/);
+  assert.doesNotMatch(markup, /overflow-y-auto pr-1/);
   assert.match(markup, /data-map-popup-surface="true"/);
   assert.ok(568 - 376 >= 192);
 });
