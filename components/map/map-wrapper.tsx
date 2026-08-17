@@ -217,7 +217,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
     <div className="map-wrapper h-full w-full relative">
       <style>{`
         .map-wrapper .leaflet-zoom-anim .leaflet-zoom-animated {
-          transition: transform 0.2s cubic-bezier(0.15, 0.7, 0.2, 1);
+          transition: transform 0.2s cubic-bezier(0, 0, 0.25, 1);
         }
 
         @media (max-width: 768px) {

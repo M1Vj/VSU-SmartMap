@@ -99,7 +99,7 @@ test("the Broad map uses a smooth scoped zoom curve without private zoom control
 
   assert.match(
     source,
-    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.2s cubic-bezier\(0\.15, 0\.7, 0\.2, 1\)/,
+    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.2s cubic-bezier\(0, 0, 0\.25, 1\)/,
   );
   assert.doesNotMatch(css, /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated/);
 });
