@@ -42,7 +42,7 @@ export function handleZoomControlKey(
   disabled: boolean,
   activate: () => void,
 ): boolean {
-  if (event.key !== " " && event.key !== "Spacebar") return false;
+  if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return false;
   event.preventDefault();
   event.stopPropagation();
   if (disabled) return true;

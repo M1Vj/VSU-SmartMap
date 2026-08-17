@@ -40,57 +40,34 @@ test("bound zoom controls no-op before invoking the flight callback", () => {
   assert.deepEqual(flights, []);
 });
 
-test("native Enter click activates once while Space activates from keydown only", () => {
-  let enterActivations = 0;
-  let enterPrevented = false;
-  let enterStopped = false;
-  const enterHandled = handleZoomControlKey(
-    {
-      key: "Enter",
-      preventDefault: () => {
-        enterPrevented = true;
+test("Enter and Space variants cancel native default and activate exactly once", () => {
+  for (const key of ["Enter", " ", "Spacebar"]) {
+    let activations = 0;
+    let prevented = false;
+    let stopped = false;
+    const handled = handleZoomControlKey(
+      {
+        key,
+        preventDefault: () => {
+          prevented = true;
+        },
+        stopPropagation: () => {
+          stopped = true;
+        },
       },
-      stopPropagation: () => {
-        enterStopped = true;
+      false,
+      () => {
+        activations += 1;
       },
-    },
-    false,
-    () => {
-      enterActivations += 1;
-    },
-  );
+    );
 
-  // Browsers dispatch an anchor click after Enter keydown, regardless of this
-  // helper's return value. The click handler is the single Enter activation.
-  enterActivations += 1;
-  assert.equal(enterHandled, false);
-  assert.equal(enterPrevented, false);
-  assert.equal(enterStopped, false);
-  assert.equal(enterActivations, 1);
-
-  let spaceActivations = 0;
-  let spacePrevented = false;
-  let spaceStopped = false;
-  const spaceHandled = handleZoomControlKey(
-    {
-      key: " ",
-      preventDefault: () => {
-        spacePrevented = true;
-      },
-      stopPropagation: () => {
-        spaceStopped = true;
-      },
-    },
-    false,
-    () => {
-      spaceActivations += 1;
-    },
-  );
-
-  assert.equal(spaceHandled, true);
-  assert.equal(spacePrevented, true);
-  assert.equal(spaceStopped, true);
-  assert.equal(spaceActivations, 1);
+    // A canceled keydown must not produce an additional native anchor click.
+    if (!prevented) activations += 1;
+    assert.equal(handled, true, key);
+    assert.equal(prevented, true, key);
+    assert.equal(stopped, true, key);
+    assert.equal(activations, 1, key);
+  }
 });
 
 test("disabled or unrelated keys never activate zoom", () => {
@@ -107,12 +84,13 @@ test("disabled or unrelated keys never activate zoom", () => {
     },
   });
 
-  assert.equal(handleZoomControlKey(makeEvent("Enter"), true, () => activations++), false);
+  assert.equal(handleZoomControlKey(makeEvent("Enter"), true, () => activations++), true);
   assert.equal(handleZoomControlKey(makeEvent(" "), true, () => activations++), true);
+  assert.equal(handleZoomControlKey(makeEvent("Spacebar"), true, () => activations++), true);
   assert.equal(handleZoomControlKey(makeEvent("ArrowUp"), false, () => activations++), false);
   assert.equal(activations, 0);
-  assert.equal(prevented, 1);
-  assert.equal(stopped, 1);
+  assert.equal(prevented, 3);
+  assert.equal(stopped, 3);
 });
 
 test("map zoom options use Leaflet's supported native input lifecycle", () => {
@@ -133,10 +111,11 @@ test("private smooth zoom option contracts no longer exist", async () => {
   assert.doesNotMatch(source, /MAP_SMOOTH_(WHEEL|CONTROL)_ZOOM_OPTIONS/);
 });
 
-test("keyboard helper reserves keydown activation for Space, not native Enter", async () => {
+test("keyboard helper reserves keydown activation for Enter and Space variants", async () => {
   const source = await readFile(new URL("./wheel-zoom.ts", import.meta.url), "utf8");
-  assert.match(source, /event\.key !== " "|event\.key !== "Spacebar"/);
-  assert.doesNotMatch(source, /event\.key !== "Enter"/);
+  assert.match(source, /event\.key !== "Enter"/);
+  assert.match(source, /event\.key !== " "/);
+  assert.match(source, /event\.key !== "Spacebar"/);
 });
 
 test("shared map zoom animation options enable animated zoom controls", () => {
