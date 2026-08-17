@@ -81,13 +81,14 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
 
-test("all map surfaces use native zoom animation timing so raster layers stay visible", async () => {
+test("the Broad map uses a smooth scoped zoom curve without private zoom controllers", async () => {
   const surfaces = await Promise.all([
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
     readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
     readFile(new URL("../admin/location-preview-map.tsx", import.meta.url), "utf8"),
     readFile(new URL("../admin/navigation/editor-map-content.tsx", import.meta.url), "utf8"),
   ]);
+  const [source] = surfaces;
   const css = await readFile(new URL("../../app/globals.css", import.meta.url), "utf8");
 
   for (const surface of surfaces) {
@@ -96,6 +97,10 @@ test("all map surfaces use native zoom animation timing so raster layers stay vi
     assert.equal(surface.match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
   }
 
+  assert.match(
+    source,
+    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.2s cubic-bezier\(0\.15, 0\.7, 0\.2, 1\)/,
+  );
   assert.doesNotMatch(css, /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated/);
 });
 

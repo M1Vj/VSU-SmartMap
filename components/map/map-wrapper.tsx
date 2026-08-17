@@ -216,6 +216,10 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   return (
     <div className="map-wrapper h-full w-full relative">
       <style>{`
+        .map-wrapper .leaflet-zoom-anim .leaflet-zoom-animated {
+          transition: transform 0.2s cubic-bezier(0.15, 0.7, 0.2, 1);
+        }
+
         @media (max-width: 768px) {
           .map-wrapper .leaflet-bottom.leaflet-left {
             margin-bottom: calc(5rem + env(safe-area-inset-bottom));
