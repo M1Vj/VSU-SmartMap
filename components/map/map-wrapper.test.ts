@@ -81,7 +81,7 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
 
-test("all map surfaces use one native bottom-left zoom control without private smooth zoom", async () => {
+test("all map surfaces use native zoom animation timing so raster layers stay visible", async () => {
   const surfaces = await Promise.all([
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
     readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
@@ -96,10 +96,7 @@ test("all map surfaces use one native bottom-left zoom control without private s
     assert.equal(surface.match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
   }
 
-  assert.match(
-    css,
-    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.03s ease-out/,
-  );
+  assert.doesNotMatch(css, /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated/);
 });
 
 test("the map keeps the vector mirror and tile layers current during live map movement", async () => {
