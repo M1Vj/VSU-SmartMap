@@ -14,3 +14,38 @@ export const MAP_ZOOM_ANIMATION_OPTIONS = {
   fadeAnimation: true,
   markerZoomAnimation: true,
 } as const;
+
+export function clampZoomTarget(
+  zoom: number,
+  minZoom: number,
+  maxZoom: number,
+): number {
+  if (!Number.isFinite(zoom)) return minZoom;
+  return Math.min(maxZoom, Math.max(minZoom, zoom));
+}
+
+export function nextZoomTarget(
+  currentZoom: number,
+  delta: number,
+  minZoom: number,
+  maxZoom: number,
+): number {
+  return clampZoomTarget(currentZoom + delta, minZoom, maxZoom);
+}
+
+export function handleZoomControlKey(
+  event: {
+    key: string;
+    preventDefault: () => void;
+    stopPropagation: () => void;
+  },
+  disabled: boolean,
+  activate: () => void,
+): boolean {
+  if (event.key !== "Enter" && event.key !== " ") return false;
+  event.preventDefault();
+  event.stopPropagation();
+  if (disabled) return true;
+  activate();
+  return true;
+}

@@ -81,7 +81,7 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
 
-test("the Broad map uses a smooth scoped zoom curve without private zoom controllers", async () => {
+test("the Broad map uses a public fractional flyTo control without timing CSS", async () => {
   const surfaces = await Promise.all([
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
     readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
@@ -94,14 +94,41 @@ test("the Broad map uses a smooth scoped zoom curve without private zoom control
   for (const surface of surfaces) {
     assert.doesNotMatch(surface, /SmoothWheelZoom|SmoothZoomControl|smooth-wheel-zoom/);
     assert.match(surface, /zoomControl=\{false\}/);
-    assert.equal(surface.match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
   }
 
-  assert.match(
-    source,
-    /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated\s*\{[\s\S]*?transition:\s*transform 0\.2s cubic-bezier\(0, 0, 0\.25, 1\)/,
-  );
+  assert.match(source, /function ContinuousZoomControl\(/);
+  assert.match(source, /clampZoomTarget\(/);
+  assert.match(source, /nextZoomTarget\(/);
+  assert.match(source, /new L\.Control\(\{ position: "bottomleft" \}\)/);
+  assert.match(source, /L\.DomUtil\.create\("a"/);
+  assert.match(source, /L\.DomEvent\.disableClickPropagation/);
+  assert.match(source, /map\.flyTo\(/);
+  assert.match(source, /duration:\s*0\.22/);
+  assert.match(source, /zoomIn\.innerHTML = '<span aria-hidden="true">\+<\/span>'/);
+  assert.match(source, /zoomOut\.innerHTML = '<span aria-hidden="true">&#x2212;<\/span>'/);
+  assert.match(source, /zoomIn\.title = "Zoom in"/);
+  assert.match(source, /zoomOut\.title = "Zoom out"/);
+  assert.match(source, /setAttribute\("aria-label", label\)/);
+  assert.match(source, /\[zoomIn, "Zoom in"\]/);
+  assert.match(source, /\[zoomOut, "Zoom out"\]/);
+  assert.match(source, /handleZoomControlKey\(/);
+  assert.match(source, /if \(nextZoom === targetZoom\) \{/);
+  assert.match(source, /DomEvent\.off\(container, "keydown"/);
+  assert.match(source, /DomEvent\.off\(container, "mousedown touchstart dblclick contextmenu"/);
+  assert.match(source, /DomEvent\.off\(container, "wheel"/);
+  assert.match(source, /DomEvent\.off\(zoomIn, "keydown"/);
+  assert.match(source, /DomEvent\.off\(zoomOut, "keydown"/);
+  assert.match(source, /map\.on\("dragstart", handleDragStart\)/);
+  assert.match(source, /map\.off\("dragstart", handleDragStart\)/);
+  assert.doesNotMatch(source, /className="leaflet-bottom leaflet-left"/);
+  assert.doesNotMatch(source, /leaflet-control-zoom button/);
+  assert.doesNotMatch(source, /<ZoomControl position="bottomleft" \/>/);
+  assert.doesNotMatch(source, /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated/);
   assert.doesNotMatch(css, /\.map-wrapper \.leaflet-zoom-anim \.leaflet-zoom-animated/);
+
+  assert.equal(surfaces[1].match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
+  assert.equal(surfaces[2].match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
+  assert.equal(surfaces[3].match(/<ZoomControl position="bottomleft" \/>/g)?.length, 1);
 });
 
 test("the map keeps the vector mirror and tile layers current during live map movement", async () => {

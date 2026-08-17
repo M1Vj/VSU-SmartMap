@@ -6,14 +6,19 @@ import L from "leaflet";
 import {
   MapContainer,
   TileLayer,
-  ZoomControl,
   useMap,
 } from "@/components/map/leaflet-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useApp } from "@/lib/context/app-context";
-import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
+import {
+  clampZoomTarget,
+  handleZoomControlKey,
+  MAP_LEAFLET_ZOOM_OPTIONS,
+  MAP_ZOOM_ANIMATION_OPTIONS,
+  nextZoomTarget,
+} from "@/lib/map/wheel-zoom";
 import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
@@ -21,11 +26,125 @@ import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
   '<a href="https://github.com/M1Vj" target="_blank" rel="noopener noreferrer">Developed by Vj F Mabansag</a>';
+const MAP_ZOOM_STEP = MAP_LEAFLET_ZOOM_OPTIONS.zoomDelta;
 
 type MapWrapperProps = {
   children?: React.ReactNode;
   className?: string;
 };
+
+function ContinuousZoomControl() {
+  const map = useMap();
+
+  useEffect(() => {
+    let targetZoom = clampZoomTarget(map.getZoom(), MAP_MIN_ZOOM, MAP_MAX_ZOOM);
+    const control = new L.Control({ position: "bottomleft" });
+    let zoomIn: HTMLAnchorElement | undefined;
+    let zoomOut: HTMLAnchorElement | undefined;
+
+    const updateDisabledState = () => {
+      const atMin = targetZoom <= MAP_MIN_ZOOM;
+      const atMax = targetZoom >= MAP_MAX_ZOOM;
+      zoomIn?.classList.toggle("leaflet-disabled", atMax);
+      zoomOut?.classList.toggle("leaflet-disabled", atMin);
+      zoomIn?.setAttribute("aria-disabled", String(atMax));
+      zoomOut?.setAttribute("aria-disabled", String(atMin));
+    };
+
+    const zoomBy = (delta: number) => {
+      const nextZoom = nextZoomTarget(targetZoom, delta, MAP_MIN_ZOOM, MAP_MAX_ZOOM);
+      if (nextZoom === targetZoom) {
+        updateDisabledState();
+        return;
+      }
+      targetZoom = nextZoom;
+      map.flyTo(map.getCenter(), nextZoom, { duration: 0.22 });
+      updateDisabledState();
+    };
+    const handleZoomIn = (event: Event) => {
+      L.DomEvent.stop(event);
+      zoomBy(MAP_ZOOM_STEP);
+    };
+    const handleZoomOut = (event: Event) => {
+      L.DomEvent.stop(event);
+      zoomBy(-MAP_ZOOM_STEP);
+    };
+    const handleZoomInKeyDown = (event: Event) => {
+      handleZoomControlKey(
+        event as KeyboardEvent,
+        targetZoom >= MAP_MAX_ZOOM,
+        () => zoomBy(MAP_ZOOM_STEP),
+      );
+    };
+    const handleZoomOutKeyDown = (event: Event) => {
+      handleZoomControlKey(
+        event as KeyboardEvent,
+        targetZoom <= MAP_MIN_ZOOM,
+        () => zoomBy(-MAP_ZOOM_STEP),
+      );
+    };
+    const syncTargetZoom = () => {
+      targetZoom = clampZoomTarget(map.getZoom(), MAP_MIN_ZOOM, MAP_MAX_ZOOM);
+      updateDisabledState();
+    };
+    const handleZoomEnd = syncTargetZoom;
+    const handleDragStart = syncTargetZoom;
+
+    control.onAdd = () => {
+      const container = L.DomUtil.create("div", "leaflet-control-zoom leaflet-bar");
+      zoomIn = L.DomUtil.create("a", "leaflet-control-zoom-in", container);
+      zoomOut = L.DomUtil.create("a", "leaflet-control-zoom-out", container);
+      zoomIn.href = "#";
+      zoomOut.href = "#";
+      zoomIn.innerHTML = '<span aria-hidden="true">+</span>';
+      zoomOut.innerHTML = '<span aria-hidden="true">&#x2212;</span>';
+      zoomIn.title = "Zoom in";
+      zoomOut.title = "Zoom out";
+      for (const [element, label] of [
+        [zoomIn, "Zoom in"],
+        [zoomOut, "Zoom out"],
+      ] as const) {
+        element.setAttribute("role", "button");
+        element.setAttribute("aria-label", label);
+      }
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      L.DomEvent.on(container, "keydown", L.DomEvent.stopPropagation);
+      L.DomEvent.on(zoomIn, "click", handleZoomIn);
+      L.DomEvent.on(zoomOut, "click", handleZoomOut);
+      L.DomEvent.on(zoomIn, "keydown", handleZoomInKeyDown);
+      L.DomEvent.on(zoomOut, "keydown", handleZoomOutKeyDown);
+      updateDisabledState();
+      return container;
+    };
+
+    map.on("zoomend", handleZoomEnd);
+    map.on("dragstart", handleDragStart);
+    control.addTo(map);
+
+    return () => {
+      map.off("zoomend", handleZoomEnd);
+      map.off("dragstart", handleDragStart);
+      if (zoomIn) {
+        L.DomEvent.off(zoomIn, "click", handleZoomIn);
+        L.DomEvent.off(zoomIn, "keydown", handleZoomInKeyDown);
+      }
+      if (zoomOut) {
+        L.DomEvent.off(zoomOut, "click", handleZoomOut);
+        L.DomEvent.off(zoomOut, "keydown", handleZoomOutKeyDown);
+      }
+      const container = control.getContainer();
+      if (container) {
+        L.DomEvent.off(container, "keydown", L.DomEvent.stopPropagation);
+        L.DomEvent.off(container, "mousedown touchstart dblclick contextmenu", L.DomEvent.stopPropagation);
+        L.DomEvent.off(container, "wheel", L.DomEvent.stopPropagation);
+      }
+      control.remove();
+    };
+  }, [map]);
+
+  return null;
+}
 
 function DeveloperAttribution() {
   const map = useMap();
@@ -216,10 +335,6 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   return (
     <div className="map-wrapper h-full w-full relative">
       <style>{`
-        .map-wrapper .leaflet-zoom-anim .leaflet-zoom-animated {
-          transition: transform 0.2s cubic-bezier(0, 0, 0.25, 1);
-        }
-
         @media (max-width: 768px) {
           .map-wrapper .leaflet-bottom.leaflet-left {
             margin-bottom: calc(5rem + env(safe-area-inset-bottom));
@@ -336,7 +451,7 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
         )}
         <MapViewportSync mapLibreMapRef={mapLibreMapRef} />
         <DeveloperAttribution />
-        <ZoomControl position="bottomleft" />
+        <ContinuousZoomControl />
         {children}
       </MapContainer>
       {satelliteFallbackActive && (
