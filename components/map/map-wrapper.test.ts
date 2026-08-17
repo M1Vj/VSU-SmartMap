@@ -81,7 +81,7 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
 
-test("the Broad map uses a public fractional flyTo control without timing CSS", async () => {
+test("the Broad map uses one continuous zoom bridge without timing CSS", async () => {
   const surfaces = await Promise.all([
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),
     readFile(new URL("./location-picker-map.tsx", import.meta.url), "utf8"),
@@ -97,13 +97,13 @@ test("the Broad map uses a public fractional flyTo control without timing CSS", 
   }
 
   assert.match(source, /function ContinuousZoomControl\(/);
-  assert.match(source, /clampZoomTarget\(/);
   assert.match(source, /nextZoomTarget\(/);
+  assert.match(source, /createLeafletContinuousZoom\(/);
   assert.match(source, /new L\.Control\(\{ position: "bottomleft" \}\)/);
   assert.match(source, /L\.DomUtil\.create\("a"/);
   assert.match(source, /L\.DomEvent\.disableClickPropagation/);
-  assert.match(source, /map\.flyTo\(/);
-  assert.match(source, /duration:\s*0\.22/);
+  assert.match(source, /engine\.zoomBy\(/);
+  assert.match(source, /wheelDelta:\s*L\.DomEvent\.getWheelDelta/);
   assert.match(source, /zoomIn\.innerHTML = '<span aria-hidden="true">\+<\/span>'/);
   assert.match(source, /zoomOut\.innerHTML = '<span aria-hidden="true">&#x2212;<\/span>'/);
   assert.match(source, /zoomIn\.title = "Zoom in"/);
@@ -115,7 +115,7 @@ test("the Broad map uses a public fractional flyTo control without timing CSS", 
   assert.match(source, /if \(nextZoom === targetZoom\) \{/);
   assert.match(source, /DomEvent\.off\(container, "keydown"/);
   assert.match(source, /DomEvent\.off\(container, "mousedown touchstart dblclick contextmenu"/);
-  assert.match(source, /DomEvent\.off\(container, "wheel"/);
+  assert.match(source, /engine\.dispose\(\)/);
   assert.match(source, /DomEvent\.off\(zoomIn, "keydown"/);
   assert.match(source, /DomEvent\.off\(zoomOut, "keydown"/);
   assert.match(source, /map\.on\("dragstart", handleDragStart\)/);

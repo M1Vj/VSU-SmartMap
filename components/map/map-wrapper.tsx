@@ -13,12 +13,14 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_TILES } from "@/lib/constants/map";
 import { useApp } from "@/lib/context/app-context";
 import {
-  clampZoomTarget,
   handleZoomControlKey,
   MAP_LEAFLET_ZOOM_OPTIONS,
   MAP_ZOOM_ANIMATION_OPTIONS,
   nextZoomTarget,
 } from "@/lib/map/wheel-zoom";
+import {
+  createLeafletContinuousZoom,
+} from "@/lib/map/leaflet-continuous-zoom";
 import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
@@ -37,12 +39,15 @@ function ContinuousZoomControl() {
   const map = useMap();
 
   useEffect(() => {
-    let targetZoom = clampZoomTarget(map.getZoom(), MAP_MIN_ZOOM, MAP_MAX_ZOOM);
+    const engine = createLeafletContinuousZoom(map, {
+      wheelDelta: L.DomEvent.getWheelDelta,
+    });
     const control = new L.Control({ position: "bottomleft" });
     let zoomIn: HTMLAnchorElement | undefined;
     let zoomOut: HTMLAnchorElement | undefined;
 
     const updateDisabledState = () => {
+      const targetZoom = engine.getTargetZoom();
       const atMin = targetZoom <= MAP_MIN_ZOOM;
       const atMax = targetZoom >= MAP_MAX_ZOOM;
       zoomIn?.classList.toggle("leaflet-disabled", atMax);
@@ -52,13 +57,13 @@ function ContinuousZoomControl() {
     };
 
     const zoomBy = (delta: number) => {
+      const targetZoom = engine.getTargetZoom();
       const nextZoom = nextZoomTarget(targetZoom, delta, MAP_MIN_ZOOM, MAP_MAX_ZOOM);
       if (nextZoom === targetZoom) {
         updateDisabledState();
         return;
       }
-      targetZoom = nextZoom;
-      map.flyTo(map.getCenter(), nextZoom, { duration: 0.22 });
+      engine.zoomBy(nextZoom - targetZoom);
       updateDisabledState();
     };
     const handleZoomIn = (event: Event) => {
@@ -72,19 +77,19 @@ function ContinuousZoomControl() {
     const handleZoomInKeyDown = (event: Event) => {
       handleZoomControlKey(
         event as KeyboardEvent,
-        targetZoom >= MAP_MAX_ZOOM,
+        engine.getTargetZoom() >= MAP_MAX_ZOOM,
         () => zoomBy(MAP_ZOOM_STEP),
       );
     };
     const handleZoomOutKeyDown = (event: Event) => {
       handleZoomControlKey(
         event as KeyboardEvent,
-        targetZoom <= MAP_MIN_ZOOM,
+        engine.getTargetZoom() <= MAP_MIN_ZOOM,
         () => zoomBy(-MAP_ZOOM_STEP),
       );
     };
     const syncTargetZoom = () => {
-      targetZoom = clampZoomTarget(map.getZoom(), MAP_MIN_ZOOM, MAP_MAX_ZOOM);
+      engine.syncToMap();
       updateDisabledState();
     };
     const handleZoomEnd = syncTargetZoom;
@@ -125,6 +130,7 @@ function ContinuousZoomControl() {
     return () => {
       map.off("zoomend", handleZoomEnd);
       map.off("dragstart", handleDragStart);
+      engine.dispose();
       if (zoomIn) {
         L.DomEvent.off(zoomIn, "click", handleZoomIn);
         L.DomEvent.off(zoomIn, "keydown", handleZoomInKeyDown);
@@ -137,7 +143,6 @@ function ContinuousZoomControl() {
       if (container) {
         L.DomEvent.off(container, "keydown", L.DomEvent.stopPropagation);
         L.DomEvent.off(container, "mousedown touchstart dblclick contextmenu", L.DomEvent.stopPropagation);
-        L.DomEvent.off(container, "wheel", L.DomEvent.stopPropagation);
       }
       control.remove();
     };
