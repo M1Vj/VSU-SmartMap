@@ -165,6 +165,10 @@ function DeveloperAttribution() {
   return null;
 }
 
+function isBrowserOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
 function OpenFreeMapVectorLayer({
   styleUrl,
   mapLibreMapRef,
@@ -316,6 +320,8 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   const mapLibreMapRef = useRef<MapLibreMap | null>(null);
 
   const handleSatelliteTileError = useCallback(() => {
+    if (isBrowserOffline()) return;
+
     const nextState = recordTileError(satelliteTileFallbackState.current);
     satelliteTileFallbackState.current = nextState;
     if (nextState.active) setSatelliteFallbackActive(true);
@@ -323,6 +329,16 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      satelliteTileFallbackState.current = createTileFallbackState();
+      setSatelliteFallbackActive(false);
+    };
+
+    window.addEventListener("offline", handleOffline);
+    return () => window.removeEventListener("offline", handleOffline);
   }, []);
 
   useEffect(() => {
@@ -340,6 +356,10 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   return (
     <div className="map-wrapper h-full w-full relative">
       <style>{`
+        .map-wrapper .leaflet-container {
+          background: hsl(var(--background));
+        }
+
         @media (max-width: 768px) {
           .map-wrapper .leaflet-bottom.leaflet-left {
             margin-bottom: calc(5rem + env(safe-area-inset-bottom));

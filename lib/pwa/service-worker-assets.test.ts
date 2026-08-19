@@ -629,6 +629,196 @@ test("tile cache stores verifiable responses, keeps them offline, and rejects op
   assert.equal(deleteCount, 1);
 });
 
+test("OpenFreeMap essentials survive tile eviction in a bounded asset cache", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const styleUrl = "https://tiles.openfreemap.org/styles/liberty";
+  const spriteUrl = "https://tiles.openfreemap.org/sprites/ofm/ofm.png";
+  const glyphUrl = "https://tiles.openfreemap.org/fonts/Noto Sans Regular/0-255.pbf";
+  const normalizedGlyphUrl = new Request(glyphUrl).url;
+  const tileEntries = new Map<string, Response>();
+  const assetEntries = new Map<string, Response>();
+  for (let index = 0; index < 399; index += 1) {
+    tileEntries.set(
+      `https://tiles.openfreemap.org/planet/20260816_080001_pt/14/0/${index}.pbf`,
+      new Response(`existing-tile-${index}`, { status: 200 }),
+    );
+  }
+
+  const cacheFor = (entries: Map<string, Response>) => ({
+    match: async (request: Request) => entries.get(request.url)?.clone(),
+    delete: async (request: Request) => entries.delete(request.url),
+    put: async (request: Request, response: Response) => {
+      entries.set(request.url, response.clone());
+    },
+    keys: async () => [...entries.keys()].map((url) => new Request(url)),
+  });
+  const cacheByName = new Map([
+    ["map-tiles-v2", cacheFor(tileEntries)],
+    ["map-assets-v1", cacheFor(assetEntries)],
+  ]);
+  let online = true;
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async (request: Request) => {
+      if (!online) throw new Error("offline");
+      const url = new URL(request.url);
+      return new Response(url.pathname.includes("/planet/") ? "tile" : "asset", {
+        status: 200,
+      });
+    },
+    caches: {
+      open: async (name: string) => cacheByName.get(name),
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async (url: string) => {
+    waitUntilPromises.length = 0;
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      },
+    });
+    assert.ok(responsePromise);
+    const response = await responsePromise;
+    await Promise.all(waitUntilPromises);
+    return response;
+  };
+
+  await dispatchFetch(styleUrl);
+  await dispatchFetch(spriteUrl);
+  await dispatchFetch(glyphUrl);
+  assert.equal(assetEntries.size, 3);
+  assert.equal(tileEntries.size, 399);
+
+  for (let index = 0; index < 401; index += 1) {
+    await dispatchFetch(
+      `https://tiles.openfreemap.org/planet/20260816_080001_pt/14/1/${index}.pbf`,
+    );
+  }
+
+  assert.ok(assetEntries.has(styleUrl));
+  assert.ok(assetEntries.has(spriteUrl));
+  assert.ok(assetEntries.has(normalizedGlyphUrl));
+  assert.equal(tileEntries.size, 400);
+
+  online = false;
+  assert.equal((await dispatchFetch(styleUrl)).status, 200);
+  assert.equal((await dispatchFetch(spriteUrl)).status, 200);
+  assert.equal((await dispatchFetch(glyphUrl)).status, 200);
+
+  online = true;
+  for (let index = 0; index < 129; index += 1) {
+    await dispatchFetch(`https://tiles.openfreemap.org/styles/test-${index}`);
+  }
+  assert.ok(assetEntries.size <= 128);
+});
+
+test("static JavaScript waits for cache writes and returns online code when writes fail", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  let releaseWrite: (() => void) | undefined;
+  let rejectWrites = false;
+  const cache = {
+    match: async () => undefined,
+    put: async () => {
+      if (rejectWrites) throw new Error("cache unavailable");
+      await new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+    },
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => new Response("online-code", { status: 200 }),
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = (url: string) => {
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: () => undefined,
+    });
+    assert.ok(responsePromise);
+    return responsePromise;
+  };
+
+  const pendingResponse = dispatchFetch(
+    "https://smartmap.test/_next/static/chunks/navigation.js",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let settled = false;
+  void pendingResponse.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(settled, false);
+  assert.ok(releaseWrite);
+  releaseWrite();
+  assert.equal((await pendingResponse).status, 200);
+
+  rejectWrites = true;
+  const writeFailureResponse = await dispatchFetch(
+    "https://smartmap.test/_next/static/chunks/navigation-failure.js",
+  );
+  assert.equal(writeFailureResponse.status, 200);
+  assert.equal(await writeFailureResponse.text(), "online-code");
+});
+
 test("uncached static JavaScript returns an executable offline error response", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const cache = {

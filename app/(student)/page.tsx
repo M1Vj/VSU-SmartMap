@@ -44,6 +44,36 @@ import {
   getRouteFacingEndpoint,
 } from "@/lib/map/map-runtime";
 import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
+const loadNavigationLayer = () => import("@/components/map/navigation-layer");
+
+async function waitForServiceWorkerControl() {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return;
+  }
+
+  const serviceWorker = navigator.serviceWorker;
+  try {
+    await navigator.serviceWorker.ready;
+  } catch {
+    return;
+  }
+  if (serviceWorker.controller) return;
+
+  await new Promise<void>((resolve) => {
+    const handleControllerChange = () => {
+      serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+      resolve();
+    };
+    serviceWorker.addEventListener("controllerchange", handleControllerChange, { once: true });
+    if (serviceWorker.controller) handleControllerChange();
+  });
+}
+
+async function preloadNavigationLayer() {
+  await waitForServiceWorkerControl();
+  await loadNavigationLayer();
+}
+
 const MapSelectionLayer = dynamic(
   () => import("@/components/map/map-selection-layer").then((m) => m.MapSelectionLayer),
   { ssr: false },
@@ -55,7 +85,7 @@ const UserLocationControl = dynamic(
 );
 
 const NavigationLayer = dynamic(
-  () => import("@/components/map/navigation-layer").then((m) => m.NavigationLayer),
+  () => loadNavigationLayer().then((m) => m.NavigationLayer),
   { ssr: false },
 );
 
@@ -130,6 +160,10 @@ function MapTab() {
   const loadFiltersRef = useRef({ debouncedQuery, selectedCategories });
   const requestedBoardingHouseId = searchParams.get("boardingHouse");
   const hasBoardingUrlFlag = searchParams.get("boarding") === "1";
+
+  useEffect(() => {
+    void preloadNavigationLayer().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const stored = localStorage.getItem("boarding-houses-map-overlay");

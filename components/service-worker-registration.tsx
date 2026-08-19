@@ -24,6 +24,7 @@ export function ServiceWorkerRegistration() {
               .filter((cacheName) =>
                 cacheName.startsWith("vsu-smartmap-") ||
                 cacheName.startsWith("map-tiles-") ||
+                cacheName.startsWith("map-assets-") ||
                 cacheName.startsWith("api-cache-"),
               )
               .map((cacheName) => caches.delete(cacheName)),

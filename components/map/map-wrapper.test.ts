@@ -81,6 +81,15 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
   assert.doesNotMatch(fallbackBranch, /satelliteTransportUrl|satelliteLabelsUrl/);
 });
 
+test("offline satellite misses keep the selected imagery layer and theme surface", async () => {
+  const source = await readMapWrapperSource();
+
+  assert.match(source, /navigator\.onLine/);
+  assert.match(source, /addEventListener\("offline"/);
+  assert.match(source, /removeEventListener\("offline"/);
+  assert.match(source, /\.map-wrapper \.leaflet-container\s*\{[\s\S]*background:\s*hsl\(var\(--background\)\)/);
+});
+
 test("the Broad map uses one continuous zoom bridge without timing CSS", async () => {
   const surfaces = await Promise.all([
     readFile(new URL("./map-wrapper.tsx", import.meta.url), "utf8"),

@@ -1,7 +1,9 @@
 const CACHE_NAME = 'vsu-smartmap-v17';
 const PREVIOUS_TILE_CACHE_NAME = 'map-tiles-v1';
 const TILE_CACHE_NAME = 'map-tiles-v2';
+const MAP_ASSET_CACHE_NAME = 'map-assets-v1';
 const TILE_CACHE_MAX_ENTRIES = 400;
+const MAP_ASSET_CACHE_MAX_ENTRIES = 128;
 const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
 const IS_LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1', '0.0.0.0'].includes(self.location.hostname) &&
@@ -76,6 +78,11 @@ function isMapTileRequest(url) {
   return false;
 }
 
+function isMapAssetRequest(url) {
+  return url.hostname === 'tiles.openfreemap.org' &&
+    /^\/(?:styles\/[^/]+|planet(?:\/|$)|sprites\/|fonts\/)/i.test(url.pathname);
+}
+
 function isUsableTileResponse(response) {
   // Opaque image responses may render online, but their status/body cannot be verified for caching.
   return Boolean(
@@ -93,15 +100,58 @@ function isServableTileResponse(response) {
   );
 }
 
-async function trimTileCache(cache) {
+async function trimCache(cache, maxEntries) {
   const keys = await cache.keys();
-  if (keys.length <= TILE_CACHE_MAX_ENTRIES) return;
+  if (keys.length <= maxEntries) return;
 
   await Promise.all(
     keys
-      .slice(0, keys.length - TILE_CACHE_MAX_ENTRIES)
+      .slice(0, keys.length - maxEntries)
       .map((request) => cache.delete(request))
   );
+}
+
+async function trimTileCache(cache) {
+  return trimCache(cache, TILE_CACHE_MAX_ENTRIES);
+}
+
+async function cacheMapAssetRequest(request, cacheName, maxEntries, scheduleCacheWrite) {
+  const cache = await caches.open(cacheName);
+  const cachedResponse = await cache.match(request);
+
+  if (cachedResponse && isUsableTileResponse(cachedResponse)) {
+    return cachedResponse;
+  }
+
+  if (cachedResponse) await cache.delete(request);
+
+  try {
+    const networkResponse = await fetch(request);
+    if (!isServableTileResponse(networkResponse)) return Response.error();
+
+    if (isUsableTileResponse(networkResponse)) {
+      scheduleCacheWrite(
+        cache
+          .put(request, networkResponse.clone())
+          .then(() => trimCache(cache, maxEntries))
+      );
+    }
+    return networkResponse;
+  } catch {
+    return Response.error();
+  }
+}
+
+async function fetchAndCacheStaticAsset(request, cache) {
+  const response = await fetch(request);
+  if (!response.ok) return response;
+
+  try {
+    await cache.put(request, response.clone());
+  } catch {
+    // Cache writes are an optimization; keep the online response usable.
+  }
+  return response;
 }
 
 async function migratePreviousTileCache(cacheNames) {
@@ -321,7 +371,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME];
+  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME, MAP_ASSET_CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       const migration = IS_LOCAL_DEVELOPMENT
@@ -363,12 +413,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) =>
         cache.match(request).then((cached) =>
-          cached || fetch(request).then((response) => {
-            if (response.ok) {
-              cache.put(request, response.clone());
-            }
-            return response;
-          }).catch(() => {
+          cached || fetchAndCacheStaticAsset(request, cache).catch(() => {
             return new Response(
               'throw new Error("VSU SmartMap cannot load this uncached code while offline.");',
               {
@@ -387,37 +432,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for map tiles
+  // Keep numeric vector/raster tiles separate from small OpenFreeMap essentials.
   if (isMapTileRequest(url)) {
     event.respondWith(
-      caches.open(TILE_CACHE_NAME).then((cache) => {
-        return cache.match(request).then(async (cachedResponse) => {
-          if (cachedResponse && isUsableTileResponse(cachedResponse)) {
-            return cachedResponse;
-          }
+      cacheMapAssetRequest(
+        request,
+        TILE_CACHE_NAME,
+        TILE_CACHE_MAX_ENTRIES,
+        event.waitUntil.bind(event),
+      ),
+    );
+    return;
+  }
 
-          if (cachedResponse) await cache.delete(request);
-
-          try {
-            const networkResponse = await fetch(request);
-            if (isServableTileResponse(networkResponse)) {
-              if (isUsableTileResponse(networkResponse)) {
-                event.waitUntil(
-                  cache
-                    .put(request, networkResponse.clone())
-                    .then(() => trimTileCache(cache))
-                );
-              }
-              return networkResponse;
-            }
-
-          } catch {
-            // Return a network error so MapWrapper can activate its explicit fallback.
-          }
-
-          return Response.error();
-        });
-      })
+  if (isMapAssetRequest(url)) {
+    event.respondWith(
+      cacheMapAssetRequest(
+        request,
+        MAP_ASSET_CACHE_NAME,
+        MAP_ASSET_CACHE_MAX_ENTRIES,
+        event.waitUntil.bind(event),
+      ),
     );
     return;
   }
