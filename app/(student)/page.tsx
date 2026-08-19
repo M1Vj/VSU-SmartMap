@@ -45,6 +45,7 @@ import {
 } from "@/lib/map/map-runtime";
 import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
 const loadNavigationLayer = () => import("@/components/map/navigation-layer");
+const loadManualStartPin = () => import("@/components/map/manual-start-pin");
 
 async function waitForServiceWorkerControl() {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
@@ -71,7 +72,7 @@ async function waitForServiceWorkerControl() {
 
 async function preloadNavigationLayer() {
   await waitForServiceWorkerControl();
-  await loadNavigationLayer();
+  await Promise.all([loadNavigationLayer(), loadManualStartPin()]);
 }
 
 const MapSelectionLayer = dynamic(
@@ -90,7 +91,7 @@ const NavigationLayer = dynamic(
 );
 
 const ManualStartPin = dynamic(
-  () => import("@/components/map/manual-start-pin").then((m) => m.ManualStartPin),
+  () => loadManualStartPin().then((m) => m.ManualStartPin),
   { ssr: false },
 );
 

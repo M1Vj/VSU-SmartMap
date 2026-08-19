@@ -165,10 +165,6 @@ function DeveloperAttribution() {
   return null;
 }
 
-function isBrowserOffline() {
-  return typeof navigator !== "undefined" && navigator.onLine === false;
-}
-
 function OpenFreeMapVectorLayer({
   styleUrl,
   mapLibreMapRef,
@@ -317,10 +313,13 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   const [mounted, setMounted] = useState(false);
   const [satelliteFallbackActive, setSatelliteFallbackActive] = useState(false);
   const satelliteTileFallbackState = useRef(createTileFallbackState());
+  const browserOfflineRef = useRef(
+    typeof navigator !== "undefined" && navigator.onLine === false,
+  );
   const mapLibreMapRef = useRef<MapLibreMap | null>(null);
 
   const handleSatelliteTileError = useCallback(() => {
-    if (isBrowserOffline()) return;
+    if (browserOfflineRef.current) return;
 
     const nextState = recordTileError(satelliteTileFallbackState.current);
     satelliteTileFallbackState.current = nextState;
@@ -333,12 +332,20 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
 
   useEffect(() => {
     const handleOffline = () => {
+      browserOfflineRef.current = true;
       satelliteTileFallbackState.current = createTileFallbackState();
       setSatelliteFallbackActive(false);
     };
+    const handleOnline = () => {
+      browserOfflineRef.current = false;
+    };
 
     window.addEventListener("offline", handleOffline);
-    return () => window.removeEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
   }, []);
 
   useEffect(() => {

@@ -84,9 +84,14 @@ test("satellite imagery switches once to an attributed Carto raster fallback aft
 test("offline satellite misses keep the selected imagery layer and theme surface", async () => {
   const source = await readMapWrapperSource();
 
-  assert.match(source, /navigator\.onLine/);
+  assert.match(source, /browserOfflineRef = useRef\([\s\S]*typeof navigator !== "undefined"[\s\S]*navigator\.onLine === false/);
+  assert.match(source, /browserOfflineRef\.current/);
   assert.match(source, /addEventListener\("offline"/);
+  assert.match(source, /addEventListener\("online"/);
   assert.match(source, /removeEventListener\("offline"/);
+  assert.match(source, /removeEventListener\("online"/);
+  assert.match(source, /const handleOnline = \(\) => \{[\s\S]*browserOfflineRef\.current = false/);
+  assert.doesNotMatch(source, /function isBrowserOffline/);
   assert.match(source, /\.map-wrapper \.leaflet-container\s*\{[\s\S]*background:\s*hsl\(var\(--background\)\)/);
 });
 

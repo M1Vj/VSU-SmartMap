@@ -9,6 +9,10 @@ test("the student map warms the navigation chunk while online", async () => {
     source,
     /const loadNavigationLayer = \(\) => import\("@\/components\/map\/navigation-layer"\)/,
   );
+  assert.match(
+    source,
+    /const loadManualStartPin = \(\) => import\("@\/components\/map\/manual-start-pin"\)/,
+  );
   assert.match(source, /void preloadNavigationLayer\(\)/);
 });
 
@@ -23,7 +27,12 @@ test("navigation preload waits for service-worker readiness and control", async 
     source,
     /waitForServiceWorkerControl\(\)[\s\S]*loadNavigationLayer\(\)/,
   );
+  assert.match(
+    source,
+    /Promise\.all\(\[[\s\S]*loadNavigationLayer\(\)[\s\S]*loadManualStartPin\(\)/,
+  );
   assert.match(source, /const NavigationLayer = dynamic\([\s\S]*loadNavigationLayer\(\)\.then/);
+  assert.match(source, /const ManualStartPin = dynamic\([\s\S]*loadManualStartPin\(\)\.then/);
   assert.doesNotMatch(
     source,
     /const NavigationLayer = dynamic\([\s\S]*waitForServiceWorkerControl\(\)/,
