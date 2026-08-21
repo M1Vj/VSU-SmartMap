@@ -19,7 +19,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 [Governance](GOVERNANCE.md) · [Data and assets](docs/DATA_AND_ASSETS.md)
 
 ## Overview
-- Interactive map (OpenFreeMap vector + Esri satellite with place/road labels) with category pins, smart pin declutter, and a selection sheet
+- Interactive map (OpenFreeMap vector + Esri satellite with place/road labels) with category pins rendered individually at every zoom, an accessible anchored selection popup, and a single map runtime that owns navigation state
 - Turn-by-turn walking navigation on a campus path graph, with nearest-gate handoff to real road routing for off-campus starts
 - Boarding houses: owner-submitted, admin-verified off-campus listings with multi-room offerings, photos, amenities/safety checklists, reviews, price-anomaly flagging, routed walk times, and student filters
 - Directory with search/filter and map handoff; campus events calendar
@@ -35,7 +35,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript
 - Tailwind CSS + shadcn/ui, lucide-react
 - Supabase (Postgres + RLS, Auth, Storage)
-- Leaflet + MapLibre GL (vector basemap bridge with a project-owned React adapter)
+- Leaflet + MapLibre GL (vector basemap bridge) behind a pure map-runtime controller: explicit navigation phases, committed-route identity, prepared-graph routing, and pointer/popup interaction gateways
 - Genkit + Google Gemini for chat
 
 ## Requirements
@@ -152,6 +152,7 @@ through whichever gate minimizes total detour.
 - `npm run start` — serve production build
 - `npm run lint` — ESLint
 - `npm test` — unit tests (node:test via tsx)
+- `npm run test:map-e2e` — Playwright map smoke suite against a deployed app (`MAP_E2E_BASE_URL`, fails closed when unset)
 - `npm run qa:rls` — adversarial RLS smoke test against loopback Supabase
 - `npm run ai:dev` — start Genkit dev server
 
@@ -165,7 +166,7 @@ through whichever gate minimizes total detour.
 - `public/sw.js` — custom service worker for offline caching
 
 ## Offline & PWA
-- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts). API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
+- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts) in versioned, size-bounded caches; tile caches migrate only re-validated entries across versions. API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
 - The `/schedule` shell works offline. Personal course payloads remain in account-scoped IndexedDB and are never copied into service-worker Cache Storage.
 - Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
 - Guest schedules make no schedule network requests. Optional account sync stores courses in private, account-owned Supabase rows for cross-device use; it does not share them with Google or Google Calendar.
@@ -194,7 +195,7 @@ through whichever gate minimizes total detour.
 - Build: `npm run build`
 - RLS: `npm run qa:rls`
 - Manual flows to verify before release:
-  - Map load, pin selection/declutter at multiple zooms, category filter, search, navigation (on- and off-campus start)
+  - Map load, pin selection and anchored popup at multiple zooms, wheel-zoom continuity, category filter, search, navigation (on- and off-campus start)
   - Boarding houses: filters, detail page (photos zoom, room options, reviews), owner create/edit → admin review → publish
   - Directory search/filter and "View on Map" handoff; events list
   - Schedule: tab visibility/reset, add/edit/delete, conflicts and TBA locations, facility map handoff, JSON restore, ICS download, reload, and offline reload
