@@ -100,6 +100,8 @@ function isServableTileResponse(response) {
   );
 }
 
+// Cache API keys are ordered by insertion time, so trimming evicts the oldest
+// stored entries (first-stored order, not a strict least-recently-used policy).
 async function trimCache(cache, maxEntries) {
   const keys = await cache.keys();
   if (keys.length <= maxEntries) return;
