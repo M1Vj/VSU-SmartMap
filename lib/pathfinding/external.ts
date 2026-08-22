@@ -1,4 +1,9 @@
 import type { PathResult, TransportMode } from "@/lib/types/graph";
+import {
+  isValidPathResult,
+  normalizePathResultEndpoints,
+  type RouteEndpoint,
+} from "./route-validation";
 
 type Point = { lat: number; lng: number };
 
@@ -25,12 +30,19 @@ type ExternalRouteProvider = () => Promise<PathResult | null>;
 export async function resolveExternalRouteProviders(
   providers: readonly ExternalRouteProvider[],
   signal?: AbortSignal,
+  expectedStart?: RouteEndpoint,
+  expectedEnd?: RouteEndpoint,
 ): Promise<PathResult | null> {
   for (const provider of providers) {
     if (signal?.aborted) return null;
     const route = await provider();
     if (signal?.aborted) return null;
-    if (route) return route;
+    if (expectedStart && expectedEnd) {
+      const normalized = normalizePathResultEndpoints(route, expectedStart, expectedEnd);
+      if (normalized) return normalized;
+    } else if (isValidPathResult(route)) {
+      return route;
+    }
   }
   return null;
 }
@@ -266,5 +278,5 @@ export async function getExternalPath(
     }
   });
 
-  return resolveExternalRouteProviders(providers, signal);
+  return resolveExternalRouteProviders(providers, signal, start, end);
 }

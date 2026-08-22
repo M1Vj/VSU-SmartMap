@@ -51,3 +51,15 @@ test("reset retires the old session until a later generation", () => {
   assert.equal(tracker.has(4), false);
   assert.equal(tracker.claim(5), true);
 });
+
+test("retiring the previous session leaves an accepted replacement claimable", () => {
+  const tracker = createRouteAnnouncementTracker();
+
+  assert.equal(tracker.claim(7), true);
+  tracker.register(7, "old-toast");
+  assert.equal(tracker.reset(7), "old-toast");
+
+  assert.equal(tracker.claim(8), true);
+  tracker.register(8, "new-toast");
+  assert.equal(tracker.has(8), true);
+});

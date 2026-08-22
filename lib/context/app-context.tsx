@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { startNavigationProgress } from "@/components/navigation-progress";
 import type { Facility, FacilityCategory } from "@/lib/types/facility";
 import type { TransportMode } from "@/lib/types/graph";
 import { FACILITY_CATEGORY_META } from "@/lib/constants/facilities";
@@ -390,6 +391,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     isNavigating.current = true;
     navigationTargetRef.current = request.route;
+    startNavigationProgress();
     router.push(request.route, { scroll: false });
   }, [router]);
 
@@ -437,6 +439,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     setActiveTabState(tab);
+    startNavigationProgress();
     router.push(fullUrl, { scroll: false });
   }, [router, debouncedQuery, selectedCategories, selectedFacility?.id, pendingFacilityId]);
 

@@ -29,3 +29,16 @@ test("adapter owns native layer cleanup and stable overlay portals", () => {
   assert.match(source, /layer\.bindTooltip/);
   assert.match(source, /layer\.bindPopup/);
 });
+
+test("tile layers expose Leaflet tile errors to map-level fallbacks", () => {
+  assert.match(source, /type TileLayerProps = TileLayerOptions & \{[\s\S]*eventHandlers\?: LeafletEventHandlerFnMap/);
+  assert.match(source, /const attachedEventHandlers = initialEventHandlers\.current[\s\S]*addLayerToMap\(/);
+  assert.match(source, /L\.tileLayer\(initialUrl\.current, initialOptions\.current\)/);
+  assert.match(source, /useEventHandlers\(layer, eventHandlers, eventHandlers\)/);
+});
+
+test("adapter exposes a native zoom control with cleanup", () => {
+  assert.match(source, /export function ZoomControl/);
+  assert.match(source, /L\.control\.zoom\(\{ position \}\)\.addTo\(map\)/);
+  assert.match(source, /control\.remove\(\)/);
+});

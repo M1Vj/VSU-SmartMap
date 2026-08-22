@@ -16,3 +16,15 @@ test("student routes keep one global desktop credit before mobile navigation", (
     "global desktop credit must retain its single ownership before mobile navigation",
   );
 });
+
+test("student shell renders a visible full-viewport fallback during client hydration", () => {
+  assert.match(source, /function StudentLoadingFallback\(\)/);
+  assert.match(
+    source,
+    /<Suspense fallback=\{<StudentLoadingFallback \/>\}>/,
+  );
+  assert.match(source, /role="status"/);
+  assert.match(source, /aria-busy="true"/);
+  assert.match(source, /Loading SmartMap…/);
+  assert.match(source, /min-h-\[100dvh\]/);
+});

@@ -1,105 +1,112 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-
+import type { PathResult } from "@/lib/types/graph";
 import {
-  shouldClearRouteForMapSearch,
-  shouldClearRouteForSelectedItem,
-} from "./selection-route-reset.ts";
+  createInitialMapRuntimeState,
+  mapRuntimeReducer,
+} from "@/lib/map/map-runtime";
 
-test("clears an existing route when a different map item is selected", () => {
+import { shouldRestoreCommittedRouteForSelectedItem } from "./selection-route-reset.ts";
+
+test("restores the committed route only when its destination is selected during a pending replacement", () => {
   assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "bougainvillea",
-      routeDestinationId: null,
-      hasNavigationState: true,
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: 2,
     }),
     true,
   );
-
   assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "bougainvillea",
-      routeDestinationId: "administration-building",
-      hasNavigationState: true,
-    }),
-    true,
-  );
-});
-
-test("keeps navigation when selecting the current route destination or when no route exists", () => {
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "bougainvillea",
-      routeDestinationId: "bougainvillea",
-      hasNavigationState: true,
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-b",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: 2,
     }),
     false,
   );
-
   assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: "bougainvillea",
-      routeDestinationId: null,
-      hasNavigationState: false,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldClearRouteForSelectedItem({
-      selectedItemId: null,
-      routeDestinationId: "bougainvillea",
-      hasNavigationState: true,
+    shouldRestoreCommittedRouteForSelectedItem({
+      selectedItemId: "facility-a",
+      routeDestinationId: "facility-b",
+      committedRouteDestinationId: "facility-a",
+      pendingRequestId: null,
     }),
     false,
   );
 });
 
-test("clears an existing route when search text no longer matches the selected item", () => {
-  assert.equal(
-    shouldClearRouteForMapSearch({
-      searchQuery: "bougainvillea",
-      selectedItemName: null,
-      hasNavigationState: true,
-    }),
-    true,
-  );
+test("committed route A survives selecting and dismissing popup B", () => {
+  const route: PathResult = {
+    path: [
+      { id: "a", lat: 10, lng: 10, type: "node" },
+      { id: "b", lat: 10.001, lng: 10.001, type: "node" },
+    ],
+    totalDistance: 150,
+    estimatedTime: 2,
+  };
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 10, lng: 10 },
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 1,
+    route,
+    snapshot: {
+      destinationId: "facility-a",
+      origin: "live",
+      mode: "walking",
+      start: { lat: 9.9, lng: 9.9 },
+      end: { lat: 10, lng: 10 },
+    },
+  });
 
-  assert.equal(
-    shouldClearRouteForMapSearch({
-      searchQuery: "bougainvillea",
-      selectedItemName: "Administration Building",
-      hasNavigationState: true,
-    }),
-    true,
-  );
+  state = mapRuntimeReducer(state, { type: "selection/set", itemId: "facility-b" });
+  state = mapRuntimeReducer(state, { type: "selection/cleared" });
+
+  assert.equal(state.navigation.committed?.destinationId, "facility-a");
+  assert.equal(state.navigation.committed?.route, route);
 });
 
-test("keeps navigation for empty searches, matching selected items, and empty route state", () => {
-  assert.equal(
-    shouldClearRouteForMapSearch({
-      searchQuery: "  ",
-      selectedItemName: "Administration Building",
-      hasNavigationState: true,
-    }),
-    false,
-  );
+test("committed route A survives a changed map search", () => {
+  const route: PathResult = {
+    path: [
+      { id: "a", lat: 10, lng: 10, type: "node" },
+      { id: "b", lat: 10.001, lng: 10.001, type: "node" },
+    ],
+    totalDistance: 150,
+    estimatedTime: 2,
+  };
+  let state = createInitialMapRuntimeState();
+  state = mapRuntimeReducer(state, {
+    type: "navigation/requested",
+    requestId: 1,
+    destinationId: "facility-a",
+    origin: "live",
+    end: { lat: 10, lng: 10 },
+  });
+  state = mapRuntimeReducer(state, {
+    type: "navigation/committed",
+    requestId: 1,
+    route,
+    snapshot: {
+      destinationId: "facility-a",
+      origin: "live",
+      mode: "walking",
+      start: { lat: 9.9, lng: 9.9 },
+      end: { lat: 10, lng: 10 },
+    },
+  });
+  const changedSearch = "another facility";
 
-  assert.equal(
-    shouldClearRouteForMapSearch({
-      searchQuery: "Administration Building",
-      selectedItemName: "Administration Building",
-      hasNavigationState: true,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldClearRouteForMapSearch({
-      searchQuery: "bougainvillea",
-      selectedItemName: "Administration Building",
-      hasNavigationState: false,
-    }),
-    false,
-  );
+  assert.equal(changedSearch, "another facility");
+  assert.equal(state.navigation.committed?.destinationId, "facility-a");
+  assert.equal(state.navigation.committed?.route, route);
 });

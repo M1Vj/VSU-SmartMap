@@ -4,6 +4,9 @@
 
 .map-popup-card .leaflet-popup-content-wrapper {
   @apply p-0 overflow-hidden rounded-lg bg-popover text-popover-foreground border border-border/50;
+  max-width: calc(100vw - 1.5rem);
+  overflow: hidden;
+  border-radius: 0.875rem;
 }
 
 .map-popup-card .leaflet-popup-tip {
@@ -11,7 +14,9 @@
 }
 
 .map-popup-card .leaflet-popup-content {
-  @apply m-0 w-auto !important;
+  width: auto !important;
+  max-width: calc(100vw - 1.5rem);
+  margin: 0;
 }
 
 /* Leaflet injects `.leaflet-popup-content p { margin: 18px 0 }`, which bloats
@@ -175,6 +180,13 @@ select:focus-visible,
   will-change: transform;
 }
 
+@media (pointer: coarse), (any-pointer: coarse) {
+  .map-popup-card [data-map-popup-action="true"] {
+    min-height: 44px;
+    min-width: 6.5rem;
+  }
+}
+
 .vsu-pin svg,
 .vsu-pin-dot svg {
   backface-visibility: hidden;
@@ -237,40 +249,6 @@ select:focus-visible,
 .vsu-pin-container.pin-selected .vsu-pin-label {
   @apply text-accent-foreground;
   color: hsl(var(--accent-foreground));
-}
-
-.vsu-marker-cluster-icon {
-  pointer-events: auto !important;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.vsu-marker-cluster {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  border: 3px solid #ffffff;
-  border-radius: 9999px;
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.3), 0 0 0 2px hsl(var(--primary) / 0.25);
-  font-size: 0.8rem;
-  font-weight: 800;
-  line-height: 1;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-
-.vsu-marker-cluster-icon:hover .vsu-marker-cluster,
-.vsu-marker-cluster-icon:focus-visible .vsu-marker-cluster {
-  transform: scale(1.08);
-  box-shadow: 0 3px 10px rgb(0 0 0 / 0.35), 0 0 0 3px hsl(var(--primary) / 0.3);
-}
-
-.leaflet-zoom-anim .leaflet-zoom-animated {
-  transition: transform 0.03s ease-out !important;
 }
 
 .leaflet-marker-icon {
