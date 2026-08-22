@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 
 import { Fragment, useEffect, useRef } from "react";
 import { useTheme } from "next-themes";
-import { MapContainer, TileLayer, Polyline, useMap, useMapEvents, Marker } from "@/components/map/leaflet-react";
+import { MapContainer, TileLayer, Polyline, ZoomControl, useMap, useMapEvents, Marker } from "@/components/map/leaflet-react";
 import { toast } from "sonner";
 import L from "leaflet";
 import { MAP_MAX_ZOOM, MAP_MIN_ZOOM, MAP_TILES, MAP_DEFAULT_CENTER } from "@/lib/constants/map";
@@ -12,7 +12,6 @@ import { useMapStyle } from "@/lib/context/map-style-context";
 import { isEdgeClosed } from "@/lib/pathfinding/astar";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { MAP_LEAFLET_ZOOM_OPTIONS, MAP_ZOOM_ANIMATION_OPTIONS } from "@/lib/map/wheel-zoom";
-import { SmoothWheelZoom, SmoothZoomControl } from "@/components/map/smooth-wheel-zoom";
 import { isPointInsideRoutingBoundary } from "@/lib/pathfinding/transition-gates";
 import type { MapNode, MapEdge } from "@/lib/types/graph";
 
@@ -294,11 +293,11 @@ export default function EditorMapContent({
         key={tiles.url}
         attribution={tiles.attribution}
         url={tiles.url}
+        crossOrigin="anonymous"
         maxZoom={MAP_MAX_ZOOM}
         maxNativeZoom={tiles.maxNativeZoom}
       />
-      <SmoothZoomControl position="bottomleft" />
-      <SmoothWheelZoom />
+      <ZoomControl position="bottomleft" />
 
       <MapEvents mode={mode} onNodeAdd={onNodeAdd} />
       <SelectionInteractions

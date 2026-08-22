@@ -1,6 +1,9 @@
-const CACHE_NAME = 'vsu-smartmap-v16';
-const TILE_CACHE_NAME = 'map-tiles-v1';
+const CACHE_NAME = 'vsu-smartmap-v17';
+const PREVIOUS_TILE_CACHE_NAME = 'map-tiles-v1';
+const TILE_CACHE_NAME = 'map-tiles-v2';
+const MAP_ASSET_CACHE_NAME = 'map-assets-v1';
 const TILE_CACHE_MAX_ENTRIES = 400;
+const MAP_ASSET_CACHE_MAX_ENTRIES = 128;
 const PRECACHE_OPERATION_TIMEOUT_MS = 10000;
 const ENABLE_LOCAL_OFFLINE_PREVIEW = new URL(self.location.href).searchParams.get('offline') === '1';
 const IS_LOCAL_DEVELOPMENT = ['localhost', '127.0.0.1', '0.0.0.0'].includes(self.location.hostname) &&
@@ -60,23 +63,126 @@ const DEV_HMR_OFFLINE_SHIM = `
 </script>`;
 
 function isMapTileRequest(url) {
-  return url.hostname === 'tile.openstreetmap.org' ||
-    url.hostname.endsWith('.openstreetmap.org') ||
-    url.hostname === 'basemaps.cartocdn.com' ||
-    url.hostname.endsWith('.cartocdn.com') ||
-    url.hostname === 'tiles.openfreemap.org' ||
-    url.hostname === 'server.arcgisonline.com';
+  if (url.hostname === 'server.arcgisonline.com') {
+    return /\/MapServer\/tile\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'tile.openstreetmap.org') {
+    return /^\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'tiles.openfreemap.org') {
+    return /(?:^|\/)\d+\/\d+\/\d+(?:\.(?:pbf|mvt|png|jpg|webp))?$/i.test(url.pathname);
+  }
+  if (url.hostname === 'basemaps.cartocdn.com' || url.hostname.endsWith('.basemaps.cartocdn.com')) {
+    return /^\/(?:light_all|dark_all|voyager|rastertiles)\/\d+\/\d+\/\d+(?:@[a-z0-9]+)?(?:\.[a-z0-9]+)?$/i.test(url.pathname);
+  }
+  return false;
 }
 
-async function trimTileCache(cache) {
+function isMapAssetRequest(url) {
+  return url.hostname === 'tiles.openfreemap.org' &&
+    /^\/(?:styles\/[^/]+|planet(?:\/|$)|sprites\/|fonts\/)/i.test(url.pathname);
+}
+
+function isUsableTileResponse(response) {
+  // Opaque image responses may render online, but their status/body cannot be verified for caching.
+  return Boolean(
+    response &&
+    response.status !== 204 &&
+    response.ok
+  );
+}
+
+function isServableTileResponse(response) {
+  return Boolean(
+    response &&
+    response.status !== 204 &&
+    (response.ok || response.type === 'opaque')
+  );
+}
+
+// Cache API keys are ordered by insertion time, so trimming evicts the oldest
+// stored entries (first-stored order, not a strict least-recently-used policy).
+async function trimCache(cache, maxEntries) {
   const keys = await cache.keys();
-  if (keys.length <= TILE_CACHE_MAX_ENTRIES) return;
+  if (keys.length <= maxEntries) return;
 
   await Promise.all(
     keys
-      .slice(0, keys.length - TILE_CACHE_MAX_ENTRIES)
+      .slice(0, keys.length - maxEntries)
       .map((request) => cache.delete(request))
   );
+}
+
+async function trimTileCache(cache) {
+  return trimCache(cache, TILE_CACHE_MAX_ENTRIES);
+}
+
+async function cacheMapAssetRequest(request, cacheName, maxEntries, scheduleCacheWrite) {
+  const cache = await caches.open(cacheName);
+  const cachedResponse = await cache.match(request);
+
+  if (cachedResponse && isUsableTileResponse(cachedResponse)) {
+    return cachedResponse;
+  }
+
+  if (cachedResponse) await cache.delete(request);
+
+  try {
+    const networkResponse = await fetch(request);
+    if (!isServableTileResponse(networkResponse)) return Response.error();
+
+    if (isUsableTileResponse(networkResponse)) {
+      scheduleCacheWrite(
+        cache
+          .put(request, networkResponse.clone())
+          .then(() => trimCache(cache, maxEntries))
+      );
+    }
+    return networkResponse;
+  } catch {
+    return Response.error();
+  }
+}
+
+async function fetchAndCacheStaticAsset(request, cache) {
+  const response = await fetch(request);
+  if (!response.ok) return response;
+
+  try {
+    await cache.put(request, response.clone());
+  } catch {
+    // Cache writes are an optimization; keep the online response usable.
+  }
+  return response;
+}
+
+async function migratePreviousTileCache(cacheNames) {
+  if (!cacheNames.includes(PREVIOUS_TILE_CACHE_NAME)) return;
+
+  const [previousCache, tileCache] = await Promise.all([
+    caches.open(PREVIOUS_TILE_CACHE_NAME),
+    caches.open(TILE_CACHE_NAME),
+  ]);
+  const requests = await previousCache.keys();
+
+  await Promise.all(requests.map(async (request) => {
+    let requestUrl;
+    try {
+      requestUrl = new URL(request.url);
+    } catch {
+      return;
+    }
+    if (!isMapTileRequest(requestUrl)) return;
+
+    const response = await previousCache.match(request);
+    if (!isUsableTileResponse(response)) return;
+
+    const currentResponse = await tileCache.match(request);
+    if (isUsableTileResponse(currentResponse)) return;
+
+    await tileCache.put(request, response.clone());
+  }));
+  await trimTileCache(tileCache);
 }
 
 function isNetworkOnlyRequest(url, request) {
@@ -267,14 +373,17 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME];
+  const keepCaches = [CACHE_NAME, TILE_CACHE_NAME, MAP_ASSET_CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
-      const deleteCaches = Promise.all(
+      const migration = IS_LOCAL_DEVELOPMENT
+        ? Promise.resolve()
+        : migratePreviousTileCache(cacheNames);
+      const deleteCaches = migration.then(() => Promise.all(
         cacheNames
           .filter((name) => !keepCaches.includes(name))
           .map((name) => caches.delete(name))
-      );
+      ));
       if (!IS_LOCAL_DEVELOPMENT) return deleteCaches;
 
       return Promise.all([
@@ -306,12 +415,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) =>
         cache.match(request).then((cached) =>
-          cached || fetch(request).then((response) => {
-            if (response.ok) {
-              cache.put(request, response.clone());
-            }
-            return response;
-          }).catch(() => {
+          cached || fetchAndCacheStaticAsset(request, cache).catch(() => {
             return new Response(
               'throw new Error("VSU SmartMap cannot load this uncached code while offline.");',
               {
@@ -330,28 +434,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for map tiles
+  // Keep numeric vector/raster tiles separate from small OpenFreeMap essentials.
   if (isMapTileRequest(url)) {
     event.respondWith(
-      caches.open(TILE_CACHE_NAME).then((cache) => {
-        return cache.match(request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          return fetch(request).then((networkResponse) => {
-            if (networkResponse.ok) {
-              event.waitUntil(
-                cache
-                  .put(request, networkResponse.clone())
-                  .then(() => trimTileCache(cache))
-              );
-            }
-            return networkResponse;
-          }).catch(() => {
-            return new Response('', { status: 204 });
-          });
-        });
-      })
+      cacheMapAssetRequest(
+        request,
+        TILE_CACHE_NAME,
+        TILE_CACHE_MAX_ENTRIES,
+        event.waitUntil.bind(event),
+      ),
+    );
+    return;
+  }
+
+  if (isMapAssetRequest(url)) {
+    event.respondWith(
+      cacheMapAssetRequest(
+        request,
+        MAP_ASSET_CACHE_NAME,
+        MAP_ASSET_CACHE_MAX_ENTRIES,
+        event.waitUntil.bind(event),
+      ),
     );
     return;
   }

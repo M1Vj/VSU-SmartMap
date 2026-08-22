@@ -27,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { addLayerToMap } from "@/lib/map/leaflet-layer";
 
 const MapContext = createContext<L.Map | null>(null);
 const LayerContext = createContext<L.Layer | null>(null);
@@ -77,13 +78,40 @@ export function useMap(): L.Map {
   return map;
 }
 
+type ZoomControlProps = {
+  position?: L.ControlPosition;
+};
+
+export function ZoomControl({ position = "topleft" }: ZoomControlProps) {
+  const map = useMap();
+
+  useEffect(() => {
+    const control = L.control.zoom({ position }).addTo(map);
+    return () => {
+      control.remove();
+    };
+  }, [map, position]);
+
+  return null;
+}
+
 function useEventHandlers(
   target: L.Evented | null,
   eventHandlers?: LeafletEventHandlerFnMap,
+  initiallyAttached?: LeafletEventHandlerFnMap,
 ) {
+  const initialHandlers = useRef(initiallyAttached);
+
   useEffect(() => {
     if (!target || !eventHandlers) return;
-    target.on(eventHandlers);
+
+    const alreadyAttached = initialHandlers.current === eventHandlers;
+    if (!alreadyAttached) {
+      if (initialHandlers.current) target.off(initialHandlers.current);
+      target.on(eventHandlers);
+    }
+    initialHandlers.current = undefined;
+
     return () => {
       target.off(eventHandlers);
     };
@@ -96,18 +124,28 @@ export function useMapEvents(eventHandlers: LeafletEventHandlerFnMap): L.Map {
   return map;
 }
 
-type TileLayerProps = TileLayerOptions & { url: string };
+type TileLayerProps = TileLayerOptions & {
+  url: string;
+  eventHandlers?: LeafletEventHandlerFnMap;
+};
 
-export function TileLayer({ url, ...options }: TileLayerProps) {
+export function TileLayer({ url, eventHandlers, ...options }: TileLayerProps) {
   const map = useMap();
   const initialUrl = useRef(url);
   const initialOptions = useRef(options);
+  const initialEventHandlers = useRef(eventHandlers);
   const [layer, setLayer] = useState<L.TileLayer | null>(null);
 
   useEffect(() => {
-    const instance = L.tileLayer(initialUrl.current, initialOptions.current).addTo(map);
+    const attachedEventHandlers = initialEventHandlers.current;
+    const instance = addLayerToMap(
+      L.tileLayer(initialUrl.current, initialOptions.current),
+      map,
+      attachedEventHandlers,
+    );
     setLayer(instance);
     return () => {
+      if (attachedEventHandlers) instance.off(attachedEventHandlers);
       instance.removeFrom(map);
     };
   }, [map]);
@@ -121,6 +159,7 @@ export function TileLayer({ url, ...options }: TileLayerProps) {
     if (typeof options.opacity === "number") layer.setOpacity(options.opacity);
     if (typeof options.zIndex === "number") layer.setZIndex(options.zIndex);
   }, [layer, options.opacity, options.zIndex]);
+  useEventHandlers(layer, eventHandlers, eventHandlers);
 
   return null;
 }
@@ -169,23 +208,26 @@ type PolylineProps = PolylineOptions & {
   positions: LatLngExpression[] | LatLngExpression[][];
   pathOptions?: PathOptions;
   eventHandlers?: LeafletEventHandlerFnMap;
+  onReady?: (layer: L.Polyline | null) => void;
 };
 
-export function Polyline({
-  positions,
-  pathOptions,
-  eventHandlers,
-  ...options
-}: PolylineProps) {
+export const Polyline = forwardRef<L.Polyline, PolylineProps>(function Polyline(
+  { positions, pathOptions, eventHandlers, onReady, ...options },
+  forwardedRef,
+) {
   const map = useMap();
   const initialPositions = useRef(positions);
   const initialOptions = useRef({ ...options, ...pathOptions });
   const [layer, setLayer] = useState<L.Polyline | null>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const instance = L.polyline(initialPositions.current, initialOptions.current).addTo(map);
     setLayer(instance);
+    onReadyRef.current?.(instance);
     return () => {
+      onReadyRef.current?.(null);
       instance.removeFrom(map);
     };
   }, [map]);
@@ -196,19 +238,21 @@ export function Polyline({
   useEffect(() => {
     if (layer && pathOptions) layer.setStyle(pathOptions);
   }, [layer, pathOptions]);
+  useImperativeHandle(forwardedRef, () => layer as L.Polyline, [layer]);
   useEventHandlers(layer, eventHandlers);
 
   return null;
-}
+});
 
 type MarkerProps = MarkerOptions & {
   position: Position;
   children?: ReactNode;
   eventHandlers?: LeafletEventHandlerFnMap;
+  onReady?: (marker: L.Marker | null) => void;
 };
 
 export const Marker = forwardRef<L.Marker, MarkerProps>(function Marker(
-  { position, children, eventHandlers, icon, draggable, opacity, zIndexOffset, ...options },
+  { position, children, eventHandlers, onReady, icon, draggable, opacity, zIndexOffset, ...options },
   forwardedRef,
 ) {
   const map = useMap();
@@ -221,11 +265,15 @@ export const Marker = forwardRef<L.Marker, MarkerProps>(function Marker(
     zIndexOffset,
   });
   const [marker, setMarker] = useState<L.Marker | null>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useLayoutEffect(() => {
     const instance = L.marker(initialPosition.current, initialOptions.current).addTo(map);
     setMarker(instance);
+    onReadyRef.current?.(instance);
     return () => {
+      onReadyRef.current?.(null);
       instance.removeFrom(map);
     };
   }, [map]);

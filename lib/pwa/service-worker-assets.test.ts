@@ -6,7 +6,7 @@ import vm from "node:vm";
 test("service worker refreshes cached app icons with a new static cache", () => {
   const serviceWorker = readFileSync("public/sw.js", "utf8");
 
-  assert.match(serviceWorker, /const CACHE_NAME = 'vsu-smartmap-v16';/);
+  assert.match(serviceWorker, /const CACHE_NAME = 'vsu-smartmap-v17';/);
   assert.match(serviceWorker, /'\/icons\/icon-192x192\.png\?v=20260709'/);
   assert.match(serviceWorker, /'\/icons\/icon-512x512\.png\?v=20260709'/);
   assert.doesNotMatch(serviceWorker, /'\/icons\/icon-192x192\.png'/);
@@ -108,6 +108,7 @@ test("install settles with bounded deduplicated optional asset discovery", async
     '<script src="/_next/static/chunks/missing.js"></script>',
     '<script src="/_next/static/chunks/hung.js"></script>',
   ].join("");
+  const currentCsp = "default-src 'self'; connect-src 'self' https://server.arcgisonline.com https://tiles.openfreemap.org https://tile.openstreetmap.org https://a.basemaps.cartocdn.com; img-src 'self' blob: data: https:";
   const workerUrl = new URL("https://smartmap.test/sw.js?offline=1");
   class WorkerRequest extends Request {
     constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -119,6 +120,7 @@ test("install settles with bounded deduplicated optional asset discovery", async
   }
   const cache = {
     match: async () => undefined,
+    keys: async () => [],
     put: async (request: Request, response: Response) => {
       assert.ok(response.ok);
       cachedUrls.push(request.url);
@@ -157,7 +159,10 @@ test("install settles with bounded deduplicated optional asset discovery", async
         return new Response("asset");
       }
       return new Response(requiredHtml, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
+        headers: {
+          "Content-Security-Policy": currentCsp,
+          "Content-Type": "text/html; charset=utf-8",
+        },
       });
     },
     caches: {
@@ -166,6 +171,8 @@ test("install settles with bounded deduplicated optional asset discovery", async
       keys: async () => [
         "vsu-smartmap-v14",
         "vsu-smartmap-v15",
+        "vsu-smartmap-v16",
+        "vsu-smartmap-v17",
         "map-tiles-v1",
         "api-cache-v2",
       ],
@@ -226,9 +233,25 @@ test("install settles with bounded deduplicated optional asset discovery", async
   assert.deepEqual(deletedCaches, [
     "vsu-smartmap-v14",
     "vsu-smartmap-v15",
+    "vsu-smartmap-v16",
+    "map-tiles-v1",
     "api-cache-v2",
   ]);
+  assert.ok(!deletedCaches.includes("vsu-smartmap-v17"));
   assert.equal(claimCalls, 1);
+
+  let documentResponsePromise: Promise<Response> | undefined;
+  listeners.get("fetch")?.({
+    request: new WorkerRequest("https://smartmap.test/"),
+    respondWith: (response: Promise<Response>) => {
+      documentResponsePromise = response;
+    },
+    waitUntil: () => undefined,
+  });
+  assert.ok(documentResponsePromise);
+  const reloadedDocument = await documentResponsePromise;
+  assert.equal(reloadedDocument.headers.get("Content-Security-Policy"), currentCsp);
+  assert.equal(fetchCounts.get("/"), 2);
 });
 
 test("install rejects a hung required shell in bounded time", async () => {
@@ -324,6 +347,476 @@ test("install rejects a hung required shell in bounded time", async () => {
   assert.ok(cachedUrls.includes("https://smartmap.test/"));
   assert.ok(!cachedUrls.includes("https://smartmap.test/schedule"));
   assert.equal(errors.length, 1);
+});
+
+test("map tile failures stay network errors for the MapWrapper fallback", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const fetchedUrls: string[] = [];
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const cache = {
+    match: async () => undefined,
+    delete: async () => true,
+    put: async () => undefined,
+    keys: async () => [],
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async (request: Request | string) => {
+      const url = new URL(typeof request === "string" ? request : request.url);
+      fetchedUrls.push(url.toString());
+      throw new Error(`${url.hostname} unavailable`);
+    },
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async (url: string) => {
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: () => undefined,
+    });
+    assert.ok(responsePromise);
+    return responsePromise;
+  };
+
+  const baseUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/17/12345/67890";
+  const baseResponse = await dispatchFetch(baseUrl);
+  assert.equal(baseResponse?.status, 0);
+  assert.deepEqual(fetchedUrls, [baseUrl]);
+
+  const referenceUrl =
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/17/12345/67890";
+  const referenceResponse = await dispatchFetch(referenceUrl);
+  assert.equal(referenceResponse?.status, 0);
+  assert.deepEqual(fetchedUrls, [baseUrl, referenceUrl]);
+});
+
+test("tile cache upgrades migrate usable v1 entries before retiring v1", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const validTileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const poisonedTileUrl = "https://tile.openstreetmap.org/17/67890/12346.png";
+  const nonTileUrl = "https://tiles.openfreemap.org/styles/liberty";
+  const migratedUrls: string[] = [];
+  const deletedCaches: Array<{ name: string; migratedUrls: string[] }> = [];
+  const v1Entries = new Map<string, Response>([
+    [validTileUrl, new Response("valid-v1-tile", { status: 200 })],
+    [poisonedTileUrl, new Response(null, { status: 204 })],
+    [nonTileUrl, new Response("style-json", { status: 200 })],
+  ]);
+  const v2Entries = new Map<string, Response>();
+  for (let index = 0; index < 400; index += 1) {
+    v2Entries.set(
+      `https://tile.openstreetmap.org/16/0/${index}.png`,
+      new Response(`existing-v2-${index}`, { status: 200 }),
+    );
+  }
+  const v1Cache = {
+    keys: async () => [...v1Entries.keys()].map((url) => new Request(url)),
+    match: async (request: Request) => v1Entries.get(request.url)?.clone(),
+  };
+  const v2Cache = {
+    keys: async () => [...v2Entries.keys()].map((url) => new Request(url)),
+    match: async (request: Request) => v2Entries.get(request.url)?.clone(),
+    delete: async (request: Request) => v2Entries.delete(request.url),
+    put: async (request: Request, response: Response) => {
+      migratedUrls.push(request.url);
+      v2Entries.set(request.url, response.clone());
+    },
+  };
+  const cacheByName = new Map([
+    ["map-tiles-v1", v1Cache],
+    ["map-tiles-v2", v2Cache],
+  ]);
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => {
+      throw new Error("offline");
+    },
+    caches: {
+      open: async (name: string) => cacheByName.get(name) ?? v2Cache,
+      match: async () => undefined,
+      keys: async () => ["vsu-smartmap-v16", "vsu-smartmap-v17", "map-tiles-v1", "map-tiles-v2"],
+      delete: async (name: string) => {
+        deletedCaches.push({ name, migratedUrls: [...migratedUrls] });
+        return true;
+      },
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  let activatePromise: Promise<unknown> | undefined;
+  listeners.get("activate")?.({
+    waitUntil: (promise: Promise<unknown>) => {
+      activatePromise = promise;
+    },
+  });
+  assert.ok(activatePromise);
+  await activatePromise;
+
+  assert.deepEqual(migratedUrls, [validTileUrl]);
+  assert.ok(v2Entries.has(validTileUrl));
+  assert.ok(!v2Entries.has(poisonedTileUrl));
+  assert.ok(!v2Entries.has(nonTileUrl));
+  assert.ok(v2Entries.size <= 400);
+  assert.deepEqual(deletedCaches, [
+    { name: "vsu-smartmap-v16", migratedUrls: [validTileUrl] },
+    { name: "map-tiles-v1", migratedUrls: [validTileUrl] },
+  ]);
+
+  let responsePromise: Promise<Response> | undefined;
+  listeners.get("fetch")?.({
+    request: new Request(validTileUrl),
+    respondWith: (response: Promise<Response>) => {
+      responsePromise = response;
+    },
+    waitUntil: () => undefined,
+  });
+  assert.ok(responsePromise);
+  const offlineResponse = await responsePromise;
+  assert.equal(offlineResponse.status, 200);
+  assert.equal(await offlineResponse.text(), "valid-v1-tile");
+});
+
+test("tile cache stores verifiable responses, keeps them offline, and rejects opaque entries", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const tileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const opaqueResponse = {
+    status: 0,
+    ok: false,
+    type: "opaque",
+    clone() {
+      return this;
+    },
+  };
+  const cacheEntries = new Map<string, Response | typeof opaqueResponse>();
+  let networkResponse: Response | typeof opaqueResponse = new Response("fresh-tile", { status: 200 });
+  let offline = false;
+  let deleteCount = 0;
+  let cachePutCount = 0;
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const cache = {
+    match: async (request: Request) =>
+      cacheEntries.get(request.url)?.clone(),
+    delete: async () => {
+      deleteCount += 1;
+      return true;
+    },
+    put: async (request: Request, response: Response) => {
+      cachePutCount += 1;
+      cacheEntries.set(request.url, response.clone());
+    },
+    keys: async () => [],
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => {
+      if (offline) throw new Error("offline");
+      return networkResponse;
+    },
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async () => {
+    waitUntilPromises.length = 0;
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(tileUrl),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      },
+    });
+    assert.ok(responsePromise);
+    const response = await responsePromise;
+    await Promise.all(waitUntilPromises);
+    return response;
+  };
+
+  const networkTile = await dispatchFetch();
+  assert.equal(networkTile.status, 200);
+  assert.equal(await networkTile.text(), "fresh-tile");
+  assert.equal(cachePutCount, 1);
+
+  offline = true;
+  const offlineTile = await dispatchFetch();
+  assert.equal(offlineTile.status, 200);
+  assert.equal(await offlineTile.text(), "fresh-tile");
+
+  offline = false;
+  networkResponse = opaqueResponse;
+  cacheEntries.delete(tileUrl);
+  const opaqueNetworkTile = await dispatchFetch();
+  assert.equal(opaqueNetworkTile, opaqueResponse);
+  assert.equal(cachePutCount, 1);
+
+  offline = true;
+  cacheEntries.set(tileUrl, opaqueResponse);
+  const opaqueOfflineTile = await dispatchFetch();
+  assert.equal(opaqueOfflineTile.status, 0);
+  assert.equal(deleteCount, 1);
+});
+
+test("OpenFreeMap essentials survive tile eviction in a bounded asset cache", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  const styleUrl = "https://tiles.openfreemap.org/styles/liberty";
+  const spriteUrl = "https://tiles.openfreemap.org/sprites/ofm/ofm.png";
+  const glyphUrl = "https://tiles.openfreemap.org/fonts/Noto Sans Regular/0-255.pbf";
+  const normalizedGlyphUrl = new Request(glyphUrl).url;
+  const tileEntries = new Map<string, Response>();
+  const assetEntries = new Map<string, Response>();
+  for (let index = 0; index < 399; index += 1) {
+    tileEntries.set(
+      `https://tiles.openfreemap.org/planet/20260816_080001_pt/14/0/${index}.pbf`,
+      new Response(`existing-tile-${index}`, { status: 200 }),
+    );
+  }
+
+  const cacheFor = (entries: Map<string, Response>) => ({
+    match: async (request: Request) => entries.get(request.url)?.clone(),
+    delete: async (request: Request) => entries.delete(request.url),
+    put: async (request: Request, response: Response) => {
+      entries.set(request.url, response.clone());
+    },
+    keys: async () => [...entries.keys()].map((url) => new Request(url)),
+  });
+  const cacheByName = new Map([
+    ["map-tiles-v2", cacheFor(tileEntries)],
+    ["map-assets-v1", cacheFor(assetEntries)],
+  ]);
+  let online = true;
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async (request: Request) => {
+      if (!online) throw new Error("offline");
+      const url = new URL(request.url);
+      return new Response(url.pathname.includes("/planet/") ? "tile" : "asset", {
+        status: 200,
+      });
+    },
+    caches: {
+      open: async (name: string) => cacheByName.get(name),
+      match: async () => undefined,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = async (url: string) => {
+    waitUntilPromises.length = 0;
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      },
+    });
+    assert.ok(responsePromise);
+    const response = await responsePromise;
+    await Promise.all(waitUntilPromises);
+    return response;
+  };
+
+  await dispatchFetch(styleUrl);
+  await dispatchFetch(spriteUrl);
+  await dispatchFetch(glyphUrl);
+  assert.equal(assetEntries.size, 3);
+  assert.equal(tileEntries.size, 399);
+
+  for (let index = 0; index < 401; index += 1) {
+    await dispatchFetch(
+      `https://tiles.openfreemap.org/planet/20260816_080001_pt/14/1/${index}.pbf`,
+    );
+  }
+
+  assert.ok(assetEntries.has(styleUrl));
+  assert.ok(assetEntries.has(spriteUrl));
+  assert.ok(assetEntries.has(normalizedGlyphUrl));
+  assert.equal(tileEntries.size, 400);
+
+  online = false;
+  assert.equal((await dispatchFetch(styleUrl)).status, 200);
+  assert.equal((await dispatchFetch(spriteUrl)).status, 200);
+  assert.equal((await dispatchFetch(glyphUrl)).status, 200);
+
+  online = true;
+  for (let index = 0; index < 129; index += 1) {
+    await dispatchFetch(`https://tiles.openfreemap.org/styles/test-${index}`);
+  }
+  assert.ok(assetEntries.size <= 128);
+});
+
+test("static JavaScript waits for cache writes and returns online code when writes fail", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const workerUrl = new URL("https://smartmap.test/sw.js");
+  let releaseWrite: (() => void) | undefined;
+  let rejectWrites = false;
+  const cache = {
+    match: async () => undefined,
+    put: async () => {
+      if (rejectWrites) throw new Error("cache unavailable");
+      await new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+    },
+  };
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Headers,
+    EventTarget,
+    setTimeout,
+    clearTimeout,
+    console,
+    fetch: async () => new Response("online-code", { status: 200 }),
+    caches: {
+      open: async () => cache,
+      match: async () => undefined,
+      keys: async () => [],
+    },
+    self: {
+      location: workerUrl,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        listeners.set(type, listener);
+      },
+      skipWaiting: () => undefined,
+      clients: { claim: () => undefined },
+      registration: { unregister: () => undefined },
+    },
+  });
+
+  vm.runInContext(readFileSync("public/sw.js", "utf8"), context);
+
+  const dispatchFetch = (url: string) => {
+    let responsePromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: new Request(url),
+      respondWith: (response: Promise<Response>) => {
+        responsePromise = response;
+      },
+      waitUntil: () => undefined,
+    });
+    assert.ok(responsePromise);
+    return responsePromise;
+  };
+
+  const pendingResponse = dispatchFetch(
+    "https://smartmap.test/_next/static/chunks/navigation.js",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let settled = false;
+  void pendingResponse.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(settled, false);
+  assert.ok(releaseWrite);
+  releaseWrite();
+  assert.equal((await pendingResponse).status, 200);
+
+  rejectWrites = true;
+  const writeFailureResponse = await dispatchFetch(
+    "https://smartmap.test/_next/static/chunks/navigation-failure.js",
+  );
+  assert.equal(writeFailureResponse.status, 200);
+  assert.equal(await writeFailureResponse.text(), "online-code");
 });
 
 test("uncached static JavaScript returns an executable offline error response", async () => {

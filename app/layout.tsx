@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { ThemeProvider } from "next-themes";
 import { ptSans, sourceCodePro } from "@/lib/typography";
 import { SkipLink } from "@/components/skip-link";
@@ -82,20 +83,28 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading the request CSP nonce forces per-request rendering so Next can
+  // stamp the proxy-generated nonce onto its inline bootstrap and flight
+  // scripts; prerendered HTML cannot carry a per-request nonce.
+  const nonce = await headers()
+    .then((requestHeaders) =>
+      requestHeaders.get("content-security-policy")?.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? null,
+    );
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${ptSans.variable} ${sourceCodePro.variable} antialiased`} suppressHydrationWarning>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+            nonce={nonce ?? undefined}
+          >
           <MapStyleProvider>
             <SyncProvider>
               <Script

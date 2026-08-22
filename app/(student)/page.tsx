@@ -1,16 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapContainerClient } from "@/components/map/map-container";
-import { MapBottomCard } from "@/components/map/map-bottom-card";
 import { MapSearchPanel } from "@/components/map/map-search-panel";
 import type { Facility } from "@/lib/types/facility";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
 import type { BoardingHouseMapItem, MapItem } from "@/lib/types/map";
 import { getFacilitiesLite } from "@/lib/supabase/queries/facilities";
-import { getBoardingHouseSummaries } from "@/lib/supabase/queries/boarding-houses";
 import {
   getPublicBoardingHouseSummaries,
   keepPublicBoardingHouses,
@@ -32,16 +30,50 @@ import type { TransportMode } from "@/lib/types/graph";
 import { ReportRouteDialog } from "@/components/navigation/report-route-dialog";
 import { filterGraphToRoutingBoundary } from "@/lib/pathfinding/transition-gates";
 import { clampPointToVsuCampus } from "@/lib/map/vsu-campus-boundary";
-import { getNavigationControlsState } from "@/lib/map/navigation-viewport";
 import { doesNavigationOwnViewport } from "@/lib/navigation/map-camera-policy";
 import { createRouteAnnouncementTracker } from "@/lib/navigation/route-announcement";
 import {
   areFacilityMarkerListsEquivalent,
   getVisibleFacilitiesForMapLoad,
 } from "@/lib/map/facility-marker-list";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { VSU_MAIN_GATE } from "@/lib/constants/map";
+import { cn } from "@/lib/utils";
+import {
+  createMapRuntimeController,
+  getRouteFacingEndpoint,
+} from "@/lib/map/map-runtime";
+import type { NavigationRequestMetadata } from "@/components/map/navigation-layer";
+const loadNavigationLayer = () => import("@/components/map/navigation-layer");
+const loadManualStartPin = () => import("@/components/map/manual-start-pin");
+
+async function waitForServiceWorkerControl() {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return;
+  }
+
+  const serviceWorker = navigator.serviceWorker;
+  try {
+    await navigator.serviceWorker.ready;
+  } catch {
+    return;
+  }
+  if (serviceWorker.controller) return;
+
+  await new Promise<void>((resolve) => {
+    const handleControllerChange = () => {
+      serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+      resolve();
+    };
+    serviceWorker.addEventListener("controllerchange", handleControllerChange, { once: true });
+    if (serviceWorker.controller) handleControllerChange();
+  });
+}
+
+async function preloadNavigationLayer() {
+  await waitForServiceWorkerControl();
+  await Promise.all([loadNavigationLayer(), loadManualStartPin()]);
+}
 
 const MapSelectionLayer = dynamic(
   () => import("@/components/map/map-selection-layer").then((m) => m.MapSelectionLayer),
@@ -54,14 +86,16 @@ const UserLocationControl = dynamic(
 );
 
 const NavigationLayer = dynamic(
-  () => import("@/components/map/navigation-layer").then((m) => m.NavigationLayer),
+  () => loadNavigationLayer().then((m) => m.NavigationLayer),
   { ssr: false },
 );
 
 const ManualStartPin = dynamic(
-  () => import("@/components/map/manual-start-pin").then((m) => m.ManualStartPin),
+  () => loadManualStartPin().then((m) => m.ManualStartPin),
   { ssr: false },
 );
+
+const DIRECTIONS_UNAVAILABLE_MESSAGE = "Directions are unavailable right now. The map still works.";
 
 export default function HomePage() {
   return (
@@ -123,9 +157,14 @@ function MapTab() {
   }, []);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [graphData, setGraphData] = useState<{ nodes: MapNode[]; edges: MapEdge[] }>({ nodes: [], edges: [] });
+  const [navigationGraphError, setNavigationGraphError] = useState<string | null>(null);
   const loadFiltersRef = useRef({ debouncedQuery, selectedCategories });
   const requestedBoardingHouseId = searchParams.get("boardingHouse");
   const hasBoardingUrlFlag = searchParams.get("boarding") === "1";
+
+  useEffect(() => {
+    void preloadNavigationLayer().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const stored = localStorage.getItem("boarding-houses-map-overlay");
@@ -214,6 +253,7 @@ function MapTab() {
       };
 
       const load = async () => {
+        setNavigationGraphError(null);
         const cached = await getCachedFacilities();
         const cachedNav = await getCachedNavigationGraph();
         
@@ -226,6 +266,7 @@ function MapTab() {
 
         if (!cached?.length && isOfflineCacheSession()) {
           setError("Map data has not been cached on this device yet. Reconnect once to save the campus map for offline use.");
+          setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
           setItems([]);
           setFiltered([]);
           setIsLoading(false);
@@ -233,9 +274,11 @@ function MapTab() {
         }
 
         const loadNavigation = async () => {
-           if (cachedNav) {
-             setGraphData(filterGraphToRoutingBoundary(cachedNav.nodes, cachedNav.edges));
-           }
+           const cachedGraph = cachedNav
+             ? filterGraphToRoutingBoundary(cachedNav.nodes, cachedNav.edges)
+             : null;
+           const cachedGraphAvailable = Boolean(cachedGraph?.nodes.length && cachedGraph.edges.length);
+           if (cachedGraph) setGraphData(cachedGraph);
            
            try {
              const [nodesRes, edgesRes] = await Promise.all([
@@ -251,14 +294,22 @@ function MapTab() {
                throw nodesRes.error ?? edgesRes.error;
              }
 
-             if (nodesRes.data && edgesRes.data) {
-               setGraphData(filterGraphToRoutingBoundary(nodesRes.data, edgesRes.data));
+             const remoteGraph = nodesRes.data && edgesRes.data
+               ? filterGraphToRoutingBoundary(nodesRes.data, edgesRes.data)
+               : null;
+             if (remoteGraph?.nodes.length && remoteGraph.edges.length && nodesRes.data && edgesRes.data) {
+               setGraphData(remoteGraph);
+               setNavigationGraphError(null);
                await setCachedNavigationGraph(nodesRes.data, edgesRes.data);
+             } else if (!cachedGraphAvailable) {
+               setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
+               toast.error(DIRECTIONS_UNAVAILABLE_MESSAGE);
              }
            } catch (e) {
              console.warn("Failed to sync navigation graph", e);
-             if (!cachedNav) {
-               toast.error("Directions are unavailable right now. The map still works.");
+             if (!cachedGraphAvailable) {
+               setNavigationGraphError(DIRECTIONS_UNAVAILABLE_MESSAGE);
+               toast.error(DIRECTIONS_UNAVAILABLE_MESSAGE);
              }
            }
         };
@@ -333,8 +384,19 @@ function MapTab() {
       className="relative flex h-full w-full flex-col overflow-hidden bg-background"
       tabIndex={0}
     >
+      <style>{`
+        @media (pointer: coarse), (any-pointer: coarse) {
+          [data-map-control="submit-location"] {
+            min-height: 44px;
+            min-width: 44px;
+          }
+        }
+      `}</style>
       <div className="relative flex-1 w-full overflow-hidden">
-        <div className="absolute right-4 top-[4.5rem] z-[1000]">
+        <div
+          data-map-popup-obstacle="top"
+          className="absolute right-4 top-[4.5rem] z-[1000]"
+        >
           <div className="flex flex-col items-end gap-2">
             <MapSearchPanel
               items={items}
@@ -349,14 +411,21 @@ function MapTab() {
         {/* Floating Action Button (Submit) */}
         {/* Preserve the same gap above mobile tabs on home-indicator devices. */}
         {/* Desktop remains bottom-8 */}
-        <div className="absolute right-6 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-30 md:right-8 md:bottom-8">
+        <div
+          data-map-popup-obstacle="bottom"
+          className="absolute right-6 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-30 md:right-8 md:bottom-8"
+        >
           <Button
             type="button"
             size="default"
-            className="gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5"
+            className={cn(
+              "h-11 min-w-11 lg:h-9 lg:min-w-0 gap-2 rounded-full font-semibold shadow-lg ring-1 ring-black/5",
+              (selectedFacility || selectedBoardingHouse) && "hidden md:inline-flex",
+            )}
             onClick={() => setSuggestOpen(true)}
             title="Submit a location"
             data-tour="map-submit"
+            data-map-control="submit-location"
           >
             <Plus className="h-5 w-5" />
             <span className="hidden md:inline">Submit Location</span>
@@ -391,6 +460,7 @@ function MapTab() {
             selectFacility(null);
           }}
           graphData={graphData}
+          navigationGraphError={navigationGraphError}
           pendingNavigationFacility={pendingNavigationFacility}
           onPendingNavigationConsumed={clearPendingNavigationFacility}
         />
@@ -414,11 +484,9 @@ import {
 } from "@/lib/navigation/manual-start";
 import { shouldConsumeFacilityNavigationRequest } from "@/lib/navigation/facility-navigation";
 import {
-  shouldClearRouteForMapSearch,
-  shouldClearRouteForSelectedItem,
+  shouldRestoreCommittedRouteForSelectedItem,
 } from "@/lib/navigation/selection-route-reset";
-
-type NavigationOrigin = "live" | "manual" | null;
+import { canReuseCommittedRoute } from "@/lib/navigation/route-reuse";
 
 function MapView({
   filtered,
@@ -431,6 +499,7 @@ function MapView({
   onSelect,
   onClearSelection,
   graphData,
+  navigationGraphError,
   pendingNavigationFacility,
   onPendingNavigationConsumed,
 }: {
@@ -444,6 +513,7 @@ function MapView({
   onSelect: (id: string) => void;
   onClearSelection: () => void;
   graphData: { nodes: MapNode[], edges: MapEdge[] };
+  navigationGraphError: string | null;
   pendingNavigationFacility: Facility | null;
   onPendingNavigationConsumed: () => void;
 }) {
@@ -451,7 +521,6 @@ function MapView({
     selectedCategories,
     debouncedQuery,
     defaultTransportMode,
-    setFacilitySheetOpen,
   } = useApp();
   const hasResults = filtered.length > 0;
   const hasActiveFilters = selectedCategories.length > 0 || debouncedQuery.trim().length > 0;
@@ -459,35 +528,183 @@ function MapView({
   const geo = useGeolocation();
   const { position, error: locationError, startTracking } = geo;
   
-  const [targetFacilityId, setTargetFacilityId] = useState<string | undefined>(undefined);
+  const runtime = useMemo(() => createMapRuntimeController(), []);
+  const runtimeState = useSyncExternalStore(
+    runtime.subscribe,
+    runtime.getState,
+    runtime.getState,
+  );
   
   // Use persistent navigation state
-  const { navStart, setNavStart, navEnd, setNavEnd, clearNavigation } = useNavigationPersistence();
+  const {
+    navStart,
+    setNavStart,
+    navEnd,
+    setNavEnd,
+    destinationId: persistedDestinationId,
+    mode: persistedNavigationMode,
+    origin: persistedNavigationOrigin,
+    setNavigationRoute,
+    clearNavigation,
+  } = useNavigationPersistence();
   
   const [navMode, setNavMode] = useState<TransportMode>('walking');
-  const [navigationOrigin, setNavigationOrigin] = useState<NavigationOrigin>(null);
-  const [isManualStartPending, setIsManualStartPending] = useState(false);
-  const [availableRoutes, setAvailableRoutes] = useState<PathResult[]>([]);
   const [routeReportOpen, setRouteReportOpen] = useState(false);
   const [manualLocationRequestPending, setManualLocationRequestPending] = useState(false);
+  const [reuseCommittedRouteAfterRestore, setReuseCommittedRouteAfterRestore] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const hydratedNavigationRequestRef = useRef(false);
   const lastConsumedPendingNavigationId = useRef<string | null>(null);
   const routeAnnouncementTracker = useMemo(() => createRouteAnnouncementTracker(), []);
   const [navigationSessionId, setNavigationSessionId] = useState(0);
-  const hasActiveRoute = availableRoutes.length > 0 && Boolean(navStart && navEnd);
-  const hasNavigationState = Boolean(navStart || navEnd || isManualStartPending || availableRoutes.length);
-  const isWaitingForLocation = navigationOrigin === "live" && Boolean(navEnd) && !navStart;
-  const navigationControls = getNavigationControlsState({
-    hasActiveRoute,
-    isManualStartPending,
-    isWaitingForLocation,
-  });
-  const selectedMapItem: MapItem | null =
-    selectedBoardingHouse ?? (selectedFacility?.id === selectedId ? selectedFacility : null);
+  const navigationSessionIdRef = useRef(0);
+  const allocateNavigationSessionId = useCallback(() => {
+    navigationSessionIdRef.current += 1;
+    return navigationSessionIdRef.current;
+  }, []);
+  const publishNavigationSessionId = useCallback((sessionId: number) => {
+    setNavigationSessionId((current) => Math.max(current, sessionId));
+  }, []);
+  const pendingNavigation = runtimeState.navigation.request;
+  const committedNavigation = runtimeState.navigation.committed;
+  const routeRequestDestinationId = pendingNavigation?.destinationId ?? committedNavigation?.destinationId ?? undefined;
+  const routeDestinationId = committedNavigation?.destinationId ?? pendingNavigation?.destinationId ?? null;
+  const routeSelectionDestinationId = runtimeState.navigation.selectionDestinationId;
+  const routeFacingEnd = getRouteFacingEndpoint(runtimeState, navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null);
+  const navigationOrigin = pendingNavigation?.origin ?? committedNavigation?.origin ?? runtimeState.navigation.origin;
+  const isManualStartPending = runtimeState.navigation.phase === "acquiring";
+  const committedRoute = committedNavigation?.route;
+  const hasCommittedOverlay = Boolean(committedRoute);
+  const shouldReuseCommittedRoute =
+    reuseCommittedRouteAfterRestore &&
+    canReuseCommittedRoute({
+      committed: committedNavigation,
+      destinationId: routeRequestDestinationId,
+      origin: navigationOrigin,
+      mode: navMode,
+      start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
+      end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
+    });
+  const navigationControls = {
+    primaryActionLabel:
+      runtimeState.presentation.controls.primaryAction === "clear" ? "Clear Route" : "Cancel Route",
+    canReportRoute: runtimeState.presentation.controls.canReportRoute,
+    statusText: runtimeState.presentation.controls.statusText,
+  };
+  const reportContext = useMemo(() => {
+    const destinationId = committedNavigation?.destinationId;
+    const destination = filtered.find((item) => item.id === destinationId) ??
+      (selectedBoardingHouse?.id === destinationId ? selectedBoardingHouse : undefined);
+    return {
+      fromText:
+        committedNavigation?.origin === "live"
+          ? "My location"
+          : committedNavigation?.origin === "manual" && committedNavigation.start
+            ? "Custom start pin"
+            : null,
+      toText: destination?.name ?? committedNavigation?.destinationId ?? null,
+      destinationId: committedNavigation?.destinationId ?? null,
+      start: committedNavigation?.start ?? null,
+      end: committedNavigation?.end ?? null,
+      mode: committedNavigation?.mode ?? navMode,
+      routeIndex: 0,
+      routeCount: committedNavigation ? 1 : 0,
+      totalDistanceMeters: committedNavigation?.route.totalDistance ?? null,
+    };
+  }, [committedNavigation, filtered, navMode, selectedBoardingHouse]);
+
+  const resolveManualStart = useCallback((point: NavigationPoint, origin: "manual" | "live") => {
+    const current = runtime.getState();
+    if (current.navigation.phase !== "acquiring") return false;
+    const pendingRequestId = current.navigation.pendingRequestId;
+    const request = current.navigation.request;
+    if (pendingRequestId == null) return false;
+    if (!request || !request.end) return false;
+    const next = runtime.dispatch({
+      type: "navigation/resolving",
+      requestId: pendingRequestId,
+      origin,
+      start: { lat: point.lat, lng: point.lng },
+    });
+    const accepted =
+      next !== current &&
+      next.navigation.pendingRequestId === pendingRequestId &&
+      next.navigation.request?.requestId === pendingRequestId &&
+      (next.navigation.phase === "resolving" || next.navigation.phase === "refreshing") &&
+      next.navigation.request.start?.lat === point.lat &&
+      next.navigation.request.start?.lng === point.lng;
+    if (!accepted) return false;
+
+    setNavStart({ lat: point.lat, lng: point.lng } as LatLng);
+    setNavigationRoute({
+      navStart: { lat: point.lat, lng: point.lng } as LatLng,
+      navEnd: { lat: request.end.lat, lng: request.end.lng } as LatLng,
+      destinationId: request.destinationId,
+      mode: request.mode,
+      origin,
+    });
+    return accepted;
+  }, [runtime, setNavStart, setNavigationRoute]);
+
+  useEffect(() => {
+    if (selectedId && selectedId !== runtimeState.selectedItemId) {
+      runtime.dispatch({ type: "selection/set", itemId: selectedId });
+    } else if (!selectedId && runtimeState.selectedItemId) {
+      runtime.dispatch({ type: "selection/cleared" });
+    }
+  }, [runtime, runtimeState.selectedItemId, selectedId]);
 
   useEffect(() => {
     setHasHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hasHydrated || hydratedNavigationRequestRef.current) return;
+    hydratedNavigationRequestRef.current = true;
+
+    if (
+      !navStart ||
+      !navEnd ||
+      !persistedDestinationId ||
+      !persistedNavigationMode ||
+      !persistedNavigationOrigin
+    ) {
+      return;
+    }
+
+    const current = runtime.getState();
+    if (current.navigation.phase !== "idle" && current.navigation.phase !== "cleared") return;
+
+    const requestId = allocateNavigationSessionId();
+    const next = runtime.dispatch({
+      type: "navigation/requested",
+      requestId,
+      destinationId: persistedDestinationId,
+      origin: persistedNavigationOrigin,
+      mode: persistedNavigationMode,
+      start: { lat: navStart.lat, lng: navStart.lng },
+      end: { lat: navEnd.lat, lng: navEnd.lng },
+    });
+    if (
+      next.navigation.pendingRequestId !== requestId ||
+      next.navigation.request?.destinationId !== persistedDestinationId
+    ) {
+      return;
+    }
+    publishNavigationSessionId(requestId);
+    setNavMode(persistedNavigationMode);
+    setReuseCommittedRouteAfterRestore(false);
+  }, [
+    hasHydrated,
+    navEnd,
+    navStart,
+    allocateNavigationSessionId,
+    publishNavigationSessionId,
+    persistedDestinationId,
+    persistedNavigationMode,
+    persistedNavigationOrigin,
+    runtime,
+  ]);
 
   const dismissRouteFoundAnnouncement = useCallback((retiredSessionId?: number) => {
     const toastId = routeAnnouncementTracker.reset(retiredSessionId);
@@ -506,17 +723,68 @@ function MapView({
   const clearRouteState = useCallback(() => {
     dismissRouteFoundAnnouncement(navigationSessionId);
     clearNavigation();
-    setNavigationOrigin(null);
-    setIsManualStartPending(false);
+    setReuseCommittedRouteAfterRestore(false);
     setManualLocationRequestPending(false);
-    setTargetFacilityId(undefined);
-    setAvailableRoutes([]);
+    runtime.dispatch({ type: "navigation/cleared" });
     setRouteReportOpen(false);
-  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId]);
+  }, [clearNavigation, dismissRouteFoundAnnouncement, navigationSessionId, runtime]);
 
-  useEffect(() => {
-    setAvailableRoutes([]);
-  }, [navEnd?.lat, navEnd?.lng, navMode]);
+  const restoreCommittedRoute = useCallback((expectedDestinationId?: string) => {
+    const current = runtime.getState();
+    const pendingRequestId = current.navigation.pendingRequestId;
+    const committed = current.navigation.committed;
+    if (
+      pendingRequestId === null ||
+      committed === null ||
+      (expectedDestinationId !== undefined && committed.destinationId !== expectedDestinationId)
+    ) {
+      return false;
+    }
+
+    const restored = runtime.dispatch({
+      type: "navigation/restored",
+      requestId: pendingRequestId,
+      destinationId: committed.destinationId,
+    });
+    if (restored === current) return false;
+
+    dismissRouteFoundAnnouncement(navigationSessionId);
+    if (committed.start && committed.end) {
+      setNavigationRoute({
+        navStart: { lat: committed.start.lat, lng: committed.start.lng } as LatLng,
+        navEnd: { lat: committed.end.lat, lng: committed.end.lng } as LatLng,
+        destinationId: committed.destinationId,
+        mode: committed.mode,
+        origin: committed.origin,
+      });
+    } else {
+      setNavStart(
+        committed.start
+          ? ({ lat: committed.start.lat, lng: committed.start.lng } as LatLng)
+          : null,
+      );
+      setNavEnd(
+        committed.end
+          ? ({ lat: committed.end.lat, lng: committed.end.lng } as LatLng)
+          : null,
+      );
+    }
+    setNavMode(committed.mode);
+    setReuseCommittedRouteAfterRestore(true);
+    setManualLocationRequestPending(false);
+    const nextSessionId = allocateNavigationSessionId();
+    publishNavigationSessionId(nextSessionId);
+    return true;
+  }, [
+    allocateNavigationSessionId,
+    dismissRouteFoundAnnouncement,
+    navigationSessionId,
+    publishNavigationSessionId,
+    runtime,
+    setNavEnd,
+    setNavStart,
+    setNavigationRoute,
+  ]);
 
   useEffect(() => {
     setNavMode(defaultTransportMode);
@@ -537,11 +805,8 @@ function MapView({
     const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
     const routeStart = clampPointToVsuCampus(liveStart);
 
-    setNavigationOrigin("live");
-    setIsManualStartPending(false);
-    setManualLocationRequestPending(false);
-    setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
-  }, [isManualStartPending, manualLocationRequestPending, navEnd, position, setNavStart]);
+    if (resolveManualStart(routeStart, "live")) setManualLocationRequestPending(false);
+  }, [isManualStartPending, manualLocationRequestPending, navEnd, position, resolveManualStart]);
 
   useEffect(() => {
     if (!manualLocationRequestPending || !locationError) return;
@@ -552,36 +817,96 @@ function MapView({
 
   useEffect(() => {
     if (
-      shouldClearRouteForSelectedItem({
-        selectedItemId: selectedId,
-        routeDestinationId: targetFacilityId ?? null,
-        hasNavigationState,
+      shouldRestoreCommittedRouteForSelectedItem({
+        selectedItemId: runtimeState.selectedItemId,
+        routeDestinationId: routeSelectionDestinationId,
+        committedRouteDestinationId: committedNavigation?.destinationId ?? null,
+        pendingRequestId: runtimeState.navigation.pendingRequestId,
       })
     ) {
-      clearRouteState();
+      restoreCommittedRoute();
     }
   }, [
-    clearRouteState,
-    hasNavigationState,
-    selectedId,
-    targetFacilityId,
+    restoreCommittedRoute,
+    runtimeState.selectedItemId,
+    runtimeState.navigation.pendingRequestId,
+    routeSelectionDestinationId,
+    committedNavigation?.destinationId,
   ]);
 
-  useEffect(() => {
-    if (
-      shouldClearRouteForMapSearch({
-        searchQuery: debouncedQuery,
-        selectedItemName: selectedMapItem?.name ?? null,
-        hasNavigationState,
-      })
-    ) {
-      clearRouteState();
-    }
-  }, [clearRouteState, debouncedQuery, hasNavigationState, selectedMapItem?.name]);
+  const handleRouteCommitted = useCallback((route: PathResult, requestId: number, metadata: NavigationRequestMetadata) => {
+    const before = runtime.getState();
+    if (before.navigation.pendingRequestId !== requestId || !metadata.destinationId) return;
+    runtime.dispatch({
+      type: "navigation/committed",
+      requestId,
+      route,
+      snapshot: {
+        destinationId: metadata.destinationId,
+        origin: metadata.origin,
+        mode: metadata.mode,
+        start: metadata.start,
+        end: metadata.end,
+      },
+    });
+  }, [runtime]);
 
-  const handleRoutesFound = useCallback((routes: PathResult[]) => {
-    setAvailableRoutes(routes);
-  }, []);
+  const handleRouteFailed = useCallback((message: string, requestId: number) => {
+    const before = runtime.getState();
+    if (before.navigation.pendingRequestId !== requestId) return;
+    const next = runtime.dispatch({ type: "navigation/failed", requestId, message });
+    if (next.navigation.pendingRequestId === null && next.navigation.phase === "failed") {
+      const committed = next.navigation.committed;
+      if (committed?.start && committed.end) {
+        setNavigationRoute({
+          navStart: { lat: committed.start.lat, lng: committed.start.lng } as LatLng,
+          navEnd: { lat: committed.end.lat, lng: committed.end.lng } as LatLng,
+          destinationId: committed.destinationId,
+          mode: committed.mode,
+          origin: committed.origin,
+        });
+        setNavMode(committed.mode);
+      } else {
+        clearNavigation();
+      }
+      setReuseCommittedRouteAfterRestore(false);
+      setManualLocationRequestPending(false);
+    }
+  }, [clearNavigation, runtime, setNavigationRoute]);
+
+  useEffect(() => {
+    if (!navigationGraphError) return;
+    const requestId = runtime.getState().navigation.pendingRequestId;
+    if (requestId == null) return;
+    handleRouteFailed(navigationGraphError, requestId);
+  }, [handleRouteFailed, navigationGraphError, runtime, runtimeState.navigation.pendingRequestId]);
+
+  const handleRouteRequestStarted = useCallback((requestId: number, metadata: NavigationRequestMetadata) => {
+    const current = runtime.getState();
+    if (current.navigation.phase === "acquiring" && current.navigation.pendingRequestId === requestId) return;
+
+    if (current.navigation.pendingRequestId !== requestId) {
+      const destinationId = metadata.destinationId ?? current.navigation.request?.destinationId ?? current.navigation.destinationId;
+      if (!destinationId) return;
+      runtime.dispatch({
+        type: "navigation/requested",
+        requestId,
+        destinationId,
+        origin: metadata.origin,
+        mode: metadata.mode,
+        start: metadata.start,
+        end: metadata.end,
+      });
+    }
+
+    runtime.dispatch({
+      type: "navigation/resolving",
+      requestId,
+      origin: metadata.origin,
+      start: metadata.start,
+      end: metadata.end,
+    });
+  }, [runtime]);
 
   const claimRouteFoundAnnouncement = useCallback((sessionId: number) => {
     return routeAnnouncementTracker.claim(sessionId);
@@ -595,26 +920,57 @@ function MapView({
     routeAnnouncementTracker.register(sessionId, toastId);
   }, [routeAnnouncementTracker]);
 
-  const beginNavigationToItem = useCallback((item: MapItem) => {
+  const beginNavigationToItem = useCallback((item: MapItem): number | null => {
     const decision = resolveNavigationStart(position);
 
-    dismissRouteFoundAnnouncement(navigationSessionId);
-    setNavigationSessionId((sessionId) => sessionId + 1);
-    setTargetFacilityId(item.id);
-    setNavEnd({ lat: item.coordinates.lat, lng: item.coordinates.lng } as LatLng);
-    setAvailableRoutes([]);
-
-    if (decision.mode === "live") {
-      setNavigationOrigin("live");
-      setIsManualStartPending(false);
-      setNavStart({ lat: decision.start.lat, lng: decision.start.lng } as LatLng);
-      return;
+    const previousSessionId = navigationSessionIdRef.current;
+    const requestId = allocateNavigationSessionId();
+    const end = { lat: item.coordinates.lat, lng: item.coordinates.lng };
+    const next = runtime.dispatch({
+      type: "navigation/requested",
+      requestId,
+      destinationId: item.id,
+      origin: decision.mode,
+      mode: navMode,
+      awaitingStart: decision.mode === "manual",
+      start: decision.mode === "live" ? { lat: decision.start.lat, lng: decision.start.lng } : null,
+      end,
+    });
+    if (
+      next.navigation.pendingRequestId !== requestId ||
+      next.navigation.request?.destinationId !== item.id
+    ) {
+      return null;
     }
 
-    setNavigationOrigin("manual");
-    setIsManualStartPending(true);
+    publishNavigationSessionId(requestId);
+    dismissRouteFoundAnnouncement(previousSessionId);
+    setReuseCommittedRouteAfterRestore(false);
+    if (decision.mode === "live") {
+      setNavigationRoute({
+        navStart: { lat: decision.start.lat, lng: decision.start.lng } as LatLng,
+        navEnd: end as LatLng,
+        destinationId: item.id,
+        mode: navMode,
+        origin: "live",
+      });
+      return requestId;
+    }
+
+    setNavEnd(end as LatLng);
     setNavStart(null);
-  }, [dismissRouteFoundAnnouncement, navigationSessionId, position, setNavEnd, setNavStart]);
+    return requestId;
+  }, [
+    dismissRouteFoundAnnouncement,
+    allocateNavigationSessionId,
+    publishNavigationSessionId,
+    navMode,
+    position,
+    runtime,
+    setNavEnd,
+    setNavStart,
+    setNavigationRoute,
+  ]);
 
   useEffect(() => {
     if (!pendingNavigationFacility) {
@@ -631,19 +987,17 @@ function MapView({
       return;
     }
 
-    lastConsumedPendingNavigationId.current = pendingNavigationFacility.id;
-    beginNavigationToItem(pendingNavigationFacility);
-    onPendingNavigationConsumed();
+    const acceptedSessionId = beginNavigationToItem(pendingNavigationFacility);
+    if (acceptedSessionId !== null) {
+      lastConsumedPendingNavigationId.current = pendingNavigationFacility.id;
+      onPendingNavigationConsumed();
+    }
   }, [beginNavigationToItem, onPendingNavigationConsumed, pendingNavigationFacility]);
 
   const handleManualStartPlacement = useCallback((point: NavigationPoint) => {
-    if (!isManualStartPending) return;
-
     const start = createManualStartPoint(point);
-    setNavigationOrigin("manual");
-    setIsManualStartPending(false);
-    setNavStart({ lat: start.lat, lng: start.lng } as LatLng);
-  }, [isManualStartPending, setNavStart]);
+    resolveManualStart(start, "manual");
+  }, [resolveManualStart]);
 
   const handleManualStartMarkerTap = useCallback((item: MapItem) => {
     handleManualStartPlacement(item.coordinates);
@@ -656,25 +1010,19 @@ function MapView({
       const liveStart = { lat: position.coords.latitude, lng: position.coords.longitude };
       const routeStart = clampPointToVsuCampus(liveStart);
 
-      setNavigationOrigin("live");
-      setIsManualStartPending(false);
-      setManualLocationRequestPending(false);
-      setNavStart({ lat: routeStart.lat, lng: routeStart.lng } as LatLng);
+      if (resolveManualStart(routeStart, "live")) setManualLocationRequestPending(false);
       return;
     }
 
     setManualLocationRequestPending(true);
     startTracking();
-  }, [isManualStartPending, position, setNavStart, startTracking]);
+  }, [isManualStartPending, position, resolveManualStart, startTracking]);
 
   const handleUseMainGateStart = useCallback(() => {
     if (!isManualStartPending) return;
 
-    setNavigationOrigin("manual");
-    setIsManualStartPending(false);
-    setManualLocationRequestPending(false);
-    setNavStart({ lat: VSU_MAIN_GATE.lat, lng: VSU_MAIN_GATE.lng } as LatLng);
-  }, [isManualStartPending, setNavStart]);
+    if (resolveManualStart(VSU_MAIN_GATE, "manual")) setManualLocationRequestPending(false);
+  }, [isManualStartPending, resolveManualStart]);
 
   return (
     <div className="relative h-full w-full">
@@ -682,19 +1030,34 @@ function MapView({
         <MapContainerClient className="h-full w-full">
           <MapSelectionLayer
             items={filtered}
-            selectedId={selectedId}
+            selectedId={runtimeState.selectedItemId}
             navigationOwnsViewport={doesNavigationOwnViewport({
-              hasDestination: Boolean(navEnd),
+              hasDestination: Boolean(routeFacingEnd),
               manualStartPending: isManualStartPending,
               pendingNavigation: Boolean(pendingNavigationFacility),
             })}
-            routeDestinationId={hasActiveRoute ? targetFacilityId ?? null : null}
-            minimizeNonDestinationMarkers={hasActiveRoute}
-            onSelect={(item) => onSelect(item.id)}
+            routeDestinationId={runtimeState.presentation.markerMode === "destination-focused" ? routeDestinationId : null}
+            minimizeNonDestinationMarkers={hasCommittedOverlay || runtimeState.presentation.markerMode === "destination-focused"}
+            onSelect={(item) => {
+              const current = runtime.getState();
+              if (
+                shouldRestoreCommittedRouteForSelectedItem({
+                  selectedItemId: item.id,
+                  routeDestinationId: current.navigation.selectionDestinationId,
+                  committedRouteDestinationId: current.navigation.committed?.destinationId ?? null,
+                  pendingRequestId: current.navigation.pendingRequestId,
+                })
+              ) {
+                restoreCommittedRoute(item.id);
+              }
+              runtime.dispatch({ type: "selection/set", itemId: item.id });
+              onSelect(item.id);
+            }}
             onMarkerTapOverride={isManualStartPending ? handleManualStartMarkerTap : undefined}
             onDirections={(item) => beginNavigationToItem(item)}
             onMapClick={isManualStartPending ? handleManualStartPlacement : undefined}
             onClearSelection={() => {
+              runtime.dispatch({ type: "selection/cleared" });
               onClearSelection();
             }}
           />
@@ -706,7 +1069,7 @@ function MapView({
           )}
           {/* ... */}
           <UserLocationControl 
-              destination={navEnd} 
+              destination={routeFacingEnd}
               selectedFacility={
                 selectedFacility?.id === selectedId 
                   ? (selectedFacility && 'coordinates' in selectedFacility ? selectedFacility.coordinates : null) 
@@ -714,29 +1077,45 @@ function MapView({
               }
               geo={geo}
           />
+          <div
+            aria-hidden="true"
+            data-map-popup-obstacle="bottom"
+            data-map-location-obstacle="true"
+            className="pointer-events-none absolute left-[12px] bottom-[calc(5rem+112px+env(safe-area-inset-bottom))] h-11 w-11 min-[769px]:bottom-[80px]"
+          />
           
           {hasHydrated && graphData.nodes.length > 0 && graphData.edges.length > 0 && (
-            <NavigationLayer 
-              key={`nav-${graphData.nodes.length}-${navStart ? 's' : 'x'}-${navEnd ? 'e' : 'x'}`}
+          <NavigationLayer
               startPoint={navStart} 
               endPoint={navEnd} 
-            destinationId={targetFacilityId}
+              destinationId={routeRequestDestinationId}
               mode={navMode} 
               nodes={graphData.nodes}
               edges={graphData.edges}
               waitingForUserLocation={navigationOrigin === "live" && !navStart}
+              acquiringStart={isManualStartPending}
+              enabled={Boolean(routeRequestDestinationId) && runtimeState.navigation.phase !== "cleared" && runtimeState.navigation.phase !== "idle" && runtimeState.navigation.phase !== "failed"}
               navigationSessionId={navigationSessionId}
               hasRouteFoundAnnouncement={hasRouteFoundAnnouncement}
               claimRouteFoundAnnouncement={claimRouteFoundAnnouncement}
               registerRouteFoundAnnouncement={registerRouteFoundAnnouncement}
               releaseRouteFoundAnnouncement={releaseRouteFoundAnnouncement}
-              onRoutesFound={handleRoutesFound}
+              onRouteCommitted={handleRouteCommitted}
+              onRouteFailed={handleRouteFailed}
+              onRouteRequestStarted={handleRouteRequestStarted}
+              committedRoute={committedRoute}
+              navigationOrigin={navigationOrigin}
+              reuseCommittedRoute={shouldReuseCommittedRoute}
             />
           )}
         </MapContainerClient>
 
-        {hasHydrated && navEnd && (
-          <div className="absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2">
+        {hasHydrated && routeFacingEnd && (
+          <div
+            data-map-status-hud
+            data-map-popup-obstacle="top"
+            className="pointer-events-none absolute top-20 left-1/2 z-[1000] flex -translate-x-1/2 flex-col items-center gap-2"
+          >
             {navigationControls.statusText && (
               <div
                 className="rounded-full border bg-background/95 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg ring-1 ring-black/5 backdrop-blur"
@@ -746,39 +1125,21 @@ function MapView({
               </div>
             )}
 
-            <div className="flex gap-2">
-                <Button 
-                  variant={hasActiveRoute ? "destructive" : "outline"}
-                  size="sm" 
-                  className={cn(
-                    "rounded-full px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5",
-                    isManualStartPending ? "h-11" : "h-8",
-                    !hasActiveRoute && "bg-background/90 backdrop-blur hover:bg-background",
-                  )}
-                  onClick={clearRouteState}
-                  aria-label={`${navigationControls.primaryActionLabel} navigation`}
-                >
-                  {navigationControls.primaryActionLabel}
-                </Button>
-
-                {navigationControls.canReportRoute && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-full bg-background/90 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
-                    onClick={() => setRouteReportOpen(true)}
-                  >
-                    Report Route
-                  </Button>
-                )}
-            </div>
+            {runtimeState.navigation.phase === "failed" && runtimeState.navigation.error && (
+              <div
+                className="pointer-events-auto max-w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-destructive/30 bg-background/95 px-4 py-2 text-center text-xs font-medium text-destructive shadow-lg ring-1 ring-black/5 backdrop-blur"
+                role="alert"
+              >
+                {runtimeState.navigation.error}
+              </div>
+            )}
 
             {isManualStartPending && (
-              <div className="flex flex-wrap justify-center gap-2">
+              <div className="pointer-events-auto flex flex-wrap justify-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                   onClick={handleUseMyLocationStart}
                   aria-label="Use my location as route start"
                 >
@@ -787,7 +1148,7 @@ function MapView({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-11 rounded-full bg-background/90 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                  className="h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
                   onClick={handleUseMainGateStart}
                   aria-label="Start route from main gate"
                 >
@@ -796,17 +1157,48 @@ function MapView({
               </div>
             )}
 
-            {!isManualStartPending && availableRoutes[0] && (
+            {!isManualStartPending && committedRoute && (
                 <div className="flex animate-in gap-3 rounded-full border bg-background/90 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground shadow-lg ring-1 ring-black/5 backdrop-blur fade-in slide-in-from-top-1">
                     <span className="flex items-center gap-1">
                         <Route className="h-3 w-3" />
-                        {availableRoutes[0].totalDistance.toFixed(0)}m
+                        {committedRoute.totalDistance.toFixed(0)}m
                     </span>
                     <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {availableRoutes[0].estimatedTime} min
+                        {committedRoute.estimatedTime} min
                     </span>
                 </div>
+            )}
+          </div>
+        )}
+
+        {hasHydrated && routeFacingEnd && (
+          <div
+            data-map-action-dock
+            data-map-popup-obstacle="bottom"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(120px+env(safe-area-inset-bottom,0px))] z-[1000] flex flex-wrap justify-center gap-2 px-3 md:absolute md:bottom-8"
+          >
+            {runtimeState.presentation.controls.primaryAction !== "none" && (
+              <Button
+                variant={hasCommittedOverlay ? "destructive" : "outline"}
+                size="sm"
+                className="pointer-events-auto h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                onClick={clearRouteState}
+                aria-label={`${navigationControls.primaryActionLabel} navigation`}
+              >
+                {navigationControls.primaryActionLabel}
+              </Button>
+            )}
+            {navigationControls.canReportRoute && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="pointer-events-auto h-11 min-w-11 rounded-full bg-background/95 px-4 text-xs font-semibold uppercase tracking-wider shadow-lg ring-1 ring-black/5 backdrop-blur hover:bg-background"
+                onClick={() => setRouteReportOpen(true)}
+                aria-label="Report route"
+              >
+                Report Route
+              </Button>
             )}
           </div>
         )}
@@ -814,28 +1206,14 @@ function MapView({
         <ReportRouteDialog
           open={routeReportOpen}
           onOpenChange={setRouteReportOpen}
-          context={{
-            fromText: navigationOrigin === "live" ? "My location" : navigationOrigin === "manual" && navStart ? "Custom start pin" : null,
-            toText: selectedBoardingHouse?.name ?? selectedFacility?.name ?? null,
-            destinationId: targetFacilityId ?? selectedBoardingHouse?.id ?? selectedFacility?.id ?? null,
-            start: navStart ? { lat: navStart.lat, lng: navStart.lng } : null,
-            end: navEnd ? { lat: navEnd.lat, lng: navEnd.lng } : null,
-            mode: navMode,
-            routeIndex: 0,
-            routeCount: availableRoutes.length,
-            totalDistanceMeters: availableRoutes[0]?.totalDistance ?? null,
-          }}
-        />
-
-        <MapBottomCard
-          item={selectedMapItem}
-          onClose={onClearSelection}
-          onViewDetails={() => setFacilitySheetOpen(true)}
-          onDirections={beginNavigationToItem}
+          context={reportContext}
         />
 
         {!hasResults && !error && !isLoading && hasActiveFilters && (
-          <div className="pointer-events-none absolute bottom-[calc(6.5rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur md:bottom-12">
+          <div
+            data-map-popup-obstacle="bottom"
+            className="pointer-events-none absolute bottom-[calc(6.5rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 px-4 py-2 shadow-lg ring-1 ring-black/5 backdrop-blur md:bottom-12"
+          >
             <p className="text-sm font-medium text-foreground">No locations found.</p>
           </div>
         )}

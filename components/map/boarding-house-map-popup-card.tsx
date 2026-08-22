@@ -9,23 +9,21 @@ import { formatBoardingHousePriceRange } from "@/lib/boarding-houses/filters";
 import { formatSlotCount } from "@/lib/boarding-houses/labels";
 import type { BoardingHouseSummary } from "@/lib/boarding-houses/types";
 import { useWalkEstimate } from "@/components/boarding-houses/use-walk-estimate";
-import { cn } from "@/lib/utils";
 
 type BoardingHouseMapPopupCardProps = {
   listing: BoardingHouseSummary;
-  onDirections?: () => void;
-  layout?: "popup" | "bottom-sheet";
+  onDetails?: () => void;
+  onDirections?: () => number | null;
 };
 
 export function BoardingHouseMapPopupCard({
   listing,
+  onDetails,
   onDirections,
-  layout = "popup",
 }: BoardingHouseMapPopupCardProps) {
   const isVerified = listing.verificationStatus === "verified";
   const hasRatings = listing.reviewCount > 0;
   const ratingValue = listing.averageRating.toFixed(1);
-  const isBottomSheet = layout === "bottom-sheet";
   const { estimate } = useWalkEstimate(listing.coordinates);
   const walkLabel = estimate
     ? `${estimate.approximate ? "~" : ""}${estimate.minutes} min walk`
@@ -34,13 +32,8 @@ export function BoardingHouseMapPopupCard({
       : null;
 
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-3 p-3",
-        isBottomSheet ? "w-full" : "min-w-[220px] max-w-[260px]",
-      )}
-    >
-      <div className="flex items-start gap-3">
+    <div className="flex min-w-[220px] max-w-[260px] flex-col gap-3 p-3">
+      <div className="flex items-start gap-3 pr-10">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Home className="h-5 w-5" aria-hidden />
         </div>
@@ -89,38 +82,33 @@ export function BoardingHouseMapPopupCard({
         </p>
       </div>
 
-      <div className={cn("flex gap-2", isBottomSheet && "flex-col")}>
-        {isBottomSheet && (
-          <Button
-            size="sm"
-            className="h-11 w-full gap-2 bg-blue-600 text-sm text-white hover:bg-blue-700"
-            onClick={onDirections}
-          >
-            <Route className="h-4 w-4" aria-hidden />
-            Navigate
-          </Button>
-        )}
+      <div className="flex gap-2">
         <Button
           asChild
           size="sm"
           variant="outline"
-          className={cn("gap-2", isBottomSheet ? "h-10 w-full text-sm" : "h-8 flex-1 text-xs")}
+          className="h-8 flex-1 gap-2 text-xs min-w-0"
         >
-          <Link href={`/boarding-houses/${listing.slug}`}>
+          <Link
+            href={`/boarding-houses/${listing.slug}`}
+            data-map-popup-action="true"
+            className="flex h-8 flex-1 items-center justify-center gap-2 text-center text-xs leading-tight min-w-0"
+            onClick={() => onDetails?.()}
+          >
             <Info className="h-3 w-3" aria-hidden />
             Details
           </Link>
         </Button>
-        {!isBottomSheet && (
-          <Button
-            size="sm"
-            className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700"
-            onClick={onDirections}
-          >
-            <Route className="h-3 w-3" aria-hidden />
-            Navigate
-          </Button>
-        )}
+        <Button
+          type="button"
+          size="sm"
+          data-map-popup-action="true"
+          className="h-8 flex-1 gap-2 bg-blue-600 text-xs text-white hover:bg-blue-700 min-w-0"
+          onClick={() => onDirections?.()}
+        >
+          <Route className="h-3 w-3" aria-hidden />
+          Navigate
+        </Button>
       </div>
     </div>
   );

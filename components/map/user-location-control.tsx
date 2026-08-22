@@ -224,7 +224,7 @@ export function UserLocationControl({ className, destination, selectedFacility, 
         onLocate={handleLocate}
         className={
           className ||
-          "left-[12px] bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-[80px]"
+          "left-[12px] bottom-[calc(5rem+112px+env(safe-area-inset-bottom))] min-[769px]:bottom-[80px]"
         }
       />
 
