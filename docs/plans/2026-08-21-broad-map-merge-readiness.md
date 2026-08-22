@@ -18,6 +18,21 @@ continuous wheel-zoom engine (`lib/map/leaflet-continuous-zoom.ts`), hardened
 service-worker tile caching with versioned migration, and an individual-marker
 overview mode.
 
+The branch also consolidates three security fixes reviewed alongside the
+rewrite:
+
+- `script-src 'unsafe-inline'` is replaced with a per-request CSP nonce shared
+  from `proxy.ts` through the request headers to Next's renderer; the root
+  layout reads that nonce so inline bootstrap and flight scripts stay
+  authorized (this makes layouts render per request).
+- The dependency-audit CI gate audits production dependencies at critical
+  severity, matching the recorded audit policy: the only outstanding high
+  (GHSA-jmr9-qjv8-65gv against extract-zip) has no upstream fix, is reached
+  only through dev tooling, and made an all-deps high gate unpassable.
+- Supabase leaked-password protection enablement is staged as an idempotent
+  management-API script and runbook; flipping it requires owner credentials on
+  the hosted project (Pro plan).
+
 ## Verification evidence
 
 All commands were run against a clean checkout of this branch:
@@ -83,3 +98,8 @@ unmerged so its remaining unique fixes are re-derived here if still relevant.
   128 map assets).
 - The Playwright smoke suite requires `MAP_E2E_BASE_URL` and runs outside CI;
   run it manually for map interaction changes.
+- The CSP nonce makes layouts render per request. Locally the map page moved
+  from ~1.3 ms to ~5.7 ms total p95 (budget: 50 ms); on Vercel, previously
+  static routes become function invocations instead of CDN-served HTML.
+- Leaked-password protection is staged only until it is enabled on the hosted
+  project with owner credentials.
