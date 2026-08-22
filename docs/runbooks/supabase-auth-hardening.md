@@ -18,9 +18,10 @@ export SUPABASE_PROJECT_REF=...    # ref from the Supabase dashboard URL
 node tools/ops/enable-leaked-password-protection.mjs
 ```
 
-The script prints the previous value, PATCHes
-`password_hibp_enabled = true` through `PATCH /v1/projects/{ref}/config/auth`,
-verifies the response, and exits non-zero if the API does not confirm.
+The script never prints configuration values (CodeQL treats password-named
+fields as sensitive). It reports whether the setting was already on, applies
+the PATCH through `PATCH /v1/projects/{ref}/config/auth`, reads the config
+back to verify, and exits non-zero if the API does not confirm.
 
 ### Option B — dashboard
 
@@ -31,7 +32,7 @@ verifies the response, and exits non-zero if the API does not confirm.
 
 ## Verify
 
-- Re-run the script; it should print `Already enabled; nothing to do.`
+- Re-run the script; it should print `already on; nothing to do`.
 - Or read back the config:
 
   ```bash

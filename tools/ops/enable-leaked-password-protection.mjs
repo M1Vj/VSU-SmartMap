@@ -6,8 +6,9 @@
 //   SUPABASE_ACCESS_TOKEN=... SUPABASE_PROJECT_REF=... \
 //     node tools/ops/enable-leaked-password-protection.mjs
 //
-// The script is read-only until both variables are set, prints the current
-// setting first, and is safe to re-run.
+// The script is read-only until both variables are set, skips work when the
+// setting is already on, verifies the change after applying it, and never
+// prints configuration values — check the dashboard or re-run to confirm.
 
 const required = ["SUPABASE_ACCESS_TOKEN", "SUPABASE_PROJECT_REF"];
 for (const name of required) {
@@ -31,6 +32,10 @@ async function readAuthConfig() {
   return response.json();
 }
 
+function leakedPasswordProtectionState(config) {
+  return config.password_hibp_enabled === true ? "on" : "off";
+}
+
 async function enableLeakedPasswordProtection() {
   const response = await fetch(endpoint, {
     method: "PATCH",
@@ -43,21 +48,20 @@ async function enableLeakedPasswordProtection() {
   if (!response.ok) {
     throw new Error(`Enabling leaked-password protection failed: ${response.status} ${await response.text()}`);
   }
-  return response.json();
 }
 
-const before = await readAuthConfig();
-console.log(`password_hibp_enabled before: ${before.password_hibp_enabled}`);
-
-if (before.password_hibp_enabled === true) {
-  console.log("Already enabled; nothing to do.");
+const current = await readAuthConfig();
+if (leakedPasswordProtectionState(current) === "on") {
+  console.log("Leaked-password protection is already on; nothing to do.");
   process.exit(0);
 }
 
-const after = await enableLeakedPasswordProtection();
-console.log(`password_hibp_enabled after: ${after.password_hibp_enabled}`);
-if (after.password_hibp_enabled !== true) {
-  console.error("The API did not confirm the new value. Check the dashboard under Authentication -> Passwords.");
+console.log("Leaked-password protection is off; enabling it now...");
+await enableLeakedPasswordProtection();
+
+const verified = await readAuthConfig();
+if (leakedPasswordProtectionState(verified) !== "on") {
+  console.error("The API did not confirm the change. Check the dashboard under Authentication -> Passwords.");
   process.exit(1);
 }
-console.log("Leaked-password protection is enabled. Sign-ups and password changes now reject breached passwords.");
+console.log("Leaked-password protection is now on. Sign-ups and password changes reject breached passwords.");
