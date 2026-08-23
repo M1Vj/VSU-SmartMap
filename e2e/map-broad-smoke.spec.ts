@@ -1,6 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const baseUrl = process.env.MAP_E2E_BASE_URL;
 const mobileViewport = { width: 390, height: 844 };
 
 async function openMap(page: Page) {
@@ -24,12 +23,6 @@ async function markerCenter(page: Page, marker: ReturnType<Page["locator"]>) {
 }
 
 test.describe("Broad map interaction smoke", () => {
-  test.beforeAll(() => {
-    if (!baseUrl) {
-      throw new Error("MAP_E2E_BASE_URL must point to a running Broad map deployment");
-    }
-  });
-
   test("keeps controls, individual dots, and map interactions working in one session", async ({ page }) => {
     await page.setViewportSize(mobileViewport);
     await openMap(page);
@@ -75,7 +68,8 @@ test.describe("Broad map interaction smoke", () => {
     const markerBox = await marker.boundingBox();
     const tipBox = await page.locator(".leaflet-popup-tip").boundingBox();
     if (!markerBox || !tipBox) throw new Error("popup anchor is not visible");
-    const markerX = markerBox.x + markerBox.width / 2;
+    const markerX = markerBox.x + markerBox.width /
+2;
     const markerY = markerBox.y + markerBox.height / 2;
     const tipX = tipBox.x + tipBox.width / 2;
     const tipY = tipBox.y + tipBox.height / 2;
