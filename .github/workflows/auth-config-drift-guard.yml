@@ -1,0 +1,46 @@
+name: auth-config-drift-guard
+
+on:
+  schedule:
+    - cron: "23 04 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/ops/enable-leaked-password-protection.mjs"
+      - "tools/ops/verify-leaked-password-protection.mjs"
+      - ".github/workflows/auth-config-drift-guard.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auth-config-drift-guard
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Assert leaked-password protection enabled
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify leaked-password protection (HIBP) is enabled
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node tools/ops/verify-leaked-password-protection.mjs
+
+      - name: Post drift guidance on failure
+        if: failure()
+        run: |
+          echo "::error::Supabase leaked-password protection has drifted to disabled (or the check could not run)."
+          echo "::error::Triage per docs/runbooks/leaked-password-protection-guard.md: confirm whether the change was authorized, re-enable via tools/ops/enable-leaked-password-protection.mjs, force password resets for accounts created while it was off, and rotate SUPABASE_ACCESS_TOKEN if unauthorized access is suspected."
