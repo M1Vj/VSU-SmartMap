@@ -1,6 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const baseUrl = process.env.MAP_E2E_BASE_URL;
 const mobileViewport = { width: 390, height: 844 };
 
 async function openMap(page: Page) {
@@ -24,12 +23,6 @@ async function markerCenter(page: Page, marker: ReturnType<Page["locator"]>) {
 }
 
 test.describe("Broad map interaction smoke", () => {
-  test.beforeAll(() => {
-    if (!baseUrl) {
-      throw new Error("MAP_E2E_BASE_URL must point to a running Broad map deployment");
-    }
-  });
-
   test("keeps controls, individual dots, and map interactions working in one session", async ({ page }) => {
     await page.setViewportSize(mobileViewport);
     await openMap(page);
