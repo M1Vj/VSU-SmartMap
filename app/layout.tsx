@@ -110,6 +110,7 @@ export default async function RootLayout({
               <Script
                 src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
                 strategy="afterInteractive"
+                nonce={nonce ?? undefined}
               />
               <NavigationProgress />
               <Toaster />
