@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectProjectTestFiles,
   escapeNodeGlobPath,
   toNodeTestArgument,
 } from "./test-file-discovery.mjs";
@@ -21,4 +22,10 @@ test("toNodeTestArgument supports literal Node 20 paths and Node 22+ globs", () 
     toNodeTestArgument(filePath, 22),
     "app/api/items/[[]id]/route.test.ts",
   );
+});
+
+test("collectProjectTestFiles includes root-level test files", async () => {
+  const testFiles = await collectProjectTestFiles();
+
+  assert.ok(testFiles.includes("proxy.test.ts"));
 });

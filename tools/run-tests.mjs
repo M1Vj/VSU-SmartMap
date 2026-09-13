@@ -1,16 +1,13 @@
 import { spawn } from "node:child_process";
 
 import {
-  collectTestFiles,
+  collectProjectTestFiles,
   toNodeTestArgument,
 } from "./test-file-discovery.mjs";
 
-const TEST_ROOTS = ["app", "components", "lib", "tools"];
 const nodeMajorVersion = Number.parseInt(process.versions.node, 10);
 
-const testFiles = (await Promise.all(TEST_ROOTS.map(collectTestFiles)))
-  .flat()
-  .sort();
+const testFiles = await collectProjectTestFiles();
 
 if (testFiles.length === 0) {
   console.error("No test files found.");
