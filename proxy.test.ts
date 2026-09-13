@@ -74,3 +74,34 @@ test("proxy CSP permits the map style, imagery, raster, and fallback tile hosts"
   assert.match(connectSource ?? "", /https:\/\/\*\.openstreetmap\.org/);
   assert.match(connectSource ?? "", /https:\/\/\*\.basemaps\.cartocdn\.com/);
 });
+
+test("proxy issues unique per-request CSP nonces shared by request and response", async () => {
+  const { proxy } = await proxyModule;
+  receivedRequests.length = 0;
+  const firstResponse = await proxy(new NextRequest("https://example.test/map"));
+  const secondResponse = await proxy(new NextRequest("https://example.test/map"));
+  const firstPolicy = firstResponse.headers.get("content-security-policy") ?? "";
+  const secondPolicy = secondResponse.headers.get("content-security-policy") ?? "";
+  const firstNonce = firstPolicy.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? "";
+  const secondNonce = secondPolicy.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? "";
+  assert.match(firstNonce, /^[A-Za-z0-9]{32}$/);
+  assert.match(secondNonce, /^[A-Za-z0-9]{32}$/);
+  assert.notEqual(firstNonce, secondNonce);
+  assert.match(firstPolicy, /script-src 'self' 'nonce-/);
+  const firstForwarded = receivedRequests[0]?.headers.get("content-security-policy") ?? "";
+  const secondForwarded = receivedRequests[1]?.headers.get("content-security-policy") ?? "";
+  const firstForwardedNonce = firstForwarded.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? "";
+  const secondForwardedNonce = secondForwarded.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? "";
+  assert.equal(firstForwardedNonce, firstNonce);
+  assert.equal(secondForwardedNonce, secondNonce);
+});
+
+test("proxy request CSP nonce is consumable by RootLayout regex", async () => {
+  const { proxy } = await proxyModule;
+  receivedRequests.length = 0;
+  await proxy(new NextRequest("https://example.test/map"));
+  const forwardedPolicy = receivedRequests[0]?.headers.get("content-security-policy") ?? "";
+  const layoutNonce = forwardedPolicy.match(/nonce-([A-Za-z0-9]+)/)?.[1] ?? null;
+  assert.ok(layoutNonce);
+  assert.match(layoutNonce ?? "", /^[A-Za-z0-9]+$/);
+});

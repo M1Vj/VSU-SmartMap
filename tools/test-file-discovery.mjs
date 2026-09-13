@@ -2,6 +2,19 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 
 const TEST_FILE_PATTERN = /\.test\.tsx?$/;
+const PROJECT_TEST_ROOTS = ["app", "components", "lib", "tools"];
+
+export async function collectProjectTestFiles() {
+  const [nestedTestFiles, rootEntries] = await Promise.all([
+    Promise.all(PROJECT_TEST_ROOTS.map(collectTestFiles)),
+    readdir(".", { withFileTypes: true }),
+  ]);
+  const rootTestFiles = rootEntries
+    .filter((entry) => entry.isFile() && TEST_FILE_PATTERN.test(entry.name))
+    .map((entry) => entry.name);
+
+  return [...nestedTestFiles.flat(), ...rootTestFiles].sort();
+}
 
 export function escapeNodeGlobPath(filePath) {
   // Node treats --test file arguments as glob patterns. Match literal route
