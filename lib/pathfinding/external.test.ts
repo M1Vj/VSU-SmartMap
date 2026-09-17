@@ -45,10 +45,30 @@ test("openrouteservice routing URL uses foot-walking and lng,lat start/end", () 
 
 test("an already-aborted external route performs no provider fetch", async () => {
   const originalFetch = globalThis.fetch;
-  const originalOnLine = Object.getOwnPropertyDescriptor(globalThis.navigator, "onLine");
+  // Hermetic navigator handling: Node 20 has no `navigator` global while Node
+  // 22+ exposes one (onLine may live on the instance or its prototype).
+  // Shadow it with an own `onLine=true` for the test, then restore exactly.
+  const holder = globalThis as unknown as Record<string, unknown>;
+  const hadNavigator = typeof holder["navigator"] !== "undefined";
+  const navigatorTarget = (hadNavigator ? holder["navigator"] : {}) as Record<
+    string,
+    unknown
+  >;
+  if (!hadNavigator) {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: navigatorTarget,
+    });
+  }
+  const originalOwn = Object.getOwnPropertyDescriptor(
+    navigatorTarget,
+    "onLine",
+  );
   let fetchCalls = 0;
-  Object.defineProperty(globalThis.navigator, "onLine", {
+  Object.defineProperty(navigatorTarget, "onLine", {
     configurable: true,
+    writable: true,
     value: true,
   });
   globalThis.fetch = async () => {
@@ -70,10 +90,13 @@ test("an already-aborted external route performs no provider fetch", async () =>
     assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalOnLine) {
-      Object.defineProperty(globalThis.navigator, "onLine", originalOnLine);
+    if (originalOwn) {
+      Object.defineProperty(navigatorTarget, "onLine", originalOwn);
     } else {
-      Reflect.deleteProperty(globalThis.navigator, "onLine");
+      Reflect.deleteProperty(navigatorTarget, "onLine");
+    }
+    if (!hadNavigator) {
+      Reflect.deleteProperty(globalThis, "navigator");
     }
   }
 });
