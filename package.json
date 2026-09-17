@@ -148,6 +148,9 @@
     },
     "glob": {
       "minimatch": "9.0.7"
+    },
+    "@maplibre/maplibre-gl-leaflet": {
+      "maplibre-gl": "$maplibre-gl"
     }
   },
   "devDependencies": {
