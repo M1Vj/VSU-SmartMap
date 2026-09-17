@@ -23,6 +23,8 @@ const child = spawn(
     "--experimental-test-module-mocks",
     "--import",
     "tsx",
+    "--import",
+    "./tools/test-setup.ts",
     "--test",
     ...testFiles.map((filePath) =>
       toNodeTestArgument(filePath, nodeMajorVersion),
