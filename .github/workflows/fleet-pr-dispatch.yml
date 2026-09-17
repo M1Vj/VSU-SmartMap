@@ -1,29 +1,37 @@
-name: fleet-pr-dispatch
-run-name: "dispatch fleet merge #${{ github.event.pull_request.number }}"
-
+name: fleet-pr-dispatch (disabled)
+# DISABLED — removed from the Next.js 16.3.5 security backport scope.
+#
+# The rejected draft added undisclosed cross-repo automation on every PR
+# event (opened / synchronize / reopened / ready_for_review) that fanned
+# out to an external control-plane repository using a privileged token,
+# without disclosure in the PR summary and without a threat model.
+# That violates the single-purpose PR principle and least-privilege:
+# a security backport must not bundle unrelated infra automation or
+# introduce new token-backed network egress.
+#
+# This file is kept as an explicit, fail-closed placeholder so the removal
+# is reviewable in-diff. It triggers ONLY on manual workflow_dispatch and
+# its sole job is a no-op that explains why external fan-out is absent.
+# Re-enabling any cross-repo fan-out requires a SEPARATE PR with:
+#   1. Threat model (event types, payload, replay/abuse, token scope).
+#   2. Permissions review (why a privileged token is needed, minimal scopes).
+#   3. Maintainer approval and security-policy alignment.
+#   4. Explicit opt-in via a repository variable as documented in that PR.
+# Until then this job never runs (`if: false`) and performs no network calls.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
   dispatch:
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: notify fleet-control
-        env:
-          GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      - name: external fan-out disabled
         run: |
-          if [ -n "$GH_TOKEN" ]; then
-            echo "Notifying fleet-control for instant review on PR #${{ github.event.pull_request.number }}..."
-            gh api /repos/M1Vj/fleet-control/dispatches \
-              -f event_type=fleet-merge \
-              -F client_payload[repo]="${{ github.repository }}" \
-              -F client_payload[pr]="${{ github.event.pull_request.number }}" || echo "Dispatch notification skipped or failed"
-          else
-            echo "FLEET_GH_TOKEN not set; skipping event dispatch"
-          fi
+          echo "fleet-pr-dispatch is disabled in the security backport."
+          echo "Cross-repo fan-out requires a separate reviewed PR with threat model and explicit opt-in."
+          echo "See file header for the re-enable checklist."
