@@ -1,0 +1,29 @@
+name: fleet-pr-dispatch
+run-name: "dispatch fleet merge #${{ github.event.pull_request.number }}"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: notify fleet-control
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          if [ -n "$GH_TOKEN" ]; then
+            echo "Notifying fleet-control for instant review on PR #${{ github.event.pull_request.number }}..."
+            gh api /repos/M1Vj/fleet-control/dispatches \
+              -f event_type=fleet-merge \
+              -F client_payload[repo]="${{ github.repository }}" \
+              -F client_payload[pr]="${{ github.event.pull_request.number }}" || echo "Dispatch notification skipped or failed"
+          else
+            echo "FLEET_GH_TOKEN not set; skipping event dispatch"
+          fi
