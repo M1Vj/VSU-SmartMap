@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "test": "node tools/run-tests.mjs",
+    "test": "node tools/run-tests.hermetic.mjs",
     "test:map-e2e": "playwright test e2e/map-broad-smoke.spec.ts",
     "eval:chat": "node tools/evals/run-chat-evals.mjs",
     "preview:offline": "NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next build && NEXT_PUBLIC_ENABLE_LOCAL_OFFLINE_SW=true next start",
