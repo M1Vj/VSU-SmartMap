@@ -1,131 +1,80 @@
-import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 import {
   collectTestFiles,
   toNodeTestArgument,
 } from "./test-file-discovery.mjs";
 
-// Hermetic engine guard: package.json declares engines.node >= 22 because
-// node:test mock.module("@/...") path-alias resolution and globalThis.navigator
-// only behave correctly on Node 22+. The fleet merge-gate historically runs
-// Node 20, which produced 18 deterministic failures (17 mock.module @/ alias
-// ERR_MODULE_NOT_FOUND + 1 navigator TypeError). Instead of silently skipping,
-// re-exec the suite on a Node >= 22 binary when one is available, else fail
-// fast with a clear, actionable message.
+const TEST_ROOTS = ["app", "components", "lib", "tools"];
+
+// Hermetic engine guard (atomic, no re-exec).
 //
-// Explicit escape hatches (repository variables with clear semantics):
-//   VSU_TEST_ALLOW_NODE20=1  -> run on Node 20 anyway (expected: alias/navigator
-//                              failures; use only for local diagnosis).
-//   VSU_TEST_NODE=<path>     -> force a specific node binary for the suite.
+// package.json declares engines.node >= 22 because node:test
+// mock.module("@/...") path-alias resolution and globalThis.navigator only
+// behave correctly on Node 22+. The fleet merge-gate historically ran Node 20,
+// which produced deterministic alias/navigator failures.
+//
+// This guard is intentionally hermetic: it inspects only
+// process.versions.node / process.version and the explicit repository
+// variable below. It performs no filesystem scans, no PATH/`which` probing,
+// no discovery or execution of alternate node binaries, and no auto re-exec
+// via spawnSync/execFileSync.
+//
+// Threat model: executing an attacker-influenceable binary (VSU_TEST_NODE,
+// toolcache enumeration, or PATH/`which` output) would turn this test helper
+// into an arbitrary-code-execution primitive and a CI supply-chain risk.
+// Candidate enumeration that stats/execs every node binary found is
+// therefore rejected. Automatic Node >= 22 re-exec is deferred to a separate
+// PR with design review, an allowlist with path validation, CI-variable
+// provenance, and dedicated unit tests for version parsing, discovery, the
+// re-exec loop guard, and every env branch. This PR keeps the dependabot
+// security bump atomic.
+//
+// Explicit gate (repository variable with a clear skip reason):
+//   VSU_TEST_ALLOW_NODE20=1 -> run on Node 20 anyway for local diagnosis
+//   only (expected: alias/navigator failures). CI must NOT set it. The
+//   bypass is logged loudly to stderr for audit. Every other value
+//   (including unset) keeps fail-fast behavior.
 const REQUIRED_NODE_MAJOR = 22;
 
-function nodeMajorOf(binary) {
-  try {
-    const out = execFileSync(binary, ["-p", "process.versions.node.split('.')[0]"], {
-      encoding: "utf8",
-      timeout: 15000,
-    }).trim();
-    const major = Number.parseInt(out, 10);
-    return Number.isInteger(major) ? major : 0;
-  } catch {
-    return 0;
+function getNodeMajorVersion() {
+  const raw = String(process.versions.node ?? "").split(".")[0] ?? "";
+  const major = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(major) || major <= 0) {
+    console.error(
+      `[run-tests] Unable to parse Node major version from ${JSON.stringify(
+        process.versions.node,
+      )}; refusing to run (requires Node >= ${REQUIRED_NODE_MAJOR}).`,
+    );
+    process.exit(1);
   }
+  return major;
 }
 
-function findNode22OrNewer() {
-  const override = String(process.env.VSU_TEST_NODE || "").trim();
-  if (override) {
-    if (existsSync(override) && nodeMajorOf(override) >= REQUIRED_NODE_MAJOR) return override;
-    return null;
-  }
-  const candidates = new Set();
-  const toolcache = "/opt/hostedtoolcache/node";
-  try {
-    if (existsSync(toolcache)) {
-      for (const entry of readdirSync(toolcache)) {
-        candidates.add(path.join(toolcache, entry, "x64", "bin", "node"));
-        candidates.add(path.join(toolcache, entry, "arm64", "bin", "node"));
-      }
-    }
-  } catch {}
-  for (const p of ["/usr/local/bin/node", "/opt/act/node/bin/node", "/usr/bin/node"]) {
-    candidates.add(p);
-  }
-  try {
-    const out = execFileSync("which", ["-a", "node"], { encoding: "utf8", timeout: 10000 });
-    for (const line of String(out).split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed) candidates.add(trimmed);
-    }
-  } catch {}
-  for (const name of ["node22", "node24", "nodejs"]) {
-    try {
-      const out = String(execFileSync("which", [name], { encoding: "utf8", timeout: 10000 })).trim();
-      if (out) candidates.add(out.split("\n")[0].trim());
-    } catch {}
-  }
-  let best = null;
-  let bestMajor = 0;
-  for (const candidate of candidates) {
-    if (!candidate || candidate === process.execPath) continue;
-    if (!existsSync(candidate)) continue;
-    const major = nodeMajorOf(candidate);
-    if (major >= REQUIRED_NODE_MAJOR && major > bestMajor) {
-      best = candidate;
-      bestMajor = major;
-    }
-  }
-  return best;
-}
-
-const nodeMajorVersion = Number.parseInt(process.versions.node, 10);
-const allowLegacyNode = /^(1|true|yes)$/i.test(String(process.env.VSU_TEST_ALLOW_NODE20 ?? ""));
+const nodeMajorVersion = getNodeMajorVersion();
+const allowLegacyNode = /^(1|true|yes)$/i.test(
+  String(process.env.VSU_TEST_ALLOW_NODE20 ?? "").trim(),
+);
 
 if (nodeMajorVersion < REQUIRED_NODE_MAJOR && !allowLegacyNode) {
-  const here = fileURLToPath(import.meta.url);
-  // Guard against re-exec loops: the re-executed child sets this marker.
-  if (process.env.VSU_TEST_REEXEC !== "1") {
-    const newer = findNode22OrNewer();
-    if (newer) {
-      console.error(
-        `[run-tests] Node ${process.version} detected (engines requires >= ${REQUIRED_NODE_MAJOR}); re-executing suite with ${newer}`,
-      );
-      const result = spawnSync(newer, [here, ...process.argv.slice(2)], {
-        stdio: "inherit",
-        env: { ...process.env, VSU_TEST_REEXEC: "1" },
-      });
-      if (result.signal) {
-        try {
-          process.kill(process.pid, result.signal);
-        } catch {}
-        process.exit(1);
-      }
-      process.exit(result.status ?? 1);
-    }
-  }
   console.error(
-    `FATAL: Node >= ${REQUIRED_NODE_MAJOR} is required (package.json engines). ` +
-      `Current: ${process.version}. ` +
-      `node:test mock.module("@/...") alias resolution and globalThis.navigator ` +
-      `are only correct on Node 22+ (18 failures on Node 20). ` +
-      `Install Node 22+, set VSU_TEST_NODE=<node22-binary>, or explicitly opt into ` +
-      `legacy mode with VSU_TEST_ALLOW_NODE20=1 for diagnosis only.`,
+    `[run-tests] Node ${process.version} detected; this suite requires Node >= ${REQUIRED_NODE_MAJOR} (see package.json engines). ` +
+      `Re-run with Node 22+ (Requirement: Node.js 22+, npm 10+). ` +
+      `For local diagnosis only you may set VSU_TEST_ALLOW_NODE20=1 to run anyway (expected: mock.module "@/..." alias and navigator failures). ` +
+      `CI must not set VSU_TEST_ALLOW_NODE20. ` +
+      `Automatic Node >= 22 re-exec is intentionally not implemented here; it requires a separate PR with design review.`,
   );
   process.exit(1);
 }
 
 if (nodeMajorVersion < REQUIRED_NODE_MAJOR && allowLegacyNode) {
   console.error(
-    `[run-tests] WARNING: running on legacy ${process.version} via explicit VSU_TEST_ALLOW_NODE20=1; ` +
-      `mock.module("@/...") and navigator-dependent tests are expected to fail.`,
+    `[run-tests] WARNING: VSU_TEST_ALLOW_NODE20=${JSON.stringify(
+      process.env.VSU_TEST_ALLOW_NODE20,
+    )} bypasses the Node >= ${REQUIRED_NODE_MAJOR} gate on ${process.version}. ` +
+      `Results are not hermetic (mock.module alias + navigator failures expected). Use only for local diagnosis; do not set in CI.`,
   );
 }
-
-const TEST_ROOTS = ["app", "components", "lib", "tools"];
-const effectiveMajor = Number.parseInt(process.versions.node, 10);
 
 const testFiles = (await Promise.all(TEST_ROOTS.map(collectTestFiles)))
   .flat()
@@ -144,7 +93,7 @@ const child = spawn(
     "tsx",
     "--test",
     ...testFiles.map((filePath) =>
-      toNodeTestArgument(filePath, effectiveMajor),
+      toNodeTestArgument(filePath, nodeMajorVersion),
     ),
     ...process.argv.slice(2),
   ],
@@ -158,7 +107,15 @@ child.on("error", (error) => {
 
 child.on("exit", (code, signal) => {
   if (signal) {
-    process.kill(process.pid, signal);
+    try {
+      process.kill(process.pid, signal);
+    } catch (error) {
+      console.error(
+        `[run-tests] Failed to forward signal ${String(signal)}:`,
+        error,
+      );
+      process.exit(1);
+    }
     return;
   }
 
