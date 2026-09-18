@@ -8,6 +8,18 @@ import {
 const TEST_ROOTS = ["app", "components", "lib", "tools"];
 const nodeMajorVersion = Number.parseInt(process.versions.node, 10);
 
+// Fail fast on an unsupported toolchain. package.json engines requires
+// Node >= 22 and CI (.github/workflows/quality.yml, security.yml) pins
+// Node 22. Run with Node 22 instead of shimming Node 20 globals: no
+// mock.module reanchoring and no synthetic globalThis.navigator stub.
+if (!Number.isSafeInteger(nodeMajorVersion) || nodeMajorVersion < 22) {
+  console.error(
+    `Refusing to run tests on ${process.version}: Node >= 22 is required ` +
+      `(package.json engines, CI pins Node 22). Re-run with Node 22.`,
+  );
+  process.exit(1);
+}
+
 const testFiles = (await Promise.all(TEST_ROOTS.map(collectTestFiles)))
   .flat()
   .sort();
@@ -23,8 +35,6 @@ const child = spawn(
     "--experimental-test-module-mocks",
     "--import",
     "tsx",
-    "--import",
-    "./tools/test-setup.ts",
     "--test",
     ...testFiles.map((filePath) =>
       toNodeTestArgument(filePath, nodeMajorVersion),
