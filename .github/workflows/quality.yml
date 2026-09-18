@@ -41,7 +41,13 @@ jobs:
       - run: npm test
       - run: npm run eval:chat
       - run: npm run build
+      # Security gate: fail on high+ advisories. Do NOT relax to critical:
+      # a security backport must not hide high-severity findings.
       - run: npm audit --omit=dev --audit-level=high
+      # Hermetic Next.js 16.3.5 backport verification (local only, no network).
+      # Fail-fast: exits 1 on any scope, nonce-forwarding, or gate regression.
+      - run: node tools/qa/verify-next-csp-nonce.mjs
+      - run: node tools/qa/lockfile-scope-guard.mjs
 
   database:
     runs-on: ubuntu-latest
