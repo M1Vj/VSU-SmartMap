@@ -179,6 +179,10 @@ function OpenFreeMapVectorLayer({
       style: styleUrl as StyleSpecification | string,
       pitch: MAP_TILES.pitch,
       bearing: MAP_TILES.bearing,
+      // Leaflet's attribution control accepts trusted HTML. Keep the fixed
+      // OpenFreeMap provider credits rather than forwarding remote style/source
+      // attribution markup through the MapLibre-to-Leaflet bridge.
+      attributionControl: { customAttribution: MAP_TILES.attribution },
       // Keep the visual mirror close to the browser frame rate while Leaflet
       // remains the sole owner of map gestures.
       updateInterval: 16,

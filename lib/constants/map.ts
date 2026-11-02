@@ -27,7 +27,7 @@ export const MAP_TILES = {
   rasterStreetUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   rasterDarkUrl: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
   attribution:
-    '© <a href="https://openfreemap.org">OpenFreeMap</a> · Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    '<a href="https://openfreemap.org">OpenFreeMap</a> · © <a href="https://openmaptiles.org/">OpenMapTiles</a> · Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   satelliteAttribution:
     'Tiles © <a href="https://www.esri.com/">Esri</a>',
   satelliteFallbackAttribution:
@@ -40,3 +40,4 @@ export const MAP_TILES = {
   pitch: 0,
   bearing: 0,
 };
+
