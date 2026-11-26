@@ -360,7 +360,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const clearFilters = useCallback(() => {
     setSearchQuery("");
-    setSelectedCategories([]);
+    setSelectedCategories([...VALID_CATEGORIES]);
   }, []);
 
   const toggleStudentDestination = useCallback((destination: StudentDestinationId) => {
