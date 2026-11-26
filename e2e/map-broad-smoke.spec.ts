@@ -94,17 +94,31 @@ test.describe("Directory filter smoke", () => {
       name: "Search buildings or facilities",
       exact: true,
     });
+    await page.goto("/directory?category=academic");
+    await expect(page.getByRole("region", { name: "Academic", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Filter directory categories: 1 selected", exact: true }),
+    ).toBeVisible();
+    const restrictedCount = page.getByText(/^Showing [1-9]\d* of [1-9]\d* facilities$/);
+    await expect(restrictedCount).toBeVisible();
+    await expect(restrictedCount).not.toHaveText(baseline);
+
     const noMatch = "zzzxxyy-no-campus-match";
     await search.fill(noMatch);
     await expect(page.getByText("No facilities match your filters.", { exact: true })).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe(noMatch);
     await page.getByRole("button", { name: "Clear filters", exact: true }).click();
 
-    await expect(search).toHaveValue("");
-    await expect(
-      page.getByRole("button", { name: "Filter directory categories: All categories", exact: true }),
-    ).toBeVisible();
-    await expect(count).toHaveText(baseline);
-    await expect.poll(() => new URL(page.url()).searchParams.has("q")).toBe(false);
+    const expectReset = async () => {
+      await expect(search).toHaveValue("");
+      await expect(
+        page.getByRole("button", { name: "Filter directory categories: All categories", exact: true }),
+      ).toBeVisible();
+      await expect(count).toHaveText(baseline);
+      await expect.poll(() => new URL(page.url()).searchParams.has("q")).toBe(false);
+    };
+    await expectReset();
+    await page.reload();
+    await expectReset();
   });
 });
