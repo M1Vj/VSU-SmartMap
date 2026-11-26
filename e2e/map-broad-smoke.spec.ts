@@ -82,3 +82,29 @@ test.describe("Broad map interaction smoke", () => {
     expect(Math.hypot(markerX - tipX, markerY - tipY)).toBeLessThan(120);
   });
 });
+
+test.describe("Directory filter smoke", () => {
+  test("Clear filters restores the unfiltered facility count", async ({ page }) => {
+    await page.goto("/directory");
+    const count = page.getByText(/^Showing ([1-9]\d*) of \1 facilities$/);
+    await expect(count).toBeVisible({ timeout: 15_000 });
+    const baseline = await count.innerText();
+
+    const search = page.getByRole("combobox", {
+      name: "Search buildings or facilities",
+      exact: true,
+    });
+    const noMatch = "zzzxxyy-no-campus-match";
+    await search.fill(noMatch);
+    await expect(page.getByText("No facilities match your filters.", { exact: true })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe(noMatch);
+    await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+
+    await expect(search).toHaveValue("");
+    await expect(
+      page.getByRole("button", { name: "Filter directory categories: All categories", exact: true }),
+    ).toBeVisible();
+    await expect(count).toHaveText(baseline);
+    await expect.poll(() => new URL(page.url()).searchParams.has("q")).toBe(false);
+  });
+});
