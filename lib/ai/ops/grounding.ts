@@ -32,6 +32,7 @@ export interface GroundingValidationResult {
 }
 
 const FAILURE_REASONS = new Set<GroundingReasonCode>([
+  "RESPONSE_TEXT_EMPTY",
   "FACILITY_REFERENCE_INVALID",
   "FACILITY_LIMIT_EXCEEDED",
   "EVENT_REFERENCE_INVALID",

@@ -132,13 +132,13 @@ test("limits facilities to six and fails a schema-limit violation", () => {
   assert.equal(result.response.facilities.length, 6);
 });
 
-test("warns for blank response text without judging its semantics", () => {
+test("rejects blank response text without judging its semantics", () => {
   const result = validateGroundedLocationResponse(
     { response: "   ", facilities: [] },
     context,
   );
 
-  assert.equal(result.outcome, "warn");
+  assert.equal(result.outcome, "fail");
   assert.deepEqual(result.reasonCodes, ["RESPONSE_TEXT_EMPTY"]);
   assert.equal(result.response.response, "");
 });
@@ -154,7 +154,7 @@ test("truncates response text to the structured-output ceiling and warns", () =>
   assert.equal(result.response.response.length, LOCATION_RESPONSE_TEXT_MAX_LENGTH);
 });
 
-test("fail outcome takes precedence while retaining response warnings", () => {
+test("keeps both reasons when response text and a facility reference are invalid", () => {
   const result = validateGroundedLocationResponse(
     {
       response: "",

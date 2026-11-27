@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
+import { validateGroundedLocationResponse } from "@/lib/ai/ops/grounding";
 
 let executeCalls = 0;
 let generationError: Error | null = null;
+let generatedContent = "Verified campus answer";
+let streamingRequest = true;
 let finalizations: Array<Record<string, unknown>> = [];
 let cacheWrites: Array<Record<string, unknown>> = [];
 let cacheError: Error | null = null;
@@ -12,11 +15,12 @@ mock.module("@/lib/ai/flows/find-location", {
     async executeFindLocation() {
       executeCalls += 1;
       if (generationError) throw generationError;
+      const grounding = validateGroundedLocationResponse({ response: generatedContent, facilities: [] }, { facilities: [], events: [], boardingHouses: [] });
       return {
-        output: { response: "Verified campus answer", facilities: [] },
+        output: grounding.response,
         operations: {
           generation: { selectedModel: "model-a", attemptCount: 1 },
-          grounding: { outcome: "pass", reasonCodes: [], response: { response: "Verified campus answer", facilities: [] } },
+          grounding,
           retrievedRecordIds: [],
         },
       };
@@ -53,7 +57,7 @@ mock.module("@/lib/ai/ops/request", {
         byteLength: 64,
         data: {
           message: "Where is DMath-LecR3?",
-          streaming: true,
+          streaming: streamingRequest,
           conversationId: "conversation-id",
           history: [],
         },
@@ -115,6 +119,8 @@ test.beforeEach(() => {
   process.env.CHAT_LLM_ENABLED = "true";
   executeCalls = 0;
   generationError = null;
+  generatedContent = "Verified campus answer";
+  streamingRequest = true;
   finalizations = [];
   cacheWrites = [];
   cacheError = null;
@@ -165,3 +171,26 @@ test("a cache persistence failure after delivery never emits a second final answ
   assert.match(body, /Verified campus answer/);
   assert.doesNotMatch(body, /I’m having trouble|I'm having trouble/);
 });
+
+for (const streaming of [true, false]) {
+  test(`a blank generated reply uses nonblank fallback and does not cache (${streaming ? "SSE" : "JSON"})`, async () => {
+    generatedContent = "    ";
+    streamingRequest = streaming;
+    const { POST } = await routeModule;
+    const response = await POST(request());
+    assert.equal(response.status, 200);
+    let content: string;
+    if (streaming) {
+      const frames = (await response.text()).split("\n")
+        .filter(line => line.startsWith("data: ") && line !== "data: [DONE]")
+        .map(line => JSON.parse(line.slice(6)));
+      content = frames.find(frame => frame.type === "final")?.content ?? "";
+    } else {
+      content = (await response.json()).content;
+    }
+    assert.ok(content.trim());
+    assert.equal(executeCalls, 1);
+    assert.equal(cacheWrites.length, 0);
+    assert.notEqual(finalizations[0]?.outcome, "live");
+  });
+}
