@@ -5,6 +5,8 @@ import test, { mock } from "node:test";
 import { LocationResponseSchema } from "../schemas/location.ts";
 
 let facilityReads = 0;
+let onFacilityRead: (() => void) | undefined;
+let rotationEntries = 0;
 let eventReads = 0;
 let knowledgeReads = 0;
 let boardingReads = 0;
@@ -15,17 +17,20 @@ mock.module("@genkit-ai/core", {
 });
 mock.module("../genkit", {
   namedExports: {
-    runWithKeyRotation: async (run: (ai: { generate(input: { prompt: string }): Promise<unknown> }) => Promise<unknown>) => run({
-      async generate(input: { prompt: string }) {
-        generatedPrompts.push(input.prompt);
-        return { output: { response: "Synthetic operational response", facilities: [] } };
-      },
-    }),
+    runWithKeyRotation: async (run: (ai: { generate(input: { prompt: string }): Promise<unknown> }) => Promise<unknown>) => {
+      rotationEntries += 1;
+      return run({
+        async generate(input: { prompt: string }) {
+          generatedPrompts.push(input.prompt);
+          return { output: { response: "Synthetic operational response", facilities: [] } };
+        },
+      });
+    },
     streamWithKeyRotation: async () => undefined,
   },
 });
 mock.module("@/lib/supabase/queries/facilities.server", {
-  namedExports: { getFacilitiesForChatCached: async () => { facilityReads += 1; return { data: [] }; } },
+  namedExports: { getFacilitiesForChatCached: async () => { facilityReads += 1; onFacilityRead?.(); return { data: [] }; } },
 });
 mock.module("@/lib/supabase/queries/ai-knowledge.server", {
   namedExports: { getAiKnowledgeForChatCached: async () => { knowledgeReads += 1; return { data: [] }; } },
@@ -170,4 +175,34 @@ test("synthetic retrieval mode produces no campus record identifiers", async () 
 test("generation forwards abort signals so client and health timeouts cancel provider work", () => {
   const source = readFileSync(new URL("./find-location.ts", import.meta.url), "utf8");
   assert.match(source, /abortSignal:\s*options\.abortSignal/g);
+});
+
+test("already canceled generation skips retrieval and the provider", async () => {
+  const { executeFindLocation } = await flowModule;
+  const prior = { facilityReads, eventReads, knowledgeReads, boardingReads, prompts: generatedPrompts.length, rotationEntries };
+  const reason = new DOMException("Canceled before generation", "AbortError");
+  await assert.rejects(
+    executeFindLocation({ query: "Synthetic canceled campus question" }, { abortSignal: AbortSignal.abort(reason) }),
+    (error) => error === reason,
+  );
+  assert.deepEqual({ facilityReads, eventReads, knowledgeReads, boardingReads, prompts: generatedPrompts.length, rotationEntries }, prior);
+});
+
+test("cancellation during retrieval stops before the provider starts", async () => {
+  const { executeFindLocation } = await flowModule;
+  const controller = new AbortController();
+  const reason = new DOMException("Canceled during retrieval", "AbortError");
+  const promptCount = generatedPrompts.length;
+  const priorRotationEntries = rotationEntries;
+  onFacilityRead = () => controller.abort(reason);
+  try {
+    await assert.rejects(
+      executeFindLocation({ query: "Synthetic canceled campus question" }, { abortSignal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(generatedPrompts.length, promptCount);
+    assert.equal(rotationEntries, priorRotationEntries);
+  } finally {
+    onFacilityRead = undefined;
+  }
 });

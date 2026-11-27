@@ -242,12 +242,15 @@ export async function executeFindLocation(
   output: LocationResponse;
   operations: FindLocationOperations;
 }> {
+  options.abortSignal?.throwIfAborted();
   const { prompt, groundingContext } = await buildChatPrompt(
     input,
     options.retrievalMode ?? "default",
   );
+  options.abortSignal?.throwIfAborted();
   let generation: GenerationRunMetadata | undefined;
   const rawOutput = await runWithKeyRotation(async (ai) => {
+    options.abortSignal?.throwIfAborted();
     const result = await ai.generate({
       prompt,
       output: { schema: LocationResponseSchema },
