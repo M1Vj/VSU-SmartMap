@@ -98,7 +98,7 @@ mock.module("@/lib/actions/events", {
   namedExports: { async getEventsCached() { return { data: [] }; } },
 });
 
-mock.module("@/lib/ai/genkit", {
+mock.module("@/lib/ai/gemini", {
   namedExports: { CHAT_MODEL_ID: "model-a" },
 });
 

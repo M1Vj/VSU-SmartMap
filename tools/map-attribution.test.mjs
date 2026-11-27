@@ -24,8 +24,7 @@ function harness(options) {
   on(name,cb) {events.push({name,cb});}
   getStyle() {getters++;return {sources:{remote:{}}};}
   getSource() {getters++;return {attribution:'<span data-sentinel="remote">REMOTE_SENTINEL</span>'};}
-  _getTransformForUpdate() {return this.transform;}
-  _fireMoveEvents() {}
+  jumpTo() {}
   remove() {this.removed=true;}
  }
  const L={

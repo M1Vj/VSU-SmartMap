@@ -40,4 +40,3 @@ export const MAP_TILES = {
   pitch: 0,
   bearing: 0,
 };
-
