@@ -1,5 +1,6 @@
 import { BlockedReason, FinishReason, type GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import { IncompleteChatGenerationError } from './chat-fallback';
 import { LocationResponseSchema } from './schemas/location';
 
 const { $schema: _draftMarker, ...geminiResponseSchema } = z.toJSONSchema(
@@ -52,8 +53,12 @@ export async function generateLocation(
   ) {
     throw new Error('Generation blocked.');
   }
-  if (finishReason === FinishReason.CONTINUATION || (!finishReason && candidate?.continuationToken)) {
-    throw new Error('AI generation incomplete');
+  if (
+    finishReason === FinishReason.MAX_TOKENS ||
+    finishReason === FinishReason.CONTINUATION ||
+    (!finishReason && candidate?.continuationToken)
+  ) {
+    throw new IncompleteChatGenerationError();
   }
   const text = response.text;
   if (!text?.trim()) throw new Error('AI failed to generate a response');

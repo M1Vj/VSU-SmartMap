@@ -29,7 +29,11 @@ import { NextResponse } from "next/server";
 import { CHAT_HISTORY } from "@/lib/constants/chat";
 import { CHAT_MODEL_ID } from "@/lib/ai/gemini";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
-import { buildChatFallbackContent, shouldUseChatFallback } from "@/lib/ai/chat-fallback";
+import {
+  buildChatFallbackContent,
+  IncompleteChatGenerationError,
+  shouldUseChatFallback,
+} from "@/lib/ai/chat-fallback";
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 type ChatContext = {
@@ -121,6 +125,7 @@ async function finalizeTurn(
 }
 
 function classifyChatError(error: unknown) {
+  if (error instanceof IncompleteChatGenerationError) return "provider_incomplete";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("grounding") || message.includes("validation")) return "validation_error";
   if (message.includes("timeout") || message.includes("etimedout")) return "provider_timeout";
@@ -568,7 +573,7 @@ export async function POST(request: Request) {
     console.error("Chat API request failed");
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    if (shouldUseChatFallback(errorMessage)) {
+    if (error instanceof IncompleteChatGenerationError || shouldUseChatFallback(errorMessage)) {
       const fallbackPayload = turnSession
         ? attachTurnCredential(await buildStaticFallbackPayload(fallbackQuery), turnSession)
         : await buildStaticFallbackPayload(fallbackQuery);
