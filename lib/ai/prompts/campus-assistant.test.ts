@@ -26,3 +26,19 @@ test("coursework and personal records have distinct official portal referrals", 
   assert.match(CAMPUS_ASSISTANT_PROMPT, /quizzes, or virtual classrooms[^.]*https:\/\/elearning\.vsu\.edu\.ph\//);
   assert.match(CAMPUS_ASSISTANT_PROMPT, /without guessing private course links or access/);
 });
+
+test("reply-language preferences and code-only follow-ups preserve the output contract", () => {
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /explicitly requests \(including Cebuano\/Bisaya\).*response text only/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /JSON keys, record values, and grounding and safety rules unchanged/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /only a place name or code, use the language of the latest substantive user turn/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /none to carry over, use plain Taglish/);
+});
+
+test("campus clarification is conditional and does not return a destination card", () => {
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /asks for a place or destination at a different campus, do not route the visitor to Baybay or suggest a Baybay alternative/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /Leave facilities as \[\].*SmartMap covers only the Main Campus in Baybay/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /different campus mentioned only as the starting point does not rule out a verified Baybay destination/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /Ask which VSU campus they mean only if it is unclear and would change the answer/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /While waiting for clarification, leave facilities as \[\] and do not suggest a destination/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /clear they mean Main Campus in Baybay, proceed without asking to confirm the campus/);
+});

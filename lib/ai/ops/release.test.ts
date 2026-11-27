@@ -14,7 +14,7 @@ test("getAiModelLadder binds configured model order without sensitive environmen
 });
 
 test("release metadata records the current prompt version and the resolved economical defaults", () => {
-  assert.equal(AI_RELEASE_BINDINGS.promptVersion, "chat-prompt-v3");
+  assert.equal(AI_RELEASE_BINDINGS.promptVersion, "chat-prompt-v4");
   assert.deepEqual(getAiModelLadder({}), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
 });
 
