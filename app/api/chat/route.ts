@@ -31,6 +31,7 @@ import { CHAT_MODEL_ID } from "@/lib/ai/gemini";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
 import {
   buildChatFallbackContent,
+  getFallbackCampusNotice,
   IncompleteChatGenerationError,
   shouldUseChatFallback,
 } from "@/lib/ai/chat-fallback";
@@ -334,6 +335,9 @@ async function buildFinalChatPayload(
 }
 
 async function buildStaticFallbackPayload(message: string): Promise<FinalChatPayload> {
+  const campusNotice = getFallbackCampusNotice(message);
+  if (campusNotice) return { content: campusNotice, cacheRefs: { facilities: [] } };
+
   const { data } = await getFacilitiesForChatCached();
   const facilityRefs = data ? findFallbackFacilityRefs(message, data) : [];
   const facilities = await resolveFacilityMatches(facilityRefs);
