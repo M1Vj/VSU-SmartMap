@@ -1,6 +1,6 @@
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
-import "@maplibre/maplibre-gl-leaflet";
+import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 
 import L from "leaflet";
 import {
@@ -24,7 +24,7 @@ import {
 import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
 import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
-import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
+import { GPUInitializationError, setWorkerUrl, type Map as MapLibreMap } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
   '<a href="https://github.com/M1Vj" target="_blank" rel="noopener noreferrer">Developed by Vj F Mabansag</a>';
@@ -168,24 +168,42 @@ function DeveloperAttribution() {
 function OpenFreeMapVectorLayer({
   styleUrl,
   mapLibreMapRef,
+  onRendererUnavailable,
 }: {
   styleUrl: string;
   mapLibreMapRef: MutableRefObject<MapLibreMap | null>;
+  onRendererUnavailable: () => void;
 }) {
   const map = useMap();
 
   useEffect(() => {
-    const layerOptions = {
-      style: styleUrl as StyleSpecification | string,
+    setWorkerUrl(new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).toString());
+
+    const layerOptions: Parameters<typeof maplibreGL>[0] & { updateInterval: number } = {
+      style: styleUrl,
       pitch: MAP_TILES.pitch,
       bearing: MAP_TILES.bearing,
       // Keep the visual mirror close to the browser frame rate while Leaflet
       // remains the sole owner of map gestures.
       updateInterval: 16,
-    } as Parameters<typeof L.maplibreGL>[0] & { updateInterval: number };
-    const layer = L.maplibreGL(layerOptions);
+    };
+    const layer = maplibreGL(layerOptions);
 
-    layer.addTo(map);
+    try {
+      layer.addTo(map);
+    } catch (error) {
+      if (!(error instanceof GPUInitializationError)) throw error;
+      // Adapter 0.1.4 can attach its container before the renderer exists.
+      // Its normal onRemove assumes a renderer; detach only the container
+      // here so Leaflet can finish removing the layer and its event handlers.
+      layer.onRemove = () => {
+        layer.getContainer()?.remove();
+        return layer;
+      };
+      layer.remove();
+      onRendererUnavailable();
+      return;
+    }
     const mapLibreMap = layer.getMaplibreMap();
     mapLibreMapRef.current = mapLibreMap;
     const customizeVectorLayer = () => {
@@ -204,7 +222,7 @@ function OpenFreeMapVectorLayer({
       if (mapLibreMapRef.current === mapLibreMap) mapLibreMapRef.current = null;
       layer.remove();
     };
-  }, [map, mapLibreMapRef, styleUrl]);
+  }, [map, mapLibreMapRef, onRendererUnavailable, styleUrl]);
 
   return null;
 }
@@ -311,6 +329,9 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
   const { resolvedTheme } = useTheme();
   const { mapStyle } = useApp();
   const [mounted, setMounted] = useState(false);
+  const [vectorUnavailable, setVectorUnavailable] = useState(false);
+  const useDarkRaster = mounted && resolvedTheme === "dark";
+  const handleVectorUnavailable = useCallback(() => setVectorUnavailable(true), []);
   const [satelliteFallbackActive, setSatelliteFallbackActive] = useState(false);
   const satelliteTileFallbackState = useRef(createTileFallbackState());
   const browserOfflineRef = useRef(
@@ -474,11 +495,22 @@ export function MapWrapper({ children, className }: MapWrapperProps) {
               />
             </>
           )
+        ) : vectorUnavailable ? (
+          <TileLayer
+            key={useDarkRaster ? "street-raster-dark" : "street-raster-light"}
+            url={useDarkRaster ? MAP_TILES.rasterDarkUrl : MAP_TILES.rasterStreetUrl}
+            attribution={useDarkRaster ? MAP_TILES.rasterDarkAttribution : MAP_TILES.rasterStreetAttribution}
+            crossOrigin="anonymous"
+            maxZoom={MAP_MAX_ZOOM}
+            maxNativeZoom={useDarkRaster ? 20 : 19}
+            updateWhenIdle={false}
+          />
         ) : (
           <OpenFreeMapVectorLayer
             key={mapStyleUrl}
             styleUrl={mapStyleUrl}
             mapLibreMapRef={mapLibreMapRef}
+            onRendererUnavailable={handleVectorUnavailable}
           />
         )}
         <MapViewportSync mapLibreMapRef={mapLibreMapRef} />

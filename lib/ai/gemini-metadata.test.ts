@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { createGenerationRunMetadata } from "./genkit.ts";
+import { createGenerationRunMetadata } from "./gemini.ts";
 
 test("generation metadata reports the selected model and bounded attempt count", () => {
   assert.deepEqual(createGenerationRunMetadata("gemini-test", 4), {
@@ -16,11 +16,6 @@ test("generation metadata reports the selected model and bounded attempt count",
 });
 
 test("provider retry logs never include API-key fragments", () => {
-  const source = readFileSync(new URL("./genkit.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./gemini.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /currentKey\.slice|key ending/i);
-});
-
-test("provider setup does not re-register models already bundled by the Google AI plugin", () => {
-  const source = readFileSync(new URL("./genkit.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /googleAI\(\{[\s\S]*?models\s*:/);
 });
