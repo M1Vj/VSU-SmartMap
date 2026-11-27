@@ -133,7 +133,7 @@ test.describe("Directory filter smoke", () => {
       name: "Filter directory categories: No categories",
       exact: true,
     })).toBeVisible();
-    await expect(page.getByText("No facilities match your filters.", { exact: true })).toBeVisible();
+    await expect(page.getByText("No facilities found.", { exact: true })).toBeVisible();
   });
 });
 
