@@ -24,7 +24,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Boarding houses: owner-submitted, admin-verified off-campus listings with multi-room offerings, photos, amenities/safety checklists, reviews, price-anomaly flagging, routed walk times, and student filters
 - Directory with search/filter and map handoff; campus events calendar
 - Private, offline-first weekly schedule with optional account-owned cross-device sync, conflict warnings, next-class guidance, campus-facility handoff, JSON backup/restore, and ICS export
-- AI chat assistant (Gemini via Genkit) with API-key rotation, model fallback ladder, answer caching, per-IP rate limits, and boarding-house awareness
+- AI chat assistant (Gemini via Google Gen AI SDK) with API-key rotation, model fallback ladder, answer caching, per-IP rate limits, and boarding-house awareness
 - Interactive per-page guides (spotlight tours) for students, owners, and admins
 - User suggestions (add/edit) with admin review and approval
 - Offline-ready PWA with cached tiles/data and an offline landing page
@@ -36,7 +36,7 @@ Project policies: [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 - Tailwind CSS + shadcn/ui, lucide-react
 - Supabase (Postgres + RLS, Auth, Storage)
 - Leaflet + MapLibre GL (vector basemap bridge) behind a pure map-runtime controller: explicit navigation phases, committed-route identity, prepared-graph routing, and pointer/popup interaction gateways
-- Genkit + Google Gemini for chat
+- Google Gen AI SDK + Gemini for chat
 
 ## Requirements
 - Node.js 22+
@@ -154,7 +154,11 @@ through whichever gate minimizes total detour.
 - `npm test` — unit tests (node:test via tsx)
 - `npm run test:map-e2e` — Playwright map smoke suite against a deployed app (`MAP_E2E_BASE_URL`, fails closed when unset)
 - `npm run qa:rls` — adversarial RLS smoke test against loopback Supabase
-- `npm run ai:dev` — start Genkit dev server
+- `npm run eval:chat` — score the saved chat fixtures without calling Gemini
+
+For local chat development, run `npm run dev` and open `/chat` to test the app flow.
+The provider contract tests in `npm test` use synthetic responses and need no Gemini credentials.
+Live answers in the local app still require server-only `GEMINI_API_KEYS`. The standalone Genkit developer UI is no longer used.
 
 ## Project Structure
 - `app/(student)` — student-facing map, schedule, boarding houses, directory, events, chat, info, offline
