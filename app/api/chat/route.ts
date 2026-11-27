@@ -27,7 +27,7 @@ import { getBoardingHousesForChatCached } from "@/lib/supabase/queries/boarding-
 import { getEventsCached } from "@/lib/actions/events";
 import { NextResponse } from "next/server";
 import { CHAT_HISTORY } from "@/lib/constants/chat";
-import { CHAT_MODEL_ID } from "@/lib/ai/genkit";
+import { CHAT_MODEL_ID } from "@/lib/ai/gemini";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
 import { buildChatFallbackContent, shouldUseChatFallback } from "@/lib/ai/chat-fallback";
 

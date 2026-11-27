@@ -1,5 +1,5 @@
-import { genkit } from 'genkit';
-import { googleAI, gemini } from '@genkit-ai/googleai';
+import { setTimeout as delay } from 'node:timers/promises';
+import { GoogleGenAI } from '@google/genai';
 import { apiKeyManager } from './api-key-manager';
 
 export const DEFAULT_CHAT_MODEL_IDS = [
@@ -66,13 +66,6 @@ export function createGenerationRunMetadata(
   };
 }
 
-const createGenkit = (apiKey: string, modelId = CHAT_MODEL_ID) => {
-  return genkit({
-    plugins: [googleAI({ apiKey })],
-    model: gemini(modelId),
-  });
-};
-
 export function shouldTryNextChatModel(error: unknown): boolean {
   const err = error as { status?: number; message?: string; response?: { status?: number } };
   const status = err?.status ?? err?.response?.status;
@@ -97,18 +90,21 @@ export function shouldTryNextChatModel(error: unknown): boolean {
 }
 
 export async function runWithKeyRotation<T>(
-  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>,
-  onSuccess?: (metadata: GenerationRunMetadata) => void,
+  operation: (sdk: GoogleGenAI, modelId: string) => Promise<T>,
+  options: { signal?: AbortSignal; onSuccess?: (metadata: GenerationRunMetadata) => void } = {},
 ): Promise<T> {
   let lastError: unknown;
   const attemptBudget = { remaining: CHAT_ATTEMPT_BUDGET };
 
   for (const modelId of CHAT_MODEL_IDS) {
+    options.signal?.throwIfAborted();
     try {
-      const result = await runWithKeyRotationForModel(operation, modelId, 'Genkit operation', attemptBudget);
-      onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
+      const result = await runWithKeyRotationForModel(operation, modelId, attemptBudget, options.signal);
+      options.signal?.throwIfAborted();
+      options.onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
       return result;
     } catch (error: unknown) {
+      options.signal?.throwIfAborted();
       lastError = error;
 
       if (
@@ -119,7 +115,7 @@ export async function runWithKeyRotation<T>(
         throw error;
       }
 
-      console.warn(`Genkit model ${modelId} failed, retrying with fallback model...`);
+      console.warn(`Gemini model ${modelId} failed, retrying with fallback model...`);
     }
   }
 
@@ -127,34 +123,41 @@ export async function runWithKeyRotation<T>(
 }
 
 async function runWithKeyRotationForModel<T>(
-  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>,
+  operation: (sdk: GoogleGenAI, modelId: string) => Promise<T>,
   modelId: string,
-  label: string,
   attemptBudget: { remaining: number },
+  signal?: AbortSignal,
 ): Promise<T> {
   const maxRetries = 3;
   let attempts = 0;
 
   while (attempts < maxRetries) {
+    signal?.throwIfAborted();
     if (attemptBudget.remaining <= 0) {
-      throw new Error(`Max retries exceeded for ${label}`);
+      throw new Error('Max retries exceeded for Gemini operation');
     }
 
     let currentKey = '';
     try {
       currentKey = apiKeyManager.getNextKey();
-      const ai = createGenkit(currentKey, modelId);
+      const sdk = new GoogleGenAI({
+        apiKey: currentKey,
+        enterprise: false,
+        // Keep all retry accounting and credential rotation in this module.
+        httpOptions: { retryOptions: { attempts: 1 } },
+      });
       attempts++;
       attemptBudget.remaining--;
-      return await operation(ai);
+      return await operation(sdk, modelId);
     } catch (error: unknown) {
+      signal?.throwIfAborted();
       const isRateLimit = isRateLimitError(error);
 
       if (isRateLimit && currentKey) {
-        console.warn(`${label} failed with rate limit for model ${modelId}; retrying with another configured credential...`);
+        console.warn(`Gemini operation failed with rate limit for model ${modelId}; retrying with another configured credential...`);
         apiKeyManager.markKeyFailed(currentKey, getRateLimitFailureKind(error));
         if (attempts < maxRetries && attemptBudget.remaining > 0) {
-          await wait(getBackoffDelayMs(attempts));
+          await delay(getBackoffDelayMs(attempts), undefined, { signal });
         }
         continue;
       }
@@ -163,37 +166,7 @@ async function runWithKeyRotationForModel<T>(
     }
   }
 
-  throw new Error(`Max retries exceeded for ${label} with model ${modelId}`);
-}
-
-export async function streamWithKeyRotation<T>(
-  operation: (ai: ReturnType<typeof createGenkit>) => Promise<T>,
-  onSuccess?: (metadata: GenerationRunMetadata) => void,
-): Promise<T> {
-  let lastError: unknown;
-  const attemptBudget = { remaining: CHAT_ATTEMPT_BUDGET };
-
-  for (const modelId of CHAT_MODEL_IDS) {
-    try {
-      const result = await runWithKeyRotationForModel(operation, modelId, 'Genkit streaming operation', attemptBudget);
-      onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
-      return result;
-    } catch (error: unknown) {
-      lastError = error;
-
-      if (
-        isAttemptBudgetExceeded(error) ||
-        !shouldTryNextChatModel(error) ||
-        modelId === CHAT_MODEL_IDS[CHAT_MODEL_IDS.length - 1]
-      ) {
-        throw error;
-      }
-
-      console.warn(`Genkit streaming model ${modelId} failed, retrying with fallback model...`);
-    }
-  }
-
-  throw lastError;
+  throw new Error(`Max retries exceeded for Gemini operation with model ${modelId}`);
 }
 
 function isRateLimitError(error: unknown): boolean {
@@ -222,8 +195,4 @@ function getBackoffDelayMs(attempt: number): number {
   const base = [250, 500, 1000][Math.min(attempt - 1, 2)];
   const jitter = 0.75 + Math.random() * 0.5;
   return Math.round(base * jitter);
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
