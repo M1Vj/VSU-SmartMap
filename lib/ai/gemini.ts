@@ -1,50 +1,9 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { GoogleGenAI } from '@google/genai';
 import { apiKeyManager } from './api-key-manager';
+import { getChatModelIds } from './model-policy';
 
-export const DEFAULT_CHAT_MODEL_IDS = [
-  'gemini-3.1-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash',
-] as const;
-
-const DEPRECATED_CHAT_MODEL_IDS = new Set([
-  'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite-preview',
-]);
-
-type EnvLike = Partial<Record<'GEMINI_MODEL_ID' | 'GEMINI_MODEL_IDS', string | undefined>>;
-
-function parseModelIds(value: string | undefined): string[] {
-  return [
-    ...new Set(
-      (value ?? '')
-        .split(',')
-        .map((modelId) => modelId.trim())
-        .filter((modelId) => modelId.length > 0 && !DEPRECATED_CHAT_MODEL_IDS.has(modelId)),
-    ),
-  ];
-}
-
-export function getChatModelIds(env?: EnvLike): string[] {
-  const source = env ?? {
-    GEMINI_MODEL_ID: process.env.GEMINI_MODEL_ID,
-    GEMINI_MODEL_IDS: process.env.GEMINI_MODEL_IDS,
-  };
-  const configuredModels = parseModelIds(source.GEMINI_MODEL_IDS);
-  if (configuredModels.length > 0) return configuredModels;
-
-  const configuredPrimary = source.GEMINI_MODEL_ID?.trim();
-  if (configuredPrimary && !DEPRECATED_CHAT_MODEL_IDS.has(configuredPrimary)) {
-    return [
-      configuredPrimary,
-      ...DEFAULT_CHAT_MODEL_IDS.filter((modelId) => modelId !== configuredPrimary),
-    ];
-  }
-
-  return [...DEFAULT_CHAT_MODEL_IDS];
-}
+export { DEFAULT_CHAT_MODEL_IDS, getChatModelIds } from './model-policy';
 
 export const CHAT_MODEL_IDS = getChatModelIds();
 export const CHAT_MODEL_ID = CHAT_MODEL_IDS[0];
