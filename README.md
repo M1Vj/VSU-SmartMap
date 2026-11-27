@@ -170,7 +170,7 @@ Live answers in the local app still require server-only `GEMINI_API_KEYS`. The s
 - `public/sw.js` — custom service worker for offline caching
 
 ## Offline & PWA
-- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts) in versioned, size-bounded caches; tile caches migrate only re-validated entries across versions. API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
+- The service worker caches static assets and OpenFreeMap, CARTO, and Esri map tiles in versioned, size-bounded caches. OpenStreetMap Standard tiles use the browser’s HTTP cache instead of the offline tile cache. API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
 - The `/schedule` shell works offline. Personal course payloads remain in account-scoped IndexedDB and are never copied into service-worker Cache Storage.
 - Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
 - Guest schedules make no schedule network requests. Optional account sync stores courses in private, account-owned Supabase rows for cross-device use; it does not share them with Google or Google Calendar.
