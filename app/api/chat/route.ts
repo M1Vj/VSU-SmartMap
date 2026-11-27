@@ -32,6 +32,7 @@ import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/
 import {
   buildChatFallbackContent,
   getFallbackCampusNotice,
+  getProviderErrorStatus,
   IncompleteChatGenerationError,
   shouldUseChatFallback,
 } from "@/lib/ai/chat-fallback";
@@ -127,6 +128,7 @@ async function finalizeTurn(
 
 function classifyChatError(error: unknown) {
   if (error instanceof IncompleteChatGenerationError) return "provider_incomplete";
+  if (getProviderErrorStatus(error) === 429) return "provider_quota";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("grounding") || message.includes("validation")) return "validation_error";
   if (message.includes("timeout") || message.includes("etimedout")) return "provider_timeout";
@@ -578,7 +580,11 @@ export async function POST(request: Request) {
     console.error("Chat API request failed");
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    if (error instanceof IncompleteChatGenerationError || shouldUseChatFallback(errorMessage)) {
+    if (
+      error instanceof IncompleteChatGenerationError ||
+      getProviderErrorStatus(error) === 429 ||
+      shouldUseChatFallback(errorMessage)
+    ) {
       const fallbackPayload = turnSession
         ? attachTurnCredential(await buildStaticFallbackPayload(fallbackQuery), turnSession)
         : await buildStaticFallbackPayload(fallbackQuery);

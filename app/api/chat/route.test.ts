@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
+import { apiKeyManager } from "@/lib/ai/api-key-manager";
+import { runWithKeyRotation } from "@/lib/ai/gemini";
+import { validateGroundedLocationResponse } from "@/lib/ai/ops/grounding";
 
 let executeCalls = 0;
 let generationError: Error | null = null;
+let generationFailure: (() => Promise<never>) | undefined;
+let generatedContent = "Verified campus answer";
 let finalizations: Array<Record<string, unknown>> = [];
 let cacheWrites: Array<Record<string, unknown>> = [];
 let cacheError: Error | null = null;
@@ -15,12 +20,14 @@ mock.module("@/lib/ai/flows/find-location", {
   namedExports: {
     async executeFindLocation() {
       executeCalls += 1;
+      if (generationFailure) return generationFailure();
       if (generationError) throw generationError;
+      const grounding = validateGroundedLocationResponse({ response: generatedContent, facilities: [] }, { facilities: [], events: [], boardingHouses: [] });
       return {
-        output: { response: "Verified campus answer", facilities: [] },
+        output: grounding.response,
         operations: {
           generation: { selectedModel: "model-a", attemptCount: 1 },
-          grounding: { outcome: "pass", reasonCodes: [], response: { response: "Verified campus answer", facilities: [] } },
+          grounding,
           retrievedRecordIds: [],
         },
       };
@@ -113,10 +120,6 @@ mock.module("@/lib/actions/events", {
   namedExports: { async getEventsCached() { return { data: [] }; } },
 });
 
-mock.module("@/lib/ai/gemini", {
-  namedExports: { CHAT_MODEL_ID: "model-a" },
-});
-
 const routeModule = import("./route.ts");
 
 function request(message = "Where is DMath-LecR3?", streaming = true) {
@@ -130,6 +133,8 @@ test.beforeEach(() => {
   process.env.CHAT_LLM_ENABLED = "true";
   executeCalls = 0;
   generationError = null;
+  generationFailure = undefined;
+  generatedContent = "Verified campus answer";
   finalizations = [];
   cacheWrites = [];
   cacheError = null;
@@ -172,6 +177,34 @@ test("an SSE generation failure goes directly to static fallback without a retry
   assert.equal(cacheWrites.length, 0);
 });
 
+for (const streaming of [false, true]) {
+  test(`a message-less provider 429 returns uncached local help (${streaming ? "SSE" : "JSON"})`, async (t) => {
+    let providerAttempts = 0;
+    t.mock.method(apiKeyManager, "getNextKey", () => "inert-route-fixture");
+    generationFailure = () => runWithKeyRotation(async () => {
+      providerAttempts += 1;
+      throw { status: 429 };
+    });
+    fallbackFacilities = [registrar];
+    const { POST } = await routeModule;
+    const response = await POST(request("Where is the Registrar at VSU Baybay?", streaming));
+    const body = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", streaming ? /text\/event-stream/ : /application\/json/);
+    assert.match(response.headers.get("cache-control") ?? "", streaming ? /no-cache/ : /no-store/);
+    assert.match(body, /I can still help/);
+    assert.match(body, /baybay-registrar/);
+    if (streaming) assert.match(body, /"type":"final".*baybay-registrar/);
+    assert.equal(executeCalls, 1);
+    assert.equal(providerAttempts, 1);
+    assert.equal(cacheWrites.length, 0);
+    assert.equal(finalizations.length, 1);
+    assert.equal(finalizations[0]?.outcome, "static_fallback");
+    assert.equal(finalizations[0]?.errorClass, "provider_quota");
+  });
+}
+
 test("a cache persistence failure after delivery never emits a second final answer", async () => {
   cacheError = new Error("private cache persistence detail");
   const { POST } = await routeModule;
@@ -183,6 +216,28 @@ test("a cache persistence failure after delivery never emits a second final answ
   assert.match(body, /Verified campus answer/);
   assert.doesNotMatch(body, /I’m having trouble|I'm having trouble/);
 });
+
+for (const streaming of [true, false]) {
+  test(`a blank generated reply uses nonblank fallback and does not cache (${streaming ? "SSE" : "JSON"})`, async () => {
+    generatedContent = "    ";
+    const { POST } = await routeModule;
+    const response = await POST(request(undefined, streaming));
+    assert.equal(response.status, 200);
+    let content: string;
+    if (streaming) {
+      const frames = (await response.text()).split("\n")
+        .filter(line => line.startsWith("data: ") && line !== "data: [DONE]")
+        .map(line => JSON.parse(line.slice(6)));
+      content = frames.find(frame => frame.type === "final")?.content ?? "";
+    } else {
+      content = (await response.json()).content;
+    }
+    assert.ok(content.trim());
+    assert.equal(executeCalls, 1);
+    assert.equal(cacheWrites.length, 0);
+    assert.notEqual(finalizations[0]?.outcome, "live");
+  });
+}
 
 const campusFallbackCases = [
   ["Where is the Registrar at VSU Tolosa?", "outside"],

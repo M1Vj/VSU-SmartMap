@@ -96,6 +96,7 @@ export async function getCachedChatAnswer(questionHash: string): Promise<ChatAns
   if (error || !data) return null;
 
   const row = data as ChatAnswerCacheRow;
+  if (!row.content.trim()) return null;
   return {
     questionHash: row.question_hash,
     question: row.question,
@@ -112,6 +113,7 @@ export async function upsertCachedChatAnswer(
   payload: ChatAnswerCachePayload,
   now = new Date()
 ): Promise<void> {
+  if (!payload.content.trim()) return;
   const supabase = getSupabaseServiceRoleClient();
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 

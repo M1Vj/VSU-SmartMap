@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
+import { validateGroundedLocationResponse } from "@/lib/ai/ops/grounding";
 
 let executeCalls = 0;
 let noCards = false;
+let generateBlank = false;
+const ordinaryQuestion = "Where is the University Library?";
+const ordinaryAnswer = "The University Library is at the VSU Main Campus.";
 type Gate = { entered: () => void; release: Promise<void> };
 let pending: Gate | undefined;
 let pendingRead: Gate | undefined;
@@ -22,11 +26,12 @@ const events = ["28", "29"].map((day) => ({
   endTime: "2026-11-" + day + "T02:00:00.000Z", category: "academic",
 }));
 const rows = new Map<string, Record<string, unknown>>();
+const writes: string[] = [];
 
 
 mock.module("@/lib/ai/flows/find-location", {
   namedExports: {
-    async executeFindLocation(_input: unknown, { requestTime }: { requestTime: Date }) {
+    async executeFindLocation({ query }: { query: string }, { requestTime }: { requestTime: Date }) {
       executeCalls += 1;
       const modeledDay = requestTime.getTime() < boundary ? 0 : 1;
       if (pending) {
@@ -35,10 +40,26 @@ mock.module("@/lib/ai/flows/find-location", {
         gate.entered();
         await gate.release;
       }
+      if (generateBlank) {
+        const grounding = validateGroundedLocationResponse(
+          { response: " \t ", facilities: [] },
+          { facilities: [], events: [], boardingHouses: [] },
+        );
+        return {
+          output: grounding.response,
+          operations: {
+            generation: { selectedModel: "model-a", attemptCount: 1 },
+            grounding,
+            retrievedRecordIds: [],
+          },
+        };
+      }
       return {
         output: {
-          response: modeledDay === 0 ? "Ugma, Nobyembre 28." : "Ugma, Nobyembre 29.",
-          events: noCards ? [] : [events[modeledDay]], facilities: []
+          response: query === ordinaryQuestion
+            ? ordinaryAnswer
+            : modeledDay === 0 ? "Ugma, Nobyembre 28." : "Ugma, Nobyembre 29.",
+          events: noCards || query === ordinaryQuestion ? [] : [events[modeledDay]], facilities: []
         },
         operations: {
           generation: { selectedModel: "model-a", attemptCount: 1 },
@@ -73,7 +94,9 @@ mock.module("@/lib/supabase/server-client", {
             } };
           } }; },
           async upsert(row: Record<string, unknown>) {
-            rows.set(String(row.question_hash), row);
+            const hash = String(row.question_hash);
+            writes.push(hash);
+            rows.set(hash, row);
             return { error: null };
           }
         };
@@ -166,6 +189,7 @@ mock.module("@/lib/ai/gemini", {
 });
 
 const routeModule = import("./route.ts");
+const cacheModule = import("@/lib/ai/answer-cache");
 
 function request(message = "Where is DMath-LecR3?", streaming = true) {
   return new Request("https://example.test/api/chat", {
@@ -174,6 +198,107 @@ function request(message = "Where is DMath-LecR3?", streaming = true) {
   });
 }
 
+function seedBlankRow(hash: string, question: string) {
+  const row = {
+    question_hash: hash,
+    question,
+    content: " \t\n ",
+    expires_at: new Date(boundary + 86_400_000).toISOString(),
+  };
+  rows.set(hash, row);
+  return row;
+}
+
+async function askChat(question: string, streaming: boolean) {
+  const { POST } = await routeModule;
+  const response = await POST(request(question, streaming));
+  assert.equal(response.status, 200);
+  if (!streaming) return response.json();
+  const wire = await response.text();
+  const finalFrame = wire.split("\n").find((line) => line.startsWith('data: {"type":"final"'));
+  assert.ok(finalFrame, wire);
+  return JSON.parse(finalFrame.slice(6));
+}
+
+for (const streaming of [false, true]) {
+  test(`a blank ordinary-key row recovers and is reused (streaming=${streaming})`, async t => {
+    process.env.CHAT_LLM_ENABLED = "true";
+    executeCalls = 0;
+    generateBlank = true;
+    t.after(() => { generateBlank = false; });
+    rows.clear();
+    writes.length = 0;
+    t.mock.timers.enable({ apis: ["Date"], now: boundary - 60_000 });
+    const { getChatQuestionHash } = await cacheModule;
+    const question = ordinaryQuestion;
+    const hash = getChatQuestionHash(question);
+    const blank = seedBlankRow(hash, question);
+
+    const fallback = await askChat(question, streaming);
+    assert.ok(fallback.content.trim());
+    assert.equal(executeCalls, 1);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(rows.get(hash), blank);
+
+    generateBlank = false;
+    const generated = await askChat(question, streaming);
+    assert.equal(generated.content, ordinaryAnswer);
+    assert.equal(executeCalls, 2);
+    assert.deepEqual(writes, [hash]);
+    assert.equal(rows.get(hash)?.content, generated.content);
+
+    t.mock.timers.setTime(boundary + 60_000);
+    assert.equal(getChatQuestionHash(question), hash);
+    assert.equal((await askChat(question, streaming)).content, generated.content);
+    assert.equal(executeCalls, 2);
+    assert.deepEqual(writes, [hash]);
+  });
+
+  test(`blank relative-day rows recover on both sides of Manila midnight (streaming=${streaming})`, async t => {
+    process.env.CHAT_LLM_ENABLED = "true";
+    executeCalls = 0;
+    noCards = false;
+    rows.clear();
+    writes.length = 0;
+    t.mock.timers.enable({ apis: ["Date"], now: boundary - 60_000 });
+    const { getChatQuestionHash } = await cacheModule;
+    const question = "Unsay kalihokan ugma sa campus?";
+    const beforeHash = getChatQuestionHash(question);
+    seedBlankRow(beforeHash, question);
+
+    const before = await askChat(question, streaming);
+    assert.equal(before.content, "Ugma, Nobyembre 28.");
+    assert.equal(before.events?.[0]?.startTime, "2026-11-28T01:00:00.000Z");
+    assert.equal(before.events?.[0]?.endTime, "2026-11-28T02:00:00.000Z");
+    assert.equal(executeCalls, 1);
+    assert.deepEqual(writes, [beforeHash]);
+    const priorDayRow = structuredClone(rows.get(beforeHash));
+    t.mock.timers.setTime(boundary - 1);
+    const beforeHit = await askChat(question, streaming);
+    assert.equal(beforeHit.content, before.content);
+    assert.deepEqual(beforeHit.events, before.events);
+    assert.equal(executeCalls, 1);
+    assert.deepEqual(writes, [beforeHash]);
+
+    t.mock.timers.setTime(boundary);
+    const afterHash = getChatQuestionHash(question);
+    assert.notEqual(afterHash, beforeHash);
+    seedBlankRow(afterHash, question);
+    const after = await askChat(question, streaming);
+    assert.equal(after.content, "Ugma, Nobyembre 29.");
+    assert.equal(after.events?.[0]?.startTime, "2026-11-29T01:00:00.000Z");
+    assert.equal(after.events?.[0]?.endTime, "2026-11-29T02:00:00.000Z");
+    assert.equal(executeCalls, 2);
+    assert.deepEqual(writes, [beforeHash, afterHash]);
+    t.mock.timers.setTime(boundary + 60_000);
+    const afterHit = await askChat(question, streaming);
+    assert.equal(afterHit.content, after.content);
+    assert.deepEqual(afterHit.events, after.events);
+    assert.equal(executeCalls, 2);
+    assert.deepEqual(writes, [beforeHash, afterHash]);
+    assert.deepEqual(rows.get(beforeHash), priorDayRow);
+  });
+}
 
 for (const streaming of [false, true]) {
   test(`fresh, warm and cold "ugma" across Manila midnight, streaming=${streaming}`, async t => {

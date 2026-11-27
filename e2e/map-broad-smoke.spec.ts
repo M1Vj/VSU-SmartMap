@@ -83,6 +83,60 @@ test.describe("Broad map interaction smoke", () => {
   });
 });
 
+test.describe("Directory filter smoke", () => {
+  test("Clear filters restores the unfiltered facility count", async ({ page }) => {
+    await page.goto("/directory");
+    const count = page.getByText(/^Showing ([1-9]\d*) of \1 facilities$/);
+    await expect(count).toBeVisible({ timeout: 15_000 });
+    const baseline = await count.innerText();
+
+    const search = page.getByRole("combobox", {
+      name: "Search buildings or facilities",
+      exact: true,
+    });
+    await page.goto("/directory?category=academic");
+    await expect(page.getByRole("region", { name: "Academic", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Filter directory categories: 1 selected", exact: true }),
+    ).toBeVisible();
+    const restrictedCount = page.getByText(/^Showing [1-9]\d* of [1-9]\d* facilities$/);
+    await expect(restrictedCount).toBeVisible();
+    await expect(restrictedCount).not.toHaveText(baseline);
+
+    const noMatch = "zzzxxyy-no-campus-match";
+    await search.fill(noMatch);
+    await expect(page.getByText("No facilities match your filters.", { exact: true })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe(noMatch);
+    await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+
+    const expectReset = async () => {
+      await expect(search).toHaveValue("");
+      await expect(
+        page.getByRole("button", { name: "Filter directory categories: All categories", exact: true }),
+      ).toBeVisible();
+      await expect(count).toHaveText(baseline);
+      await expect.poll(() => {
+        const params = new URL(page.url()).searchParams;
+        return { query: params.has("q"), category: params.has("category") };
+      }).toEqual({ query: false, category: false });
+    };
+    await expectReset();
+    await page.reload();
+    await expectReset();
+
+    await page.getByRole("button", {
+      name: "Filter directory categories: All categories",
+      exact: true,
+    }).click();
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(page.getByRole("button", {
+      name: "Filter directory categories: No categories",
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByText("No facilities found.", { exact: true })).toBeVisible();
+  });
+});
+
 async function compositedPixels(page: Page, rgb: [number, number, number]) {
   // Screenshot the composited map; the GPU drawing buffer may already be clear.
   let capture: Buffer;

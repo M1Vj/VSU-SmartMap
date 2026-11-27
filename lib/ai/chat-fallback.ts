@@ -5,6 +5,11 @@ export class IncompleteChatGenerationError extends Error {
   }
 }
 
+export function getProviderErrorStatus(error: unknown): number | undefined {
+  const providerError = error as { status?: number; response?: { status?: number } } | null;
+  return providerError?.status ?? providerError?.response?.status;
+}
+
 const FALLBACK_ERROR_PATTERNS = [
   "no api keys configured",
   "api key not valid",
