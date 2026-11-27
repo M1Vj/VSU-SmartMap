@@ -193,6 +193,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           const decoder = new TextDecoder();
           let buffer = "";
           let fullContent = "";
+          let receivedFinal = false;
           let resolvedFinalContent = "";
           let facilities: FacilityMatch[] | undefined;
           let events: EventMatch[] | undefined;
@@ -200,7 +201,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
           let followUp: string | null = null;
           let feedbackCredentials: ChatFeedbackCredentials | undefined;
 
-          while (true) {
+          while (!receivedFinal) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -235,10 +236,9 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                   content: fullContent,
                 }));
               } else if (type === "final") {
-                const finalContent =
-                  typeof (payload as { content?: unknown }).content === "string"
-                    ? (payload as { content: string }).content
-                    : fullContent;
+                const finalContent = (payload as { content?: unknown }).content;
+                if (typeof finalContent !== "string" || !finalContent.trim()) continue;
+                receivedFinal = true;
                 resolvedFinalContent = finalContent;
 
                 const maybeFacilities = (payload as {
@@ -279,6 +279,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
                   followUp,
                   ...feedbackCredentials,
                 }));
+                break;
               } else if (
                 type === "error" &&
                 (payload as { error?: unknown }).error
@@ -292,6 +293,11 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
             }
           }
 
+          reader.releaseLock();
+          if (!receivedFinal) {
+            throw new Error("The reply was interrupted. Please try again.");
+          }
+
           setState((prev) => ({
             ...prev,
             isLoading: false,
@@ -299,7 +305,7 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
               message.id === assistantId
                 ? {
                   ...message,
-                  content: resolvedFinalContent || fullContent || message.content,
+                  content: resolvedFinalContent,
                   facilities,
                   events,
                   boardingHouses,
@@ -365,7 +371,10 @@ export function useChat({ streaming = true }: UseChatOptions = {}) {
 
         setState((prev) => ({
           ...prev,
-          messages: applyTruncation([...prev.messages, errorAssistant]),
+          messages: applyTruncation([
+            ...prev.messages.filter((message) => message.id !== assistantId),
+            errorAssistant,
+          ]),
           isLoading: false,
           error: errorMessage,
         }));
