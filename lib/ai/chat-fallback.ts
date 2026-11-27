@@ -1,3 +1,10 @@
+export class IncompleteChatGenerationError extends Error {
+  constructor() {
+    super("AI generation incomplete");
+    this.name = "IncompleteChatGenerationError";
+  }
+}
+
 const FALLBACK_ERROR_PATTERNS = [
   "no api keys configured",
   "api key not valid",

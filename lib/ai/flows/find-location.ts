@@ -1,11 +1,9 @@
-import { flow } from "@genkit-ai/core";
 import {
   runWithKeyRotation,
   type GenerationRunMetadata,
-} from "../genkit";
+} from "../gemini";
+import { generateLocation } from "../location-provider";
 import {
-  LocationQuerySchema,
-  LocationResponseSchema,
   type LocationQuery,
   type LocationResponse,
 } from "../schemas/location";
@@ -29,11 +27,6 @@ import {
   validateGroundedLocationResponse,
   type GroundingContext,
 } from "../ops/grounding";
-
-const CHAT_GENERATION_CONFIG = {
-  temperature: 0.3,
-  maxOutputTokens: 1024,
-};
 
 function formatKnowledgeContext(entries: AiKnowledgeChatContext[]) {
   let remainingBudget = 5200;
@@ -242,23 +235,20 @@ export async function executeFindLocation(
   output: LocationResponse;
   operations: FindLocationOperations;
 }> {
+  options.abortSignal?.throwIfAborted();
   const { prompt, groundingContext } = await buildChatPrompt(
     input,
     options.retrievalMode ?? "default",
   );
+  options.abortSignal?.throwIfAborted();
   let generation: GenerationRunMetadata | undefined;
-  const rawOutput = await runWithKeyRotation(async (ai) => {
-    const result = await ai.generate({
-      prompt,
-      output: { schema: LocationResponseSchema },
-      config: CHAT_GENERATION_CONFIG,
-      abortSignal: options.abortSignal,
-    });
-    if (!result.output) throw new Error("AI failed to generate a response");
-    return result.output;
-  }, (metadata) => {
-    generation = metadata;
-  });
+  const rawOutput = await runWithKeyRotation(
+    (sdk, modelId) => generateLocation(sdk, modelId, prompt, options.abortSignal),
+    {
+      signal: options.abortSignal,
+      onSuccess: (metadata) => { generation = metadata; },
+    },
+  );
   const grounding = sanitizeGeneratedLocationResponse(rawOutput, groundingContext);
   return {
     output: grounding.response,
@@ -269,14 +259,3 @@ export async function executeFindLocation(
     },
   };
 }
-
-export const findLocationFlow = flow(
-  {
-    name: "findLocation",
-    inputSchema: LocationQuerySchema,
-    outputSchema: LocationResponseSchema,
-  },
-  async (input: LocationQuery) => {
-    return (await executeFindLocation(input)).output;
-  }
-);
