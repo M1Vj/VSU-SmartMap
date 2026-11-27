@@ -66,9 +66,6 @@ function isMapTileRequest(url) {
   if (url.hostname === 'server.arcgisonline.com') {
     return /\/MapServer\/tile\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
   }
-  if (url.hostname === 'tile.openstreetmap.org') {
-    return /^\/\d+\/\d+\/\d+(?:\.[a-z0-9]+)?$/i.test(url.pathname);
-  }
   if (url.hostname === 'tiles.openfreemap.org') {
     return /(?:^|\/)\d+\/\d+\/\d+(?:\.(?:pbf|mvt|png|jpg|webp))?$/i.test(url.pathname);
   }
@@ -399,6 +396,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // OSM Standard tiles use the browser's HTTP cache, not our offline caches.
+  if (url.hostname === 'tile.openstreetmap.org') return;
 
   if (IS_LOCAL_DEVELOPMENT) {
     event.respondWith(fetch(request));
