@@ -143,8 +143,13 @@ async function runWithKeyRotationForModel<T>(
       const sdk = new GoogleGenAI({
         apiKey: currentKey,
         enterprise: false,
-        // Keep all retry accounting and credential rotation in this module.
-        httpOptions: { retryOptions: { attempts: 1 } },
+        apiVersion: 'v1beta',
+        httpOptions: {
+          // Preserve the previous Developer API destination for the rotated key.
+          baseUrl: 'https://generativelanguage.googleapis.com/',
+          // Keep retries and credential rotation in the app.
+          retryOptions: { attempts: 1 },
+        },
       });
       attempts++;
       attemptBudget.remaining--;

@@ -198,6 +198,63 @@ test("actual Gemini adapter sends a structured request; synthetic mode reads no 
   assert.deepEqual(result.operations.retrievedRecordIds, []);
 });
 
+test("the adapter preserves the legacy Gemini endpoint and version despite SDK environment overrides", async t => {
+  const overrides = {
+    GOOGLE_GEMINI_BASE_URL: "https://fixture.invalid/",
+    GOOGLE_GENAI_API_VERSION: "v1",
+  };
+  for (const [name, value] of Object.entries(overrides)) {
+    const original = process.env[name];
+    t.after(() => {
+      if (original === undefined) delete process.env[name];
+      else process.env[name] = original;
+    });
+    process.env[name] = value;
+  }
+
+  const expectedOutput = { response: "Synthetic endpoint check", facilities: [] };
+  const { transport, credential } = mockGemini(t, ({ url, init }) => {
+    assert.equal(url.href, `${providerOrigin}/v1beta/models/${CHAT_MODEL_IDS[0]}:generateContent`);
+    assert.equal(new Headers(init.headers).get("x-goog-api-key"), fixtureCredentials[0]);
+    return mockedModelResponse(expectedOutput);
+  });
+
+  const { executeFindLocation } = await flowModule;
+  const result = await executeFindLocation({ query: "Synthetic endpoint check" }, { retrievalMode: "none" });
+
+  assert.deepEqual(result.output, expectedOutput);
+  assert.equal(transport.mock.callCount(), 1);
+  assert.equal(credential.mock.callCount(), 1);
+});
+
+test("a Gemini continuation is not a completed answer or a second wire request", async t => {
+  let wireRequests = 0;
+  const { transport, credential } = mockGemini(t, () => {
+    wireRequests += 1;
+    if (wireRequests > 1) {
+      return mockedModelResponse({ response: "Synthetic resumed answer", facilities: [] });
+    }
+    return Response.json({
+      candidates: [{
+        content: { role: "model", parts: [{ text: JSON.stringify({ response: "Synthetic partial reply", facilities: [] }) }] },
+        continuationToken: "c3ludGhldGlj",
+        finishReason: "CONTINUATION",
+      }],
+    });
+  });
+
+  const { executeFindLocation } = await flowModule;
+  const result = await Promise.allSettled([
+    executeFindLocation({ query: "Synthetic continuation check" }, { retrievalMode: "none" }),
+  ]);
+
+  assert.equal(transport.mock.callCount(), 1);
+  assert.equal(credential.mock.callCount(), 1);
+  const [generation] = result;
+  if (generation.status !== "rejected") assert.fail("The incomplete reply was accepted");
+  assert.match(String(generation.reason), /AI generation incomplete/);
+});
+
 test("the actual provider adapter rejects bad JSON and schema-invalid payloads without a retry", async t => {
   const replies = [
     Response.json({ candidates: [{ content: { parts: [{ text: "not JSON" }] } }] }),

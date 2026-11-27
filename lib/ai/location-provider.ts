@@ -37,17 +37,23 @@ export async function generateLocation(
       maxOutputTokens: 1024,
       responseMimeType: 'application/json',
       responseJsonSchema: geminiResponseSchema,
+      // A continuation would make another wire request outside the app's budget.
+      automaticContinuation: false,
       abortSignal: signal,
     },
   });
   signal?.throwIfAborted();
   const promptBlock = response.promptFeedback?.blockReason;
-  const finishReason = response.candidates?.[0]?.finishReason;
+  const candidate = response.candidates?.[0];
+  const finishReason = candidate?.finishReason;
   if (
     (promptBlock && promptBlock !== BlockedReason.BLOCKED_REASON_UNSPECIFIED) ||
     (finishReason && blockedFinishReasons.has(finishReason))
   ) {
     throw new Error('Generation blocked.');
+  }
+  if (finishReason === FinishReason.CONTINUATION || (!finishReason && candidate?.continuationToken)) {
+    throw new Error('AI generation incomplete');
   }
   const text = response.text;
   if (!text?.trim()) throw new Error('AI failed to generate a response');
