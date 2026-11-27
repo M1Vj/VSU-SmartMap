@@ -240,6 +240,7 @@ export async function executeFindLocation(
     input,
     options.retrievalMode ?? "default",
   );
+  options.abortSignal?.throwIfAborted();
   let generation: GenerationRunMetadata | undefined;
   const rawOutput = await runWithKeyRotation(
     (sdk, modelId) => generateLocation(sdk, modelId, prompt, options.abortSignal),

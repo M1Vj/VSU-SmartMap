@@ -7,11 +7,12 @@ import { CHAT_MODEL_IDS } from "../gemini.ts";
 import { LocationResponseSchema } from "../schemas/location.ts";
 
 let facilityReads = 0;
+let onFacilityRead: (() => void) | undefined;
 let eventReads = 0;
 let knowledgeReads = 0;
 let boardingReads = 0;
 mock.module("@/lib/supabase/queries/facilities.server", {
-  namedExports: { getFacilitiesForChatCached: async () => { facilityReads += 1; return { data: [] }; } },
+  namedExports: { getFacilitiesForChatCached: async () => { facilityReads += 1; onFacilityRead?.(); return { data: [] }; } },
 });
 mock.module("@/lib/supabase/queries/ai-knowledge.server", {
   namedExports: { getAiKnowledgeForChatCached: async () => { knowledgeReads += 1; return { data: [] }; } },
@@ -141,7 +142,7 @@ function mockGemini(
   respond: (request: { url: URL; init: RequestInit }) => Response | Promise<Response>,
 ) {
   let keyIndex = 0;
-  t.mock.method(apiKeyManager, "getNextKey", () => fixtureCredentials[keyIndex++ % fixtureCredentials.length]);
+  const credential = t.mock.method(apiKeyManager, "getNextKey", () => fixtureCredentials[keyIndex++ % fixtureCredentials.length]);
   const cooldown = t.mock.method(apiKeyManager, "markKeyFailed", () => undefined);
   const transport = t.mock.method(globalThis, "fetch", async (input: string | URL, init: RequestInit) => {
     const url = new URL(input);
@@ -149,7 +150,7 @@ function mockGemini(
     assert.match(url.pathname, /\/models\/[^/]+:generateContent$/);
     return respond({ url, init });
   });
-  return { transport, cooldown };
+  return { transport, cooldown, credential };
 }
 
 function mockedModelResponse(value: unknown): Response {
@@ -255,6 +256,49 @@ test("the app rotates credentials for a 429, falls back on unavailable model, an
   assert.equal(cooldown.mock.callCount(), 1);
   assert.deepEqual(result.operations.generation, { selectedModel: CHAT_MODEL_IDS[1], attemptCount: 3 });
   assert.deepEqual(result.output, expectedOutput);
+});
+
+function retrievalReadCounts() {
+  return { facilityReads, eventReads, knowledgeReads, boardingReads };
+}
+
+test("a pre-cancelled request skips default retrieval, credentials, and transport", async t => {
+  const { transport, credential } = mockGemini(t, () => {
+    assert.fail("pre-cancelled request reached provider transport");
+  });
+  const previousReads = retrievalReadCounts();
+  const reason = new DOMException("Cancelled before retrieval", "AbortError");
+  const { executeFindLocation } = await flowModule;
+
+  await assert.rejects(
+    executeFindLocation({ query: "Synthetic campus query" }, { abortSignal: AbortSignal.abort(reason) }),
+    (error) => error === reason,
+  );
+  assert.deepEqual(retrievalReadCounts(), previousReads);
+  assert.equal(credential.mock.callCount(), 0);
+  assert.equal(transport.mock.callCount(), 0);
+});
+
+test("cancellation during default retrieval stops before credentials or transport", async t => {
+  const { transport, credential } = mockGemini(t, () => {
+    assert.fail("cancelled retrieval reached provider transport");
+  });
+  const { executeFindLocation } = await flowModule;
+  const controller = new AbortController();
+  const reason = new DOMException("Cancelled during retrieval", "AbortError");
+  const previousFacilityReads = facilityReads;
+  onFacilityRead = () => controller.abort(reason);
+  try {
+    await assert.rejects(
+      executeFindLocation({ query: "Synthetic campus query" }, { abortSignal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(facilityReads, previousFacilityReads + 1);
+    assert.equal(credential.mock.callCount(), 0);
+    assert.equal(transport.mock.callCount(), 0);
+  } finally {
+    onFacilityRead = undefined;
+  }
 });
 
 test("a cancelled generation stops transport and never starts another credential or model", { timeout: 2000 }, async t => {
