@@ -24,8 +24,7 @@ mock.module("@/lib/actions/events", {
   namedExports: { getEventsCached: async (range: {startDate: Date; endDate: Date}) => { eventReads += 1; onEventRead?.(range); return { data: [] }; } },
 });
 
-// Exercise the six-call budget against four legitimate IDs using mock fetches only.
-// These are test overrides, not the lower-cost runtime defaults.
+// These are test overrides for the model-fallback cases, using mock fetch only.
 const CHAT_MODEL_IDS = [
   "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash",
 ];
@@ -336,34 +335,54 @@ test("the SDK adapter discards blocked content even when its JSON would pass val
   assert.equal(transport.mock.callCount(), 1);
 });
 
-test("the app rotates credentials for a 429, falls back on unavailable model, and counts wire attempts", async t => {
-  assert.ok(CHAT_MODEL_IDS.length >= 2, "this test expects the ordinary multi-model configuration");
-  const seenModels: string[] = [];
-  const seenCredentials: (string | null)[] = [];
-  const expectedOutput = { response: "Synthetic model fallback", facilities: [] };
-  const { transport, cooldown } = mockGemini(t, ({ url, init }) => {
-    seenModels.push(url.pathname.split("/").at(-1)?.split(":")[0] ?? "");
-    seenCredentials.push(new Headers(init.headers).get("x-goog-api-key"));
-    if (seenModels.length === 1) {
-      return Response.json({ error: { code: 429, message: "Synthetic quota", status: "RESOURCE_EXHAUSTED" } }, { status: 429 });
-    }
-    if (seenModels.length === 2) {
-      return Response.json({ error: { code: 404, message: "Synthetic model missing", status: "NOT_FOUND" } }, { status: 404 });
-    }
-    return mockedModelResponse(expectedOutput);
+for (const status of [404, 503]) {
+  test(`a model ${status} allows one wire request on the fallback model`, async t => {
+    const seenModels: string[] = [];
+    const seenCredentials: (string | null)[] = [];
+    const expectedOutput = { response: "Synthetic model fallback", facilities: [] };
+    const { transport, cooldown } = mockGemini(t, ({ url, init }) => {
+      seenModels.push(url.pathname.split("/").at(-1)?.split(":")[0] ?? "");
+      seenCredentials.push(new Headers(init.headers).get("x-goog-api-key"));
+      if (seenModels.length === 1) {
+        return Response.json({ error: { code: status, message: "Synthetic model unavailable" } }, { status });
+      }
+      return mockedModelResponse(expectedOutput);
+    });
+
+    const { executeFindLocation } = await flowModule;
+    const result = await executeFindLocation({ query: "Synthetic fallback check" }, { retrievalMode: "none" });
+
+    assert.equal(transport.mock.callCount(), 2);
+    assert.deepEqual(seenModels, CHAT_MODEL_IDS.slice(0, 2));
+    assert.deepEqual(seenCredentials, fixtureCredentials.slice(0, 2));
+    assert.equal(cooldown.mock.callCount(), 0);
+    assert.deepEqual(result.operations.generation, { selectedModel: CHAT_MODEL_IDS[1], attemptCount: 2 });
+    assert.deepEqual(result.output, expectedOutput);
   });
+}
 
-  const { executeFindLocation } = await flowModule;
-  const result = await executeFindLocation({ query: "Synthetic fallback check" }, { retrievalMode: "none" });
-
-  assert.equal(transport.mock.callCount(), 3);
-  assert.deepEqual(seenModels, [CHAT_MODEL_IDS[0], CHAT_MODEL_IDS[0], CHAT_MODEL_IDS[1]]);
-  assert.deepEqual(seenCredentials, [fixtureCredentials[0], fixtureCredentials[1], fixtureCredentials[0]]);
-  assert.deepEqual(cooldown.mock.calls[0]?.arguments, [fixtureCredentials[0], "rpm"]);
-  assert.equal(cooldown.mock.callCount(), 1);
-  assert.deepEqual(result.operations.generation, { selectedModel: CHAT_MODEL_IDS[1], attemptCount: 3 });
-  assert.deepEqual(result.output, expectedOutput);
-});
+for (const { label, status, error } of [
+  { label: "bare quota", status: 429, error: {} },
+  {
+    label: "shared project quota", status: 429,
+    error: {
+      message: "Project quota exceeded",
+      status: "RESOURCE_EXHAUSTED",
+      details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ subject: "project", description: "Shared project limit" }] }],
+    },
+  },
+  { label: "authentication", status: 401, error: { message: "Unauthenticated" } },
+  { label: "structured model permission", status: 403, error: { message: "Account lacks permission for this model" } },
+]) {
+  test(`a ${label} error makes exactly one wire request`, async t => {
+    const { transport, credential, cooldown } = mockGemini(t, () => Response.json({ error }, { status }));
+    const { executeFindLocation } = await flowModule;
+    await assert.rejects(executeFindLocation({ query: "Synthetic terminal failure" }, { retrievalMode: "none" }), { status });
+    assert.equal(transport.mock.callCount(), 1);
+    assert.equal(credential.mock.callCount(), 1);
+    assert.equal(cooldown.mock.callCount(), 0);
+  });
+}
 
 function retrievalReadCounts() {
   return { facilityReads, eventReads, knowledgeReads, boardingReads };
@@ -438,23 +457,6 @@ test("a cancelled generation stops transport and never starts another credential
     { retrievalMode: "none", abortSignal: controller.signal },
   ), (error) => error === cancellation);
   assert.equal(transport.mock.callCount(), 1);
-});
-
-test("the app stops after the shared six-wire-attempt budget across models", async t => {
-  const seen: string[] = [];
-  const { transport } = mockGemini(t, ({ url }) => {
-    seen.push(url.pathname.split("/").at(-1)?.split(":")[0] ?? "");
-    const status = seen.length % 2 === 1 ? 429 : 404;
-    return Response.json({ error: { code: status, message: "Synthetic retry test" } }, { status });
-  });
-
-  const { executeFindLocation } = await flowModule;
-  await assert.rejects(
-    executeFindLocation({ query: "Synthetic budget check" }, { retrievalMode: "none" }),
-    /Max retries exceeded/,
-  );
-  assert.equal(transport.mock.callCount(), 6);
-  assert.deepEqual(seen, CHAT_MODEL_IDS.slice(0, 3).flatMap((model) => [model, model]));
 });
 
 test("trusted request time sets the campus date independently of untrusted text and process timezone", async (t) => {
