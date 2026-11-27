@@ -267,7 +267,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         params.delete("q");
       }
 
-      if (selectedCategories.length > 0) {
+      const hasDefaultDirectoryCategories = pathname === "/directory" &&
+        selectedCategories.length === VALID_CATEGORIES.length &&
+        VALID_CATEGORIES.every((category) => selectedCategories.includes(category));
+      if (selectedCategories.length > 0 && !hasDefaultDirectoryCategories) {
         params.set("category", selectedCategories.join(","));
       } else {
         params.delete("category");
