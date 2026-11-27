@@ -20,3 +20,9 @@ test("the prompt keeps exact room lookup, current-status limits and output bound
   assert.match(CAMPUS_ASSISTANT_PROMPT, /exact facilityId and name, maximum six/);
   assert.match(CAMPUS_ASSISTANT_PROMPT, /off-campus rentals, use only matching boarding-house listings/);
 });
+
+test("coursework and personal records have distinct official portal referrals", () => {
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /personal class schedules or grades[^\n]*https:\/\/my\.vsu\.edu\.ph\//);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /quizzes, or virtual classrooms[^.]*https:\/\/elearning\.vsu\.edu\.ph\//);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /without guessing private course links or access/);
+});

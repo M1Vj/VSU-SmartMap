@@ -17,9 +17,11 @@ test("chat ops CSV export authenticates before its bounded sanitized query", asy
 
 test("authorized CSV export filters persisted current and historic model IDs exactly", async () => {
   const modelFilters: string[] = [];
+  let queryCount = 0;
   const fixtureModels = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"];
   const client = {
     from(table: string) {
+      queryCount += 1;
       let selection: string | undefined;
       const builder = {
         select() { return builder; },
@@ -64,6 +66,23 @@ test("authorized CSV export filters persisted current and historic model IDs exa
       assert.ok(!csv.includes(`"${other}"`), `unexpected exported row: ${other}`);
     }
   }
-  await GET(request("models/gemini-3.5-flash-lite"));
+  const beforeInvalid = queryCount;
+  for (const suffix of [
+    "?model=models%2Fgemini-3.5-flash-lite",
+    "?model=%20",
+    "?model=gemini-3.8-flash&model=",
+    "?model=gemini-3.8-flash&model=gemini-2.5-flash",
+  ]) {
+    const response = await GET(new NextRequest(`https://example.test/api/admin/chat-ops/export${suffix}`));
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal(queryCount, beforeInvalid);
+  for (const suffix of ["", "?model="]) {
+    const response = await GET(new NextRequest(`https://example.test/api/admin/chat-ops/export${suffix}`));
+    assert.equal(response.status, 200);
+    const csv = await response.text();
+    for (const model of fixtureModels) assert.ok(csv.includes(`"${model}"`));
+  }
   assert.deepEqual(modelFilters, fixtureModels);
 });

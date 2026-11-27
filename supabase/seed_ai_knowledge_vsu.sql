@@ -137,7 +137,7 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU portals: my.VSU and e-learning',
-  'The VSU site links my.VSU at https://my.vsu.edu.ph/ for a student’s grades, subjects, and personal schedule. Verify a room assignment in that portal or with the instructor. Do not share login credentials, identifying details, grades, or a private schedule in the map chat. Source reviewed 2026-11-27.',
+  'The VSU site links my.VSU at https://my.vsu.edu.ph/ for a student’s grades, subjects, and personal schedule. Verify a room assignment in that portal or with the instructor. For instructor-posted course materials, quizzes, or virtual classrooms, use the VSU E-Learning Environment at https://elearning.vsu.edu.ph/. Do not share login credentials, identifying details, grades, or a private schedule in the map chat. Source reviewed 2026-11-27.',
   ARRAY['my.vsu','student portal','grades','subjects','schedule','e-learning','room assignment']::text[],
   'https://www.vsu.edu.ph/',
   83
