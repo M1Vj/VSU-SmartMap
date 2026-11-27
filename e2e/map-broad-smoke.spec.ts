@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, errors, type Page } from "@playwright/test";
 
 const baseUrl = process.env.MAP_E2E_BASE_URL;
 const mobileViewport = { width: 390, height: 844 };
@@ -81,4 +81,160 @@ test.describe("Broad map interaction smoke", () => {
     const tipY = tipBox.y + tipBox.height / 2;
     expect(Math.hypot(markerX - tipX, markerY - tipY)).toBeLessThan(120);
   });
+});
+
+async function compositedPixels(page: Page, rgb: [number, number, number]) {
+  // Screenshot the composited map; the GPU drawing buffer may already be clear.
+  let capture: Buffer;
+  try {
+    capture = await page.locator(".leaflet-container").screenshot({ scale: "css", timeout: 2_000 });
+  } catch (error) {
+    // A transient compositor timeout should consume a poll, not the test budget.
+    if (error instanceof errors.TimeoutError) return 0;
+    throw error;
+  }
+  return page.evaluate(async ({ png, rgb: [red, green, blue] }) => {
+    const bytes = Uint8Array.from(atob(png), (character) => character.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not decode the screenshot into a 2D canvas");
+      ctx.drawImage(bitmap, 0, 0);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let matches = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (
+          Math.abs(pixels[offset] - red) <= 10 &&
+          Math.abs(pixels[offset + 1] - green) <= 10 &&
+          Math.abs(pixels[offset + 2] - blue) <= 10
+        ) matches++;
+      }
+      return matches;
+    } finally {
+      bitmap.close();
+    }
+  }, { png: capture.toString("base64"), rgb });
+}
+
+test.describe("MapLibre vector rendering smoke", () => {
+  test.use({ serviceWorkers: "block", viewport: mobileViewport });
+
+  test("draws a worker-processed feature from the Vector basemap style", async ({ page, context }) => {
+    if (!baseUrl) throw new Error("MAP_E2E_BASE_URL must point to a running map build");
+    const appOrigin = new URL(baseUrl).origin;
+
+    const fixtureStyle = {
+      version: 8,
+      sources: {
+        "smoke-campus": {
+          type: "geojson",
+          data: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "Polygon",
+              // A closed rectangle large enough to cover the starting campus viewport.
+              coordinates: [[
+                [124.780, 10.735], [124.805, 10.735], [124.805, 10.755],
+                [124.780, 10.755], [124.780, 10.735],
+              ]],
+            },
+          },
+        },
+      },
+      layers: [{
+        id: "smoke-campus-fill",
+        type: "fill",
+        source: "smoke-campus",
+        paint: { "fill-color": "#fd00f9" },
+      }],
+    };
+
+    // A fresh visitor starts on Satellite. Seed only the app's saved map preference.
+    await context.addInitScript((origin) => {
+      if (window.location.origin === origin) localStorage.setItem("vsu-map-style", "vector");
+    }, appOrigin);
+    await context.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === appOrigin) return route.continue(); // Real app chunks and worker.
+      if (
+        url.origin === "https://tiles.openfreemap.org" &&
+        ["/styles/liberty", "/styles/dark"].includes(url.pathname)
+      ) {
+        return route.fulfill({
+          json: fixtureStyle,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      // Keep external provider traffic out of this browser test.
+      return route.abort();
+    });
+
+    await openMap(page);
+    await expect.poll(() => compositedPixels(page, [253, 0, 249]), {
+      timeout: 15_000,
+      intervals: [250, 500, 750],
+      message: "MapLibre should paint the fixture polygon in a WebGL2-capable browser",
+    }).toBeGreaterThan(400);
+  });
+});
+
+test.describe("MapLibre raster fallback smoke", () => {
+  test.use({ serviceWorkers: "block", viewport: mobileViewport });
+
+  const cases = [
+    { theme: "light", denyAllWebGL2: true, attribution: "OpenStreetMap",
+      tiles: /^https:\/\/tile\.openstreetmap\.org\/\d+\/\d+\/\d+\.png$/ },
+    { theme: "dark", denyAllWebGL2: false, attribution: "CARTO",
+      tiles: /^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/\d+\/\d+\/\d+(?:@2x)?\.png$/ },
+  ] as const;
+
+  for (const { theme, denyAllWebGL2, attribution, tiles } of cases) {
+    test(`draws the ${theme} raster basemap when renderer initialization fails`, async ({ page, context }) => {
+      if (!baseUrl) throw new Error("MAP_E2E_BASE_URL must point to a running map build");
+      const appOrigin = new URL(baseUrl).origin;
+      await context.addInitScript(({ origin, theme, denyAllWebGL2 }) => {
+        if (window.location.origin !== origin) return;
+        localStorage.setItem("vsu-map-style", "vector");
+        localStorage.setItem("theme", theme);
+        const getContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (
+          this: HTMLCanvasElement,
+          kind: string,
+          ...options: unknown[]
+        ) {
+          // Deny either all WebGL2 or only the renderer's required stencil buffer.
+          const attributes = options[0] as WebGLContextAttributes | undefined;
+          if (kind === "webgl2" && (denyAllWebGL2 || attributes?.stencil)) return null;
+          return Reflect.apply(getContext, this, [kind, ...options]);
+        } as typeof getContext;
+      }, { origin: appOrigin, theme, denyAllWebGL2 });
+
+      const tile = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGMUea3GQApgIkn1qIZRDUNKAwCzMQFF9XckQQAAAABJRU5ErkJggg==", "base64");
+      await context.route("**/*", (route) => {
+        const url = route.request().url();
+        if (new URL(url).origin === appOrigin) return route.continue();
+        if (!tiles.test(url)) return route.abort();
+        return route.fulfill({
+          contentType: "image/png",
+          headers: { "Access-Control-Allow-Origin": "*" },
+          body: tile,
+        });
+      });
+
+      await openMap(page);
+      await expect.poll(() => compositedPixels(page, [20, 235, 38]), {
+        timeout: 15_000,
+        message: "The raster fixture should be visible in the map",
+      }).toBeGreaterThan(400);
+      const map = page.locator(".leaflet-container");
+      await expect(map.locator(".leaflet-gl-layer")).toHaveCount(0);
+      await expect(map.locator(".leaflet-control-attribution")
+        .getByRole("link", { name: attribution, exact: true })).toBeVisible();
+      await expect(map.getByRole("button", { name: "Zoom in", exact: true })).toBeEnabled();
+    });
+  }
 });
