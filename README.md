@@ -121,7 +121,7 @@ BREAK_GLASS_ADMIN_USER_IDS=...         # Comma-separated auth user ids that alwa
 NEXT_PUBLIC_GEOAPIFY_KEY=...           # (optional) walking-route provider — see Routing below
 NEXT_PUBLIC_ORS_KEY=...                # (optional) OpenRouteService key — alternative provider
 GEMINI_API_KEYS=key1,key2,...          # Comma-separated Gemini API keys (rotated per request)
-GEMINI_MODEL_IDS=gemini-3.1-flash-lite,gemini-3.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash  # Ordered fallback ladder (lite-first for free-tier quota)
+GEMINI_MODEL_IDS=gemini-3.5-flash-lite,gemini-3.1-flash-lite  # Ordered stable Flash-Lite fallback ladder
 ```
 
 ### Routing (walking directions + boarding-house walk times)
