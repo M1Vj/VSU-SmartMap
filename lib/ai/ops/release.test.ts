@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getAiModelLadder, getAiReleaseId } from "./release.ts";
+import { AI_RELEASE_BINDINGS, getAiModelLadder, getAiReleaseId } from "./release.ts";
 
 test("getAiModelLadder binds configured model order without sensitive environment data", () => {
   assert.deepEqual(
     getAiModelLadder({
-      GEMINI_MODEL_IDS: "model-b, model-a, model-b",
-      GEMINI_API_KEY: "must-not-be-read",
+      GEMINI_MODEL_IDS: "gemini-3.8-flash, gemini-2.5-flash, gemini-3.5-flash, gemini-3.8-flash",
+      get GEMINI_API_KEY(): string { return assert.fail("A credential field was accessed"); },
     }),
-    ["model-b", "model-a"]
+    ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
   );
+});
+
+test("release metadata records the current prompt version and the resolved economical defaults", () => {
+  assert.equal(AI_RELEASE_BINDINGS.promptVersion, "chat-prompt-v5");
+  assert.deepEqual(getAiModelLadder({}), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
 });
 
 test("getAiReleaseId is stable for identical explicit behavior inputs", () => {
