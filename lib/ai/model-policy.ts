@@ -5,14 +5,23 @@ export const DEFAULT_CHAT_MODEL_IDS = [
   "gemini-3.1-flash-lite",
 ] as const;
 
-const SUPPORTED_CHAT_MODEL_IDS = new Set<string>([
+const CURRENT_CHAT_MODEL_IDS = [
   ...DEFAULT_CHAT_MODEL_IDS,
   // Legacy access is limited to existing projects. Keep it explicit only.
   "gemini-2.5-flash-lite",
   // Higher-cost Flash models require an explicit configuration choice.
   "gemini-3.6-flash",
   "gemini-3.8-flash",
-]);
+] as const;
+const SUPPORTED_CHAT_MODEL_IDS = new Set<string>(CURRENT_CHAT_MODEL_IDS);
+
+// Chat Ops filters stored IDs literally, so retired IDs remain filterable
+// without making them valid generation targets.
+export const CHAT_OPS_MODEL_FILTER_IDS = [
+  ...CURRENT_CHAT_MODEL_IDS,
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+] as const;
 
 type ModelEnvironment = Partial<Record<"GEMINI_MODEL_ID" | "GEMINI_MODEL_IDS", string | undefined>>;
 

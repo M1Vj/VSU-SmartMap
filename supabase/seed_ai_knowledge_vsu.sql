@@ -25,9 +25,9 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU SmartMap location matching rules',
-  'Map cards use exact retrieved facility identifiers and names. A room card is tied to the retrieved parent building only when the room is present in its room list. A similar name or building-code match is not proof of a room location. Use Map & Directions for official visitor information, and use SmartMap records for app pins.',
+  'Map cards use exact retrieved facility identifiers and names. A room card is tied to the retrieved parent building only when the room is present in its room list. A similar name or building-code match is not proof of a room location. Use SmartMap records for app pins and its Map and Directions for navigation. The official About VSU page confirms campus identity, not map pins or routes.',
   ARRAY['location search','facility matching','rooms','building codes','cr','canteen','gym','clinic','admin']::text[],
-  'https://www.vsu.edu.ph/support/map',
+  'https://www.vsu.edu.ph/about',
   96
 ),
 (
@@ -46,9 +46,9 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU SmartMap directions and route limits',
-  'SmartMap can offer route options from a verified map destination through its Directions control. A manual start can be used when available. Chat does not compute a live route, walking time, or accessibility status. The official VSU Map & Directions page is a separate reference for visitors to the Baybay Main Campus.',
+  'SmartMap can offer route options from a verified map destination through its Directions control. A manual start can be used when available. Chat does not compute a live route, walking time, or accessibility status. Use SmartMap Map and Directions to navigate and the official About VSU page to verify the Baybay Main Campus identity.',
   ARRAY['directions','route','pathfinding','gps','manual start pin','navigation','map tab','eta']::text[],
-  'https://www.vsu.edu.ph/support/map',
+  'https://www.vsu.edu.ph/about',
   94
 ),
 (
@@ -74,9 +74,9 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU main campus land area and facilities',
-  'The VSU Main Campus is in Baybay City, Leyte. Historic campus descriptions include land-area and building counts, but are not a current facility or room inventory. Use the retrieved SmartMap record for app locations and the official Map & Directions page for visitor orientation. Source reviewed 2026-11-27.',
+  'The VSU Main Campus is in Baybay City, Leyte. Historic campus descriptions include land-area and building counts, but are not a current facility or room inventory. Use retrieved SmartMap records for app locations and SmartMap Map and Directions for navigation. The official About VSU page confirms Main Campus identity. Source reviewed 2026-11-27.',
   ARRAY['campus facilities','main campus','land area','camotes sea','mt pangasugan','buildings','dormitories','library','infirmary']::text[],
-  'https://www.vsu.edu.ph/support/map',
+  'https://www.vsu.edu.ph/about',
   90
 ),
 (
@@ -111,7 +111,7 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
   'VSU enrollment process for incoming students',
   'VSU posts enrollment instructions through official announcements and admission channels. Check the current academic year, intake, and campus before relying on an appointment process, dates, requirements, or fees. Use the official portal or campus office for personal enrollment. Source reviewed 2026-11-27.',
   ARRAY['enrollment','enroll at vsu','incoming students','appointment','admissions office','requirements','guidance counselor']::text[],
-  'https://www.vsu.edu.ph/13-announcements-main',
+  'https://www.vsu.edu.ph/articles/bulletin',
   86
 ),
 (

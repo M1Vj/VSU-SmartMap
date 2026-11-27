@@ -5,7 +5,8 @@ import { CAMPUS_ASSISTANT_PROMPT } from "./campus-assistant.ts";
 test("the campus prompt bounds its public guidance and gives verified VSU destinations", () => {
   assert.match(CAMPUS_ASSISTANT_PROMPT, /Main Campus in Visca, Baybay City, Leyte/);
   assert.match(CAMPUS_ASSISTANT_PROMPT, /unofficial student-led map/);
-  assert.match(CAMPUS_ASSISTANT_PROMPT, /https:\/\/www\.vsu\.edu\.ph\/support\/map/);
+  assert.match(CAMPUS_ASSISTANT_PROMPT, /https:\/\/www\.vsu\.edu\.ph\/about/);
+  assert.doesNotMatch(CAMPUS_ASSISTANT_PROMPT, /vsu\.edu\.ph\/support\/map|location-and-facilities/);
   assert.match(CAMPUS_ASSISTANT_PROMPT, /different campus.*do not route.*Baybay/i);
   assert.doesNotMatch(CAMPUS_ASSISTANT_PROMPT, /Third Year|parking is usually available/);
 });
