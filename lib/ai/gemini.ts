@@ -1,55 +1,21 @@
-import { setTimeout as delay } from 'node:timers/promises';
 import { GoogleGenAI } from '@google/genai';
 import { apiKeyManager } from './api-key-manager';
+import { getProviderErrorStatus } from './chat-fallback';
+import { getChatModelIds } from './model-policy';
 
-export const DEFAULT_CHAT_MODEL_IDS = [
-  'gemini-3.1-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash',
-] as const;
-
-const DEPRECATED_CHAT_MODEL_IDS = new Set([
-  'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite-preview',
-]);
-
-type EnvLike = Partial<Record<'GEMINI_MODEL_ID' | 'GEMINI_MODEL_IDS', string | undefined>>;
-
-function parseModelIds(value: string | undefined): string[] {
-  return [
-    ...new Set(
-      (value ?? '')
-        .split(',')
-        .map((modelId) => modelId.trim())
-        .filter((modelId) => modelId.length > 0 && !DEPRECATED_CHAT_MODEL_IDS.has(modelId)),
-    ),
-  ];
-}
-
-export function getChatModelIds(env?: EnvLike): string[] {
-  const source = env ?? {
-    GEMINI_MODEL_ID: process.env.GEMINI_MODEL_ID,
-    GEMINI_MODEL_IDS: process.env.GEMINI_MODEL_IDS,
-  };
-  const configuredModels = parseModelIds(source.GEMINI_MODEL_IDS);
-  if (configuredModels.length > 0) return configuredModels;
-
-  const configuredPrimary = source.GEMINI_MODEL_ID?.trim();
-  if (configuredPrimary && !DEPRECATED_CHAT_MODEL_IDS.has(configuredPrimary)) {
-    return [
-      configuredPrimary,
-      ...DEFAULT_CHAT_MODEL_IDS.filter((modelId) => modelId !== configuredPrimary),
-    ];
-  }
-
-  return [...DEFAULT_CHAT_MODEL_IDS];
-}
+export { DEFAULT_CHAT_MODEL_IDS, getChatModelIds } from './model-policy';
 
 export const CHAT_MODEL_IDS = getChatModelIds();
 export const CHAT_MODEL_ID = CHAT_MODEL_IDS[0];
 
 const CHAT_ATTEMPT_BUDGET = 6;
+
+class ChatAttemptBudgetError extends Error {
+  constructor() {
+    super('Max retries exceeded for Gemini operation');
+    this.name = 'ChatAttemptBudgetError';
+  }
+}
 
 export type GenerationRunMetadata = {
   selectedModel: string;
@@ -67,26 +33,9 @@ export function createGenerationRunMetadata(
 }
 
 export function shouldTryNextChatModel(error: unknown): boolean {
-  const err = error as { status?: number; message?: string; response?: { status?: number } };
-  const status = err?.status ?? err?.response?.status;
-  const message = err?.message?.toLowerCase() ?? '';
-
-  if (status === 404 || status === 429 || (status !== undefined && status >= 500)) {
-    return true;
-  }
-
-  return [
-    'model',
-    'quota',
-    'rate limit',
-    'too many requests',
-    'timeout',
-    'etimedout',
-    'network',
-    'econnrefused',
-    'unavailable',
-    'max retries',
-  ].some((pattern) => message.includes(pattern));
+  const status = getProviderErrorStatus(error);
+  // A quota error does not establish capacity on another model or credential.
+  return status === 404 || status === 503;
 }
 
 export async function runWithKeyRotation<T>(
@@ -94,21 +43,33 @@ export async function runWithKeyRotation<T>(
   options: { signal?: AbortSignal; onSuccess?: (metadata: GenerationRunMetadata) => void } = {},
 ): Promise<T> {
   let lastError: unknown;
-  const attemptBudget = { remaining: CHAT_ATTEMPT_BUDGET };
+  let remainingAttempts = CHAT_ATTEMPT_BUDGET;
 
   for (const modelId of CHAT_MODEL_IDS) {
     options.signal?.throwIfAborted();
+    if (remainingAttempts === 0) throw new ChatAttemptBudgetError();
+
+    const sdk = new GoogleGenAI({
+      apiKey: apiKeyManager.getNextKey(),
+      enterprise: false,
+      apiVersion: 'v1beta',
+      httpOptions: {
+        // Preserve the Developer API destination for the selected key.
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        retryOptions: { attempts: 1 },
+      },
+    });
+    remainingAttempts--;
     try {
-      const result = await runWithKeyRotationForModel(operation, modelId, attemptBudget, options.signal);
+      const result = await operation(sdk, modelId);
       options.signal?.throwIfAborted();
-      options.onSuccess?.(createGenerationRunMetadata(modelId, attemptBudget.remaining));
+      options.onSuccess?.(createGenerationRunMetadata(modelId, remainingAttempts));
       return result;
     } catch (error: unknown) {
       options.signal?.throwIfAborted();
       lastError = error;
 
       if (
-        isAttemptBudgetExceeded(error) ||
         !shouldTryNextChatModel(error) ||
         modelId === CHAT_MODEL_IDS[CHAT_MODEL_IDS.length - 1]
       ) {
@@ -120,84 +81,4 @@ export async function runWithKeyRotation<T>(
   }
 
   throw lastError;
-}
-
-async function runWithKeyRotationForModel<T>(
-  operation: (sdk: GoogleGenAI, modelId: string) => Promise<T>,
-  modelId: string,
-  attemptBudget: { remaining: number },
-  signal?: AbortSignal,
-): Promise<T> {
-  const maxRetries = 3;
-  let attempts = 0;
-
-  while (attempts < maxRetries) {
-    signal?.throwIfAborted();
-    if (attemptBudget.remaining <= 0) {
-      throw new Error('Max retries exceeded for Gemini operation');
-    }
-
-    let currentKey = '';
-    try {
-      currentKey = apiKeyManager.getNextKey();
-      const sdk = new GoogleGenAI({
-        apiKey: currentKey,
-        enterprise: false,
-        apiVersion: 'v1beta',
-        httpOptions: {
-          // Preserve the previous Developer API destination for the rotated key.
-          baseUrl: 'https://generativelanguage.googleapis.com/',
-          // Keep retries and credential rotation in the app.
-          retryOptions: { attempts: 1 },
-        },
-      });
-      attempts++;
-      attemptBudget.remaining--;
-      return await operation(sdk, modelId);
-    } catch (error: unknown) {
-      signal?.throwIfAborted();
-      const isRateLimit = isRateLimitError(error);
-
-      if (isRateLimit && currentKey) {
-        console.warn(`Gemini operation failed with rate limit for model ${modelId}; retrying with another configured credential...`);
-        apiKeyManager.markKeyFailed(currentKey, getRateLimitFailureKind(error));
-        if (attempts < maxRetries && attemptBudget.remaining > 0) {
-          await delay(getBackoffDelayMs(attempts), undefined, { signal });
-        }
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error(`Max retries exceeded for Gemini operation with model ${modelId}`);
-}
-
-function isRateLimitError(error: unknown): boolean {
-  const err = error as { status?: number; message?: string; response?: { status?: number } };
-  const message = err?.message?.toLowerCase() ?? '';
-  return (
-    err?.status === 429 ||
-    err?.response?.status === 429 ||
-    message.includes('429') ||
-    message.includes('quota') ||
-    message.includes('rate limit') ||
-    message.includes('too many requests')
-  );
-}
-
-export function getRateLimitFailureKind(error: unknown): 'rpm' | 'rpd' {
-  const message = (error as { message?: string })?.message ?? '';
-  return /perday|per day|daily/i.test(message) ? 'rpd' : 'rpm';
-}
-
-function isAttemptBudgetExceeded(error: unknown): boolean {
-  return (error as { message?: string })?.message?.startsWith('Max retries exceeded') ?? false;
-}
-
-function getBackoffDelayMs(attempt: number): number {
-  const base = [250, 500, 1000][Math.min(attempt - 1, 2)];
-  const jitter = 0.75 + Math.random() * 0.5;
-  return Math.round(base * jitter);
 }

@@ -418,23 +418,26 @@ test("map tile failures stay network errors for the MapWrapper fallback", async 
   assert.deepEqual(fetchedUrls, [baseUrl, referenceUrl]);
 });
 
-test("tile cache upgrades migrate usable v1 entries before retiring v1", async () => {
+test("tile cache upgrades retain allowed providers but defer OSM Standard to the browser", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const workerUrl = new URL("https://smartmap.test/sw.js");
-  const validTileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
-  const poisonedTileUrl = "https://tile.openstreetmap.org/17/67890/12346.png";
+  const validTileUrl = "https://a.basemaps.cartocdn.com/dark_all/17/67890/12345.png";
+  const emptyTileUrl = "https://a.basemaps.cartocdn.com/dark_all/17/67890/12346.png";
+  const oldOsmUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const cachedOsmUrl = "https://tile.openstreetmap.org/17/67890/12346.png";
   const nonTileUrl = "https://tiles.openfreemap.org/styles/liberty";
   const migratedUrls: string[] = [];
   const deletedCaches: Array<{ name: string; migratedUrls: string[] }> = [];
   const v1Entries = new Map<string, Response>([
     [validTileUrl, new Response("valid-v1-tile", { status: 200 })],
-    [poisonedTileUrl, new Response(null, { status: 204 })],
+    [emptyTileUrl, new Response(null, { status: 204 })],
+    [oldOsmUrl, new Response("old-osm-tile", { status: 200 })],
     [nonTileUrl, new Response("style-json", { status: 200 })],
   ]);
   const v2Entries = new Map<string, Response>();
   for (let index = 0; index < 400; index += 1) {
     v2Entries.set(
-      `https://tile.openstreetmap.org/16/0/${index}.png`,
+      `https://a.basemaps.cartocdn.com/dark_all/16/0/${index}.png`,
       new Response(`existing-v2-${index}`, { status: 200 }),
     );
   }
@@ -501,13 +504,25 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
 
   assert.deepEqual(migratedUrls, [validTileUrl]);
   assert.ok(v2Entries.has(validTileUrl));
-  assert.ok(!v2Entries.has(poisonedTileUrl));
+  assert.ok(!v2Entries.has(emptyTileUrl));
+  assert.ok(!v2Entries.has(oldOsmUrl));
   assert.ok(!v2Entries.has(nonTileUrl));
   assert.ok(v2Entries.size <= 400);
   assert.deepEqual(deletedCaches, [
     { name: "vsu-smartmap-v16", migratedUrls: [validTileUrl] },
     { name: "map-tiles-v1", migratedUrls: [validTileUrl] },
   ]);
+
+  v2Entries.set(cachedOsmUrl, new Response("expired-osm-tile", {
+    headers: { Expires: "Sat, 01 Jan 2000 00:00:00 GMT" },
+  }));
+  let interceptedOsm = false;
+  listeners.get("fetch")?.({
+    request: new Request(cachedOsmUrl),
+    respondWith: () => { interceptedOsm = true; },
+    waitUntil: () => undefined,
+  });
+  assert.equal(interceptedOsm, false, "the browser must handle OSM HTTP caching");
 
   let responsePromise: Promise<Response> | undefined;
   listeners.get("fetch")?.({
@@ -526,7 +541,7 @@ test("tile cache upgrades migrate usable v1 entries before retiring v1", async (
 test("tile cache stores verifiable responses, keeps them offline, and rejects opaque entries", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
   const workerUrl = new URL("https://smartmap.test/sw.js");
-  const tileUrl = "https://tile.openstreetmap.org/17/67890/12345.png";
+  const tileUrl = "https://a.basemaps.cartocdn.com/dark_all/17/67890/12345.png";
   const opaqueResponse = {
     status: 0,
     ok: false,

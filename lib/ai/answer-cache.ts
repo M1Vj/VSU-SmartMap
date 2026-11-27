@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server-client";
 import type { EventMatch } from "@/lib/types/chat";
+import { formatManilaCivilDate } from "@/lib/schedule/time";
 import { AI_RELEASE_ID } from "@/lib/ai/ops/release";
 
 export type CachedFacilityRef = {
@@ -64,10 +65,21 @@ export function isChatAnswerCacheEligible(question: string): boolean {
   return !SENSITIVE_CACHE_PATTERNS.some((pattern) => pattern.test(question));
 }
 
-export function getChatQuestionHash(question: string, releaseId = AI_RELEASE_ID): string {
+// Scope recognized relative-day questions to their campus calendar day.
+// Keep the previous key for ordinary questions, including campus directions.
+const RELATIVE_DAY = /\b(?:today|tomorrow|tonight|yesterday|ngayon|bukas|kahapon|karon|ugma|gahapon)\b/iu;
+export function getChatQuestionHash(
+  question: string,
+  releaseId = AI_RELEASE_ID,
+  now = new Date(),
+): string {
+  const normalized = normalizeChatQuestion(question);
+  const dateScope = RELATIVE_DAY.test(normalized)
+    ? `|manila-day:${formatManilaCivilDate(now)}`
+    : "";
   return createHash("sha256")
     .update(
-      `${CHAT_ANSWER_CACHE_BEHAVIOR_VERSION}|${releaseId}|${normalizeChatQuestion(question)}`
+      `${CHAT_ANSWER_CACHE_BEHAVIOR_VERSION}|${releaseId}${dateScope}|${normalized}`
     )
     .digest("hex");
 }
@@ -84,6 +96,7 @@ export async function getCachedChatAnswer(questionHash: string): Promise<ChatAns
   if (error || !data) return null;
 
   const row = data as ChatAnswerCacheRow;
+  if (!row.content.trim()) return null;
   return {
     questionHash: row.question_hash,
     question: row.question,
@@ -100,6 +113,7 @@ export async function upsertCachedChatAnswer(
   payload: ChatAnswerCachePayload,
   now = new Date()
 ): Promise<void> {
+  if (!payload.content.trim()) return;
   const supabase = getSupabaseServiceRoleClient();
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 

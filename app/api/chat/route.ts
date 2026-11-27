@@ -31,6 +31,8 @@ import { CHAT_MODEL_ID } from "@/lib/ai/gemini";
 import type { BoardingHouseMatch, FacilityMatch, EventMatch } from "@/lib/types/chat";
 import {
   buildChatFallbackContent,
+  getFallbackCampusNotice,
+  getProviderErrorStatus,
   IncompleteChatGenerationError,
   shouldUseChatFallback,
 } from "@/lib/ai/chat-fallback";
@@ -126,6 +128,7 @@ async function finalizeTurn(
 
 function classifyChatError(error: unknown) {
   if (error instanceof IncompleteChatGenerationError) return "provider_incomplete";
+  if (getProviderErrorStatus(error) === 429) return "provider_quota";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("grounding") || message.includes("validation")) return "validation_error";
   if (message.includes("timeout") || message.includes("etimedout")) return "provider_timeout";
@@ -232,13 +235,12 @@ async function resolveEventMatches(
     endTime: string;
     locationText?: string;
     category: string;
-  }> | undefined
+  }> | undefined,
+  requestTime: Date,
 ): Promise<EventMatch[]> {
   if (!events?.length) return [];
-  const today = new Date();
-  const nextWeek = new Date(today);
-  nextWeek.setDate(today.getDate() + 7);
-  const { data } = await getEventsCached({ startDate: today, endDate: nextWeek });
+  const nextWeek = new Date(requestTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const { data } = await getEventsCached({ startDate: requestTime, endDate: nextWeek });
   const canonical = new Map((data ?? []).map((event) => [event.id, event]));
 
   return events.flatMap((event) => {
@@ -286,10 +288,10 @@ async function resolveBoardingHouseMatches(
     }));
 }
 
-async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit): Promise<FinalChatPayload> {
+async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit, requestTime: Date): Promise<FinalChatPayload> {
   const facilities = await resolveFacilityMatches(cacheHit.facilities);
   const boardingHouses = await resolveBoardingHouseMatches(cacheHit.boardingHouses);
-  const events = await resolveEventMatches(cacheHit.events);
+  const events = await resolveEventMatches(cacheHit.events, requestTime);
 
   return {
     content: cacheHit.content,
@@ -308,15 +310,16 @@ async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit): Promise<Fi
 async function buildFinalChatPayload(
   message: string,
   context: ChatContext,
+  requestTime: Date,
   abortSignal?: AbortSignal,
 ): Promise<FinalChatPayload> {
   const { output: result, operations } = await executeFindLocation(
     { query: message, context },
-    { abortSignal },
+    { abortSignal, requestTime },
   );
 
   const matches = await resolveFacilityMatches(result.facilities);
-  const eventMatches = await resolveEventMatches(result.events);
+  const eventMatches = await resolveEventMatches(result.events, requestTime);
   const boardingHouseMatches = await resolveBoardingHouseMatches(result.boardingHouses);
 
   return {
@@ -334,6 +337,9 @@ async function buildFinalChatPayload(
 }
 
 async function buildStaticFallbackPayload(message: string): Promise<FinalChatPayload> {
+  const campusNotice = getFallbackCampusNotice(message);
+  if (campusNotice) return { content: campusNotice, cacheRefs: { facilities: [] } };
+
   const { data } = await getFacilitiesForChatCached();
   const facilityRefs = data ? findFallbackFacilityRefs(message, data) : [];
   const facilities = await resolveFacilityMatches(facilityRefs);
@@ -367,6 +373,7 @@ async function cacheSuccessfulFinalPayload(
 }
 
 export async function POST(request: Request) {
+  const requestTime = new Date();
   let fallbackQuery = "";
   let turnSession: ChatTurnSession | undefined;
 
@@ -431,11 +438,11 @@ export async function POST(request: Request) {
       return NextResponse.json(clientPayload(payload), { headers: { "Cache-Control": "no-store" } });
     }
     const contextFreeQuestion = isContextFreeQuestion(context) && isChatAnswerCacheEligible(message);
-    const questionHash = contextFreeQuestion ? getChatQuestionHash(message) : "";
+    const questionHash = contextFreeQuestion ? getChatQuestionHash(message, AI_RELEASE_ID, requestTime) : "";
     const cacheHit = contextFreeQuestion ? await getCachedChatAnswer(questionHash) : null;
 
     if (cacheHit) {
-      const payload = attachTurnCredential(await buildCachedFinalPayload(cacheHit), session);
+      const payload = attachTurnCredential(await buildCachedFinalPayload(cacheHit, requestTime), session);
       session.markFirstToken();
       await finalizeTurn(session, payload, "cached", { cacheState: "hit" });
 
@@ -463,7 +470,7 @@ export async function POST(request: Request) {
       return createSseResponse(async (controller) => {
         let finalSent = false;
         try {
-          const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+          const generatedPayload = await buildFinalChatPayload(message, context, requestTime, request.signal);
           if (generatedPayload.operations?.grounding.outcome === "fail") {
             throw new GroundingValidationError(generatedPayload.operations);
           }
@@ -530,7 +537,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+    const generatedPayload = await buildFinalChatPayload(message, context, requestTime, request.signal);
     if (generatedPayload.operations?.grounding.outcome === "fail") {
       const fallbackPayload = attachTurnCredential({
         ...(await buildStaticFallbackPayload(message)),
@@ -573,7 +580,11 @@ export async function POST(request: Request) {
     console.error("Chat API request failed");
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    if (error instanceof IncompleteChatGenerationError || shouldUseChatFallback(errorMessage)) {
+    if (
+      error instanceof IncompleteChatGenerationError ||
+      getProviderErrorStatus(error) === 429 ||
+      shouldUseChatFallback(errorMessage)
+    ) {
       const fallbackPayload = turnSession
         ? attachTurnCredential(await buildStaticFallbackPayload(fallbackQuery), turnSession)
         : await buildStaticFallbackPayload(fallbackQuery);
