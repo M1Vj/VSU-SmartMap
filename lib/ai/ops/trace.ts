@@ -1,4 +1,4 @@
-import { CHAT_MODEL_ID } from "@/lib/ai/genkit";
+import { CHAT_MODEL_ID } from "@/lib/ai/gemini";
 
 import { AI_RELEASE_BINDINGS, AI_RELEASE_ID } from "./release";
 import { createTurnIdentity, recordChatTurn } from "./server";

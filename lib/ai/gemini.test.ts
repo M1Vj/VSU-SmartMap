@@ -7,7 +7,7 @@ import {
   DEFAULT_CHAT_MODEL_IDS,
   getChatModelIds,
   shouldTryNextChatModel,
-} from "./genkit.ts";
+} from "./gemini.ts";
 
 test("chat defaults to the best Gemini model with stable fallbacks", () => {
   assert.deepEqual(CHAT_MODEL_IDS, [

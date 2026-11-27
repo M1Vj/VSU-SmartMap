@@ -17,6 +17,7 @@ const SAFE_OUTCOMES = new Set<ChatOutcome>([
 ]);
 const SAFE_ERROR_CLASSES = new Set([
   "provider_error",
+  "provider_incomplete",
   "provider_timeout",
   "provider_unavailable",
   "provider_quota",
