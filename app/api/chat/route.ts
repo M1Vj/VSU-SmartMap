@@ -233,13 +233,12 @@ async function resolveEventMatches(
     endTime: string;
     locationText?: string;
     category: string;
-  }> | undefined
+  }> | undefined,
+  requestTime: Date,
 ): Promise<EventMatch[]> {
   if (!events?.length) return [];
-  const today = new Date();
-  const nextWeek = new Date(today);
-  nextWeek.setDate(today.getDate() + 7);
-  const { data } = await getEventsCached({ startDate: today, endDate: nextWeek });
+  const nextWeek = new Date(requestTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const { data } = await getEventsCached({ startDate: requestTime, endDate: nextWeek });
   const canonical = new Map((data ?? []).map((event) => [event.id, event]));
 
   return events.flatMap((event) => {
@@ -287,10 +286,10 @@ async function resolveBoardingHouseMatches(
     }));
 }
 
-async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit): Promise<FinalChatPayload> {
+async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit, requestTime: Date): Promise<FinalChatPayload> {
   const facilities = await resolveFacilityMatches(cacheHit.facilities);
   const boardingHouses = await resolveBoardingHouseMatches(cacheHit.boardingHouses);
-  const events = await resolveEventMatches(cacheHit.events);
+  const events = await resolveEventMatches(cacheHit.events, requestTime);
 
   return {
     content: cacheHit.content,
@@ -309,15 +308,16 @@ async function buildCachedFinalPayload(cacheHit: ChatAnswerCacheHit): Promise<Fi
 async function buildFinalChatPayload(
   message: string,
   context: ChatContext,
+  requestTime: Date,
   abortSignal?: AbortSignal,
 ): Promise<FinalChatPayload> {
   const { output: result, operations } = await executeFindLocation(
     { query: message, context },
-    { abortSignal },
+    { abortSignal, requestTime },
   );
 
   const matches = await resolveFacilityMatches(result.facilities);
-  const eventMatches = await resolveEventMatches(result.events);
+  const eventMatches = await resolveEventMatches(result.events, requestTime);
   const boardingHouseMatches = await resolveBoardingHouseMatches(result.boardingHouses);
 
   return {
@@ -371,6 +371,7 @@ async function cacheSuccessfulFinalPayload(
 }
 
 export async function POST(request: Request) {
+  const requestTime = new Date();
   let fallbackQuery = "";
   let turnSession: ChatTurnSession | undefined;
 
@@ -435,11 +436,11 @@ export async function POST(request: Request) {
       return NextResponse.json(clientPayload(payload), { headers: { "Cache-Control": "no-store" } });
     }
     const contextFreeQuestion = isContextFreeQuestion(context) && isChatAnswerCacheEligible(message);
-    const questionHash = contextFreeQuestion ? getChatQuestionHash(message) : "";
+    const questionHash = contextFreeQuestion ? getChatQuestionHash(message, AI_RELEASE_ID, requestTime) : "";
     const cacheHit = contextFreeQuestion ? await getCachedChatAnswer(questionHash) : null;
 
     if (cacheHit) {
-      const payload = attachTurnCredential(await buildCachedFinalPayload(cacheHit), session);
+      const payload = attachTurnCredential(await buildCachedFinalPayload(cacheHit, requestTime), session);
       session.markFirstToken();
       await finalizeTurn(session, payload, "cached", { cacheState: "hit" });
 
@@ -467,7 +468,7 @@ export async function POST(request: Request) {
       return createSseResponse(async (controller) => {
         let finalSent = false;
         try {
-          const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+          const generatedPayload = await buildFinalChatPayload(message, context, requestTime, request.signal);
           if (generatedPayload.operations?.grounding.outcome === "fail") {
             throw new GroundingValidationError(generatedPayload.operations);
           }
@@ -534,7 +535,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const generatedPayload = await buildFinalChatPayload(message, context, request.signal);
+    const generatedPayload = await buildFinalChatPayload(message, context, requestTime, request.signal);
     if (generatedPayload.operations?.grounding.outcome === "fail") {
       const fallbackPayload = attachTurnCredential({
         ...(await buildStaticFallbackPayload(message)),
