@@ -29,6 +29,18 @@ test("parseChatOpsFilters allowlists filters and defaults to a 24 hour window", 
   });
 });
 
+test("the model filter accepts current and historical persisted IDs, not provider aliases or arbitrary strings", () => {
+  for (const model of [
+    "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite",
+    "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash",
+  ]) {
+    assert.equal(parseChatOpsFilters({ model }).model, model);
+  }
+  for (const model of ["gemini-4-neon", "gemini-3.5-flash-lite-preview", "models/gemini-3.5-flash-lite"]) {
+    assert.equal(parseChatOpsFilters({ model }).model, undefined);
+  }
+});
+
 test("serializeChatOpsCsv neutralizes formulas and excludes restricted fields", () => {
   const csv = serializeChatOpsCsv([{
     id: "turn-1", createdAt: "2026-08-01T01:00:00.000Z", releaseId: "ai_release",

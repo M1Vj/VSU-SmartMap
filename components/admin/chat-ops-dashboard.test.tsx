@@ -53,7 +53,7 @@ test("ChatOpsDashboard renders operational summaries and sanitized recent activi
     }],
     page: { limit: 50, offset: 0, hasMoreTurns: false, hasMoreFeedback: false },
     retention: { turnsDays: 90, feedbackDays: 90, alertClaimsDays: 30, alertWindowMinutes: 15 },
-  }} />);
+  }} filters={{ model: "gemini-3.5-flash-lite", windowHours: 24, since: "2026-07-31T00:00:00.000Z" }} />);
 
   assert.match(html, /Chat outcomes/);
   assert.match(html, /Latency/);
@@ -63,6 +63,12 @@ test("ChatOpsDashboard renders operational summaries and sanitized recent activi
   assert.match(html, /1 user turn.*0 synthetic checks/i);
   assert.match(html, /First delivery p50 \/ p95/);
   assert.match(html, /Feedback/);
+  const modelSelect = html.match(/<select[^>]+name="model"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+  assert.match(modelSelect, /<option value="gemini-3\.5-flash-lite" selected="">/);
+  for (const model of ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"]) {
+    assert.ok(modelSelect.includes(`value="${model}"`), `missing model option: ${model}`);
+  }
+  assert.match(html, /\/api\/admin\/chat-ops\/export\?[^"]*model=gemini-3\.5-flash-lite/);
   assert.doesNotMatch(html, /token hash|raw metadata/i);
 });
 

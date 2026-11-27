@@ -11,7 +11,7 @@ CREATE TEMP TABLE seed_ai_knowledge_entries (
 INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priority) VALUES
 (
   'VSU SmartMap Assistant identity and creator',
-  'VSU SmartMap Campus Assistant is part of the VSU SmartMap Web project. It helps students, visitors, and staff find buildings, offices, rooms, dormitories, food areas, landmarks, events, and other campus facilities. If asked who created the project or assistant, answer that it was created and developed by Vj F. Mabansag, a Third Year BS Computer Science student at Visayas State University. Keep this answer short and non-technical unless the user asks for technical details.',
+  'Campus SmartMap is an unofficial student-led project created by Vj F. Mabansag. It covers the Visayas State University Main Campus in Visca, Baybay City, Leyte. The app helps users find campus locations and selected events and listings; it is not an official university service.',
   ARRAY['smartmap','assistant','creator','vj mabansag','project','campus map','chatbot']::text[],
   'seed:campus-assistant-prompt',
   100
@@ -25,14 +25,14 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU SmartMap location matching rules',
-  'When a user asks for a campus location, match exact or near-exact facility names, common shortened names, building codes, rooms, and categories. Examples: Admin may mean Administration Building; CR may mean comfort room or restroom; canteen, kainan, or food court may refer to dining facilities; clinic may refer to the infirmary or health facility; gym may refer to the gymnasium. If a query is ambiguous, give up to 6 likely options and ask a focused clarification.',
+  'Map cards use exact retrieved facility identifiers and names. A room card is tied to the retrieved parent building only when the room is present in its room list. A similar name or building-code match is not proof of a room location. Use SmartMap records for app pins and its Map and Directions for navigation. The official About VSU page confirms campus identity, not map pins or routes.',
   ARRAY['location search','facility matching','rooms','building codes','cr','canteen','gym','clinic','admin']::text[],
-  'seed:campus-assistant-prompt',
+  'https://www.vsu.edu.ph/about',
   96
 ),
 (
   'VSU SmartMap room code and subject code guidance',
-  'If the user asks for a specific room code such as ICT101, CAS-201, or Lab A, search for the parent building that contains that room and say the room is inside that building. If the user asks for something that looks like a subject or course code, such as CSci 108 or G067, clarify that it may be a subject code and ask the user to check the Room Assignment in their schedule or COR.',
+  'A room code is mapped only if it explicitly appears in the retrieved rooms for a verified building. An unrecognized code does not establish a building. Subject codes identify classes; the official Room Assignment in the schedule or Certificate of Registration identifies the venue. Private schedules belong in the official student portal or with the instructor.',
   ARRAY['room code','subject code','course code','cor','schedule','room assignment','ICT101','CSci']::text[],
   'seed:campus-assistant-prompt',
   95
@@ -46,23 +46,23 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU SmartMap directions and route limits',
-  'The map can show campus locations and route options inside the VSU campus area. The chat assistant should not invent exact turn-by-turn instructions, live GPS movement, or precise ETA from text alone. If the user wants navigation, tell them to open the Map tab, select the destination pin, and use Directions. If live location is unavailable or outside campus, use a manual start pin inside the VSU campus map.',
+  'SmartMap can offer route options from a verified map destination through its Directions control. A manual start can be used when available. Chat does not compute a live route, walking time, or accessibility status. Use SmartMap Map and Directions to navigate and the official About VSU page to verify the Baybay Main Campus identity.',
   ARRAY['directions','route','pathfinding','gps','manual start pin','navigation','map tab','eta']::text[],
-  'seed:campus-assistant-prompt',
+  'https://www.vsu.edu.ph/about',
   94
 ),
 (
   'VSU SmartMap emergency and security guidance',
-  'For urgent security, safety, medical, or emergency concerns, do not rely only on the chatbot. Direct the user to nearby guards, guard house or entrance facilities if available in the map, the VSU Infirmary for health concerns, and official university or local emergency channels. Keep the response short and action-oriented.',
+  'For an urgent safety or medical issue, use on-site security or local emergency services directly. A map listing does not establish current staffing, emergency availability, opening hours, or access. Published VSU campus-access rules can require visitor identification; verify current entry instructions with VSU and do not share identity documents in chat.',
   ARRAY['emergency','security','guard','guard house','infirmary','medical','safety','help']::text[],
-  'seed:campus-assistant-prompt',
+  'https://www.vsu.edu.ph/university-policies-2?start=12',
   93
 ),
 (
   'Visayas State University overview and main contact',
-  'Visayas State University is located in Visca, Baybay City, Leyte, Philippines 6521. VSU describes itself as a leading global university in agriculture and allied fields, with its flagship main campus in Baybay City. Main contact details from the official website: trunkline +63 (53) 565 0600, fax +63 (53) 563 7067, and email uimpa@vsu.edu.ph.',
+  'The main campus of Visayas State University is in Visca, Baybay City, Leyte 6521, Philippines. The university website lists +63 (53) 565 0600 as a general trunkline, not an emergency number. For current office contacts or visitor access, check the official VSU site. Source reviewed 2026-11-27.',
   ARRAY['vsu','visayas state university','contact','address','baybay','leyte','trunkline','uimpa']::text[],
-  'https://www.vsu.edu.ph/about',
+  'https://www.vsu.edu.ph/',
   92
 ),
 (
@@ -74,9 +74,9 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU main campus land area and facilities',
-  'VSU Main Campus covers about 1,099.4 hectares, extending from the shore of Camotes Sea to Mt. Pangasugan. Official VSU information lists 188 main-campus buildings, including student dormitories, staff houses, academic buildings, administration buildings, Main Library, Student Union, Convention Center, Center for Continuing Education, Infirmary, Guesthouse, Hostel, Pavilion, market, cafeteria, gymnatorium, marine laboratory, workshops, research and training centers, and other facilities.',
+  'The VSU Main Campus is in Baybay City, Leyte. Historic campus descriptions include land-area and building counts, but are not a current facility or room inventory. Use retrieved SmartMap records for app locations and SmartMap Map and Directions for navigation. The official About VSU page confirms Main Campus identity. Source reviewed 2026-11-27.',
   ARRAY['campus facilities','main campus','land area','camotes sea','mt pangasugan','buildings','dormitories','library','infirmary']::text[],
-  'https://www.vsu.edu.ph/about/overview',
+  'https://www.vsu.edu.ph/about',
   90
 ),
 (
@@ -88,37 +88,37 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU undergraduate programs at Main Campus',
-  'VSU Main Campus undergraduate offerings include programs under Agriculture and Food Sciences, Humanities and Social Sciences, Natural and Mathematical Sciences, Computing, Teacher Education, Engineering, Forestry and Environmental Sciences, Management and Economics, Nursing, and Veterinary Medicine. Examples include BS Agriculture, BS Development Communication, BS Food Technology, AB English Language Studies, AB Philosophy, BS Biology, BS Computer Science, teacher education programs, engineering programs, BS Forestry, BS Environmental Science, BS Agribusiness, BS Economics, BS Hospitality Management, BS Tourism Management, BS Nursing, and Doctor of Veterinary Medicine.',
+  'VSU publishes admissions and program information by campus and intake. Confirm the academic year, eligibility, and availability with the current official admissions page and admission portal; prior program lists are not a guarantee of current offerings. Source reviewed 2026-11-27.',
   ARRAY['undergraduate programs','main campus','bs agriculture','bs computer science','engineering','nursing','veterinary medicine','education']::text[],
-  'https://www.vsu.edu.ph/admission/college',
+  'https://cat.vsu.edu.ph/',
   88
 ),
 (
   'VSU component campus undergraduate programs',
-  'VSU component campuses offer selected undergraduate programs. Alangalang includes Elementary Education, Agriculture, Environmental Science, Information Technology, and Secondary Education. Isabel includes English Language Studies, Elementary Education, Physical Education, Agribusiness, Civil Engineering, Industrial Engineering, Information Technology, Mechanical Engineering, and Secondary Education. Villaba includes Elementary Education, Physical Education, Agriculture majors, and Secondary Education. Tolosa includes Elementary Education, Physical Education, Criminology, Fisheries, Industrial Security Management, Marine Biology, and Secondary Education.',
+  'Alangalang, Isabel, Tolosa, and Villaba are separate VSU campuses; the Baybay SmartMap does not provide directions to their buildings. Confirm a program by campus and academic year through the official admissions portal. Source reviewed 2026-11-27.',
   ARRAY['component campuses','alangalang','isabel','villaba','tolosa','undergraduate programs']::text[],
-  'https://www.vsu.edu.ph/admission/college',
+  'https://cat.vsu.edu.ph/',
   87
 ),
 (
   'VSU College Admission Test basics',
-  'For VSUCAT, official VSU admission information says the admission rating is computed as 70% VSUCAT score and 30% GPA. Applicants generally need a final admission rating of at least 60% and must be within the approved quota of the chosen degree program. Equity Target Group, athlete, and artist applicants may qualify from 40% to below 60%, subject to ranking, slots, and document verification. Requirements and schedules change, so direct applicants to the official VSU admissions page for current details.',
+  'The official VSU admissions portal publishes current applicant instructions for the VSU College Admission Test. Dates, eligibility, ratings, quotas, and documentary requirements depend on the published admission cycle. Check the campus and intake in the official portal; do not rely on an undated rule or estimate admission. Source reviewed 2026-11-27.',
   ARRAY['vsucat','admission','college admission test','gpa','quota','equity target group','applicants']::text[],
-  'https://www.vsu.edu.ph/admission',
+  'https://cat.vsu.edu.ph/',
   86
 ),
 (
   'VSU enrollment process for incoming students',
-  'VSU introduced a one-stop shop enrollment process for incoming students to reduce long queues and confusion. The official guide includes setting an online appointment before going to the enrollment site, attending a short guidance counselor intake session, bringing one long white folder, and submitting original admission requirements to the Admissions Office. Incomplete submissions may not be accepted, except some conditional cases noted by VSU. Always check the latest official #EnrollAtVSU page for current schedules and document lists.',
+  'VSU posts enrollment instructions through official announcements and admission channels. Check the current academic year, intake, and campus before relying on an appointment process, dates, requirements, or fees. Use the official portal or campus office for personal enrollment. Source reviewed 2026-11-27.',
   ARRAY['enrollment','enroll at vsu','incoming students','appointment','admissions office','requirements','guidance counselor']::text[],
-  'https://www.vsu.edu.ph/admission/college/enrollment-process',
+  'https://www.vsu.edu.ph/articles/bulletin',
   86
 ),
 (
   'VSU Office of the University Registrar contact',
-  'For registrar concerns, official VSU program pages list the Office of the University Registrar at the Administration Building, Visayas State University. The undergraduate programs page lists Mr. Raymund Igcasama as University Registrar, telephone +63 53 563 7428, and email registrar@vsu.edu.ph. Another official contact page lists Office of the Registrar phone numbers +63 53 335 2644 / 563 7428. For records, enrollment, registration, and credentials, tell users to contact the Registrar directly.',
+  'The Office of the University Registrar handles academic records and related credentials. Use the official Registrar guidance and VSU document-request portal at https://docrequest.vsu.edu.ph/ for authorized services. Confirm the correct office/campus through VSU before visiting; do not share grades, student IDs, credentials, payment data, or documents in chat. Source reviewed 2026-11-27.',
   ARRAY['registrar','office of the university registrar','records','registration','credentials','enrollment','raymund igcasama']::text[],
-  'https://www.vsu.edu.ph/admission/college',
+  'https://www.vsu.edu.ph/vsu/987-registrar-concerns',
   85
 ),
 (
@@ -130,14 +130,14 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU Learning Commons Library hours and services',
-  'VSU Learning Commons Library hours from its official site: weekdays 7:00 AM to 6:00 PM with no noon break; Saturdays 8:00 AM to 5:00 PM with noon break from 12:00 PM to 1:00 PM; term breaks and summer terms Monday to Friday 8:00 AM to 5:00 PM with no noon break. The library supports academic and research needs with books, journals, digital resources, multimedia materials, quiet study areas, collaborative spaces, computer labs, and staff assistance.',
+  'The VSU Learning Commons website provides information on library services and posted schedules. Some official materials differ on Saturday hours; do not use an undated schedule to say the library is open now. Check the current term notice or official contact page at https://library.vsu.edu.ph/about-us/contact-us before visiting. Source reviewed 2026-11-27.',
   ARRAY['library','learning commons','library hours','books','journals','study area','computer lab','research']::text[],
-  'https://library.vsu.edu.ph/home.php',
+  'https://library.vsu.edu.ph/',
   84
 ),
 (
   'VSU portals: my.VSU and e-learning',
-  'The official VSU site describes my.VSU as a student portal for grades, subjects, schedules, and more. Some VSU pages also refer to the VSU E-Learning Portal as a resource for course requirements and helpful materials. If a student asks about grades, subjects, schedules, or room assignments, advise them to check my.VSU or official class/instructor announcements.',
+  'The VSU site links my.VSU at https://my.vsu.edu.ph/ for a student’s grades, subjects, and personal schedule. Verify a room assignment in that portal or with the instructor. For instructor-posted course materials, quizzes, or virtual classrooms, use the VSU E-Learning Environment at https://elearning.vsu.edu.ph/. Do not share login credentials, identifying details, grades, or a private schedule in the map chat. Source reviewed 2026-11-27.',
   ARRAY['my.vsu','student portal','grades','subjects','schedule','e-learning','room assignment']::text[],
   'https://www.vsu.edu.ph/',
   83
@@ -158,7 +158,7 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
 ),
 (
   'VSU official website and latest news',
-  'The official VSU website is https://www.vsu.edu.ph. It carries university news, announcements, academic information, admissions, student resources, transparency information, and links to services such as my.VSU. Recent official website content noted VSU entering the 2026 QS World University Rankings and other university news. For time-sensitive updates, direct users to the official website instead of guessing.',
+  'The official VSU website publishes university news, announcements and links to campus services. For current closures, events, dates or deadlines, check the latest dated notice and the specific campus, not an older search result. Source reviewed 2026-11-27.',
   ARRAY['official website','news','announcements','qs world university rankings','vsu.edu.ph','latest']::text[],
   'https://www.vsu.edu.ph/',
   81
@@ -171,12 +171,13 @@ INSERT INTO seed_ai_knowledge_entries (title, content, keywords, source, priorit
   78
 );
 
-DELETE FROM ai_knowledge_entries
-WHERE title IN (SELECT title FROM seed_ai_knowledge_entries);
-
-INSERT INTO ai_knowledge_entries (title, content, keywords, source, priority, is_active)
-SELECT title, content, keywords, source, priority, true
-FROM seed_ai_knowledge_entries
-ORDER BY priority DESC, title ASC;
+-- Seed missing titles only. Existing entries can be edited by an administrator.
+INSERT INTO public.ai_knowledge_entries (title, content, keywords, source, priority, is_active)
+SELECT candidate.title, candidate.content, candidate.keywords, candidate.source, candidate.priority, true
+FROM seed_ai_knowledge_entries AS candidate
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.ai_knowledge_entries AS existing WHERE existing.title = candidate.title
+)
+ORDER BY candidate.priority DESC, candidate.title ASC;
 
 COMMIT;
