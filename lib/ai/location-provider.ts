@@ -34,7 +34,7 @@ export async function generateLocation(
     model,
     contents: prompt,
     config: {
-      temperature: 0.3,
+      // Keep provider-default sampling: newer Gemini generations ignore or reject sampling controls.
       maxOutputTokens: 1024,
       responseMimeType: 'application/json',
       responseJsonSchema: geminiResponseSchema,

@@ -22,9 +22,8 @@ export default function OfflinePage() {
         </h1>
 
         <p className="mt-4 max-w-md text-muted-foreground">
-          It looks like you&apos;ve lost your internet connection.
-          Some features may be unavailable, but you can still view
-          previously cached map areas.
+          You&apos;re not connected to the internet.
+          Some previously viewed map areas may still be available.
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -33,7 +32,7 @@ export default function OfflinePage() {
         </div>
 
         <p className="mt-8 text-sm text-muted-foreground">
-          Tip: Map tiles you&apos;ve viewed before are saved for offline use.
+          SmartMap doesn&apos;t save OpenStreetMap Standard tiles for offline use.
         </p>
       </main>
       <SiteCredit reserveMobileNavigation={false} />

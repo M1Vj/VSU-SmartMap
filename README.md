@@ -121,7 +121,7 @@ BREAK_GLASS_ADMIN_USER_IDS=...         # Comma-separated auth user ids that alwa
 NEXT_PUBLIC_GEOAPIFY_KEY=...           # (optional) walking-route provider — see Routing below
 NEXT_PUBLIC_ORS_KEY=...                # (optional) OpenRouteService key — alternative provider
 GEMINI_API_KEYS=key1,key2,...          # Comma-separated Gemini API keys (rotated per request)
-GEMINI_MODEL_IDS=gemini-3.1-flash-lite,gemini-3.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash  # Ordered fallback ladder (lite-first for free-tier quota)
+GEMINI_MODEL_IDS=gemini-3.5-flash-lite,gemini-3.1-flash-lite  # Ordered stable Flash-Lite fallback ladder
 ```
 
 ### Routing (walking directions + boarding-house walk times)
@@ -170,7 +170,7 @@ Live answers in the local app still require server-only `GEMINI_API_KEYS`. The s
 - `public/sw.js` — custom service worker for offline caching
 
 ## Offline & PWA
-- Service worker caches static assets and map tiles (OpenFreeMap/OSM/CARTO/Esri hosts) in versioned, size-bounded caches; tile caches migrate only re-validated entries across versions. API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
+- The service worker caches static assets and OpenFreeMap, CARTO, and Esri map tiles in versioned, size-bounded caches. OpenStreetMap Standard tiles use the browser’s HTTP cache instead of the offline tile cache. API, same-origin auth, exact `*.supabase.co/auth/v1/` project requests, Supabase REST/RPC, and non-GET requests are always network-only.
 - The `/schedule` shell works offline. Personal course payloads remain in account-scoped IndexedDB and are never copied into service-worker Cache Storage.
 - Schedule facility fields use the same ranked name, code, alias, and room search as the campus map and remain cache-first when connectivity is limited.
 - Guest schedules make no schedule network requests. Optional account sync stores courses in private, account-owned Supabase rows for cross-device use; it does not share them with Google or Google Calendar.

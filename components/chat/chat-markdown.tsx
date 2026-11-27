@@ -3,11 +3,21 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+const studentPortals = [
+  { href: "https://my.vsu.edu.ph/", label: "my.VSU Portal" },
+  { href: "https://elearning.vsu.edu.ph/", label: "VSU E-Learning (VSUEE)" },
+] as const;
+
+type StudentPortal = (typeof studentPortals)[number];
+
 type InlineNode =
   | { type: "text"; text: string }
   | { type: "bold"; children: InlineNode[] }
   | { type: "italic"; children: InlineNode[] }
-  | { type: "link"; href: string; children: InlineNode[] };
+  | { type: "link"; href: string; children: InlineNode[] }
+  | { type: "portal"; portal: StudentPortal };
+
+type InlineToken = { start: number; end: number; node: InlineNode };
 
 type MarkdownBlock =
   | { type: "paragraph"; children: InlineNode[] }
@@ -70,12 +80,12 @@ export function parseChatMarkdown(markdown: string): MarkdownBlock[] {
   return blocks;
 }
 
-function parseInline(text: string): InlineNode[] {
+function parseInline(text: string, allowLinks = true): InlineNode[] {
   const nodes: InlineNode[] = [];
   let index = 0;
 
   while (index < text.length) {
-    const next = findNextToken(text, index);
+    const next = findNextToken(text, index, allowLinks);
     if (!next) {
       nodes.push({ type: "text", text: text.slice(index) });
       break;
@@ -92,15 +102,12 @@ function parseInline(text: string): InlineNode[] {
   return mergeTextNodes(nodes);
 }
 
-function findNextToken(
-  text: string,
-  from: number
-): { start: number; end: number; node: InlineNode } | null {
+function findNextToken(text: string, from: number, allowLinks: boolean): InlineToken | null {
   const candidates = [
-    findDelimitedToken(text, from, "**", "bold"),
-    findDelimitedToken(text, from, "*", "italic"),
-    findInternalLinkToken(text, from),
-  ].filter(Boolean) as Array<{ start: number; end: number; node: InlineNode }>;
+    findDelimitedToken(text, from, "**", "bold", allowLinks),
+    findDelimitedToken(text, from, "*", "italic", allowLinks),
+    ...(allowLinks ? [findMarkdownLinkToken(text, from), findBarePortalToken(text, from)] : []),
+  ].filter((token): token is InlineToken => token !== null);
 
   candidates.sort((a, b) => a.start - b.start);
   return candidates[0] ?? null;
@@ -110,51 +117,70 @@ function findDelimitedToken(
   text: string,
   from: number,
   delimiter: "*" | "**",
-  type: "bold" | "italic"
-): { start: number; end: number; node: InlineNode } | null {
+  type: "bold" | "italic",
+  allowLinks: boolean,
+): InlineToken | null {
   const start = text.indexOf(delimiter, from);
   if (start === -1) return null;
   if (delimiter === "*" && text[start + 1] === "*") {
-    return findDelimitedToken(text, start + 2, delimiter, type);
+    return findDelimitedToken(text, start + 2, delimiter, type, allowLinks);
   }
 
   const contentStart = start + delimiter.length;
   const end = text.indexOf(delimiter, contentStart);
   if (end === -1 || end === contentStart) return null;
   if (delimiter === "*" && text[end + 1] === "*") {
-    return findDelimitedToken(text, end + 2, delimiter, type);
+    return findDelimitedToken(text, end + 2, delimiter, type, allowLinks);
   }
 
   return {
     start,
     end: end + delimiter.length,
-    node: { type, children: parseInline(text.slice(contentStart, end)) },
+    node: { type, children: parseInline(text.slice(contentStart, end), allowLinks) },
   };
 }
 
-function findInternalLinkToken(text: string, from: number): { start: number; end: number; node: InlineNode } | null {
+function findStudentPortal(href: string) {
+  return studentPortals.find((portal) => href === portal.href || href === portal.href.slice(0, -1));
+}
+
+function findMarkdownLinkToken(text: string, from: number): InlineToken | null {
   const pattern = /\[([^\]]+)\]\(([^)]+)\)/g;
   pattern.lastIndex = from;
+  const match = pattern.exec(text);
+  if (!match) return null;
 
-  for (const match of text.matchAll(pattern)) {
-    const href = match[2];
-    let decodedHref: string;
-    try {
-      decodedHref = decodeURIComponent(href);
-    } catch {
-      continue;
-    }
-    if (href !== href.trim() || !href.startsWith("/") || href.startsWith("//") || decodedHref.startsWith("//")) {
-      continue;
-    }
-
-    return {
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      node: { type: "link", href, children: parseInline(match[1]) },
-    };
+  const [syntax, label, href] = match;
+  const portal = findStudentPortal(href);
+  let node: InlineNode = { type: "text", text: syntax };
+  if (portal) {
+    node = { type: "portal", portal };
+  } else if (isInternalHref(href)) {
+    node = { type: "link", href, children: parseInline(label, false) };
   }
+  // Consume rejected Markdown as a unit, even if its label contains a portal URL.
+  return { start: match.index, end: match.index + syntax.length, node };
+}
 
+function isInternalHref(href: string): boolean {
+  if (href !== href.trim() || !href.startsWith("/")) return false;
+  try {
+    return !/^\/\s*[/\\]/.test(decodeURIComponent(href));
+  } catch {
+    return false;
+  }
+}
+
+function findBarePortalToken(text: string, from: number): InlineToken | null {
+  const pattern = /(?<=^|[\s([{<"'“‘])https?:\/\/[^\s<>"'”’]+/gi;
+  pattern.lastIndex = from;
+  for (const match of text.matchAll(pattern)) {
+    const url = match[0].replace(/[.,!)\]}]+$/, "");
+    const portal = findStudentPortal(url);
+    if (portal) {
+      return { start: match.index, end: match.index + url.length, node: { type: "portal", portal } };
+    }
+  }
   return null;
 }
 
@@ -176,6 +202,19 @@ function renderInline(nodes: InlineNode[], keyPrefix: string): ReactNode[] {
     if (node.type === "text") return node.text;
     if (node.type === "bold") return <strong key={key}>{renderInline(node.children, key)}</strong>;
     if (node.type === "italic") return <em key={key}>{renderInline(node.children, key)}</em>;
+    if (node.type === "portal") {
+      return (
+        <a
+          key={key}
+          href={node.portal.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-11 max-w-full items-center rounded-md px-2 align-middle font-medium text-primary underline underline-offset-2 hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          {node.portal.label}
+        </a>
+      );
+    }
     return (
       <Link key={key} href={node.href} className="font-medium text-primary underline-offset-2 hover:underline">
         {renderInline(node.children, key)}
@@ -188,7 +227,7 @@ export function ChatMarkdown({ content }: { content: string }) {
   const blocks = parseChatMarkdown(content);
 
   return (
-    <div className="space-y-2 text-sm">
+    <div className="space-y-2 text-sm [overflow-wrap:anywhere]">
       {blocks.map((block, index) => {
         if (block.type === "paragraph") {
           return (
