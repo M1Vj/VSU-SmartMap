@@ -25,6 +25,18 @@ Do not link the university directions or location-and-facilities pages until rev
 
 Smoke cases: unknown room code returns no made-up pin; a Tolosa question does not silently route to Baybay; library “open now” does not assert live hours; “Where do I open a quiz or virtual class?” points to VSUEE, while personalized grades go to my.VSU without asking for an ID; and student schedules preserve only supported room and event details.
 
+## Rehearse the operator SQL offline
+
+Use Node 22 and two trusted, clean local checkouts. The first checkout must contain the pre-refresh seed; for this change use commit `18cc334e48c490f009f58de7f6b92b611df360de`. The second checkout contains the candidate, including the script below. Install the pinned fixture dependency from your trusted npm registry into a temporary directory:
+
+```sh
+fixture="$(mktemp -d)"
+npm install --prefix "$fixture" --no-audit --no-fund --ignore-scripts @electric-sql/pglite@0.6.0
+node tools/qa/rehearse-knowledge-refresh.mjs /path/to/pre-refresh-checkout "$PWD" "$fixture"
+```
+
+Run this from the candidate checkout. Both tests use in-memory databases with synthetic editorial edits. The second test commits only in memory and checks default rollback, guarded application, preservation of skipped rows and a no-op second application. This does not exercise hosted PostgreSQL, RLS, concurrent operators, or live data. The standard database CI job does not run this script.
+
 ## Gemini default and configured fallbacks
 
 The code fallback order is `gemini-3.5-flash-lite` then `gemini-3.1-flash-lite`. A supported explicit `GEMINI_MODEL_IDS` list preserves its order, so changing the checked-in example does not change a deployment setting. Use exact supported model IDs; set any higher-cost Flash model explicitly. `gemini-2.5-flash-lite` remains opt-in for existing providers that still have access, not the default. The older `gemini-2.5-flash` alias is normalized to `gemini-3.5-flash-lite` rather than depending on Google's December 1 redirect. The old `gemini-3.5-flash` alias is not automatically upgraded to higher-priced Flash.
