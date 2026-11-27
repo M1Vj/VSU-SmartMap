@@ -27,6 +27,7 @@ const child = spawn(
     ...testFiles.map((filePath) =>
       toNodeTestArgument(filePath, nodeMajorVersion),
     ),
+    "tools/map-attribution.test.mjs",
     ...process.argv.slice(2),
   ],
   { stdio: "inherit" },

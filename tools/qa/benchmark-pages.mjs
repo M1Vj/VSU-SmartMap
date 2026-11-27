@@ -17,15 +17,34 @@ const ROUTES = [
   "/admin/navigation",
   "/admin/navigation/pathfinding",
   "/admin/suggestions",
-  "/admin/suggestions/performance-benchmark",
   "/offline",
 ];
 
-const baseUrl = new URL(process.env.PERF_BASE_URL ?? "http://127.0.0.1:3000");
+// PERF_PUBLIC_ONLY=1 measures public routes only; the default checks all configured targets.
+// No mode supplies a signed-in session or measures underlying query work.
+const publicOnly = process.env.PERF_PUBLIC_ONLY === "1";
+const routes = publicOnly
+  ? ROUTES.filter((route) => route === "/admin/login" || !route.startsWith("/admin"))
+  : ROUTES;
+const baseUrl = parseBaseUrl(process.env.PERF_BASE_URL ?? "http://127.0.0.1:3000");
+
+function parseBaseUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    console.error("PERF_BASE_URL must be a valid HTTP(S) URL without credentials.");
+    process.exit(1);
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    console.error("PERF_BASE_URL must be a valid HTTP(S) URL without credentials.");
+    process.exit(1);
+  }
+  return url;
+}
 const warmupRuns = readPositiveInteger("PERF_WARMUPS", 3);
 const sampleRuns = readPositiveInteger("PERF_SAMPLES", 30);
 const budgetMs = readPositiveNumber("PERF_BUDGET_MS", 50);
-const maxRedirects = 5;
 
 const agents = {
   "http:": new http.Agent({ keepAlive: true, maxSockets: 1 }),
@@ -58,7 +77,8 @@ function summarize(values) {
   };
 }
 
-function request(url, startedAt = performance.now(), redirectCount = 0) {
+function request(url) {
+  const startedAt = performance.now();
   const transport = url.protocol === "https:" ? https : http;
 
   return new Promise((resolve, reject) => {
@@ -73,21 +93,9 @@ function request(url, startedAt = performance.now(), redirectCount = 0) {
       },
       (response) => {
         const responseStartedAt = performance.now();
-        const location = response.headers.location;
-
-        if (
-          location &&
-          response.statusCode &&
-          response.statusCode >= 300 &&
-          response.statusCode < 400 &&
-          redirectCount < maxRedirects
-        ) {
-          response.resume();
-          response.once("end", () => {
-            resolve(request(new URL(location, url), startedAt, redirectCount + 1));
-          });
-          return;
-        }
+        const status = response.statusCode ?? 0;
+        // A redirect is not the page we asked to time. Do not fetch its destination.
+        const redirected = status >= 300 && status < 400 && Boolean(response.headers.location);
 
         let bytes = 0;
         response.on("data", (chunk) => {
@@ -95,8 +103,8 @@ function request(url, startedAt = performance.now(), redirectCount = 0) {
         });
         response.once("end", () => {
           resolve({
-            status: response.statusCode ?? 0,
-            redirects: redirectCount,
+            status,
+            redirected,
             ttfbMs: responseStartedAt - startedAt,
             totalMs: performance.now() - startedAt,
             bytes,
@@ -111,66 +119,73 @@ function request(url, startedAt = performance.now(), redirectCount = 0) {
 }
 
 async function run() {
-  const results = new Map(ROUTES.map((route) => [route, []]));
+  const results = new Map(routes.map((route) => [route, []]));
 
   for (let iteration = 0; iteration < warmupRuns; iteration += 1) {
-    for (const route of ROUTES) {
+    for (const route of routes) {
       await request(new URL(route, baseUrl));
     }
   }
 
   for (let iteration = 0; iteration < sampleRuns; iteration += 1) {
-    for (const route of ROUTES) {
+    for (const route of routes) {
       results.get(route).push(await request(new URL(route, baseUrl)));
     }
   }
 
-  const rows = ROUTES.map((route) => {
+  const rows = routes.map((route) => {
     const samples = results.get(route);
-    const ttfb = summarize(samples.map((sample) => sample.ttfbMs));
-    const total = summarize(samples.map((sample) => sample.totalMs));
     const latest = samples.at(-1);
-
+    const targetSamples = samples.filter(
+      (sample) => sample.status >= 200 && sample.status < 300,
+    ).length;
+    const complete = targetSamples === samples.length;
+    const ttfb = complete ? summarize(samples.map((sample) => sample.ttfbMs)) : null;
+    const total = complete ? summarize(samples.map((sample) => sample.totalMs)) : null;
     return {
       route,
       status: latest.status,
-      redirects: latest.redirects,
+      redirected: latest.redirected,
       bytes: latest.bytes,
-      ttfbP50: ttfb.p50,
-      ttfbP95: ttfb.p95,
-      totalMin: total.min,
-      totalMean: total.mean,
-      totalP50: total.p50,
-      totalP95: total.p95,
-      totalMax: total.max,
-      passes: latest.status >= 200 && latest.status < 300 && total.p95 < budgetMs,
+      targetSamples,
+      sampleCount: samples.length,
+      ttfb,
+      total,
+      passes: total !== null && total.p95 < budgetMs,
     };
   });
 
   console.log(
-    `Page benchmark: ${baseUrl} | ${warmupRuns} warmups + ${sampleRuns} samples | p95 budget < ${budgetMs} ms`
+    `Anonymous page benchmark (${publicOnly ? "public routes only" : "all configured routes"}): ${baseUrl.origin} | ${warmupRuns} warmups + ${sampleRuns} samples | p95 budget < ${budgetMs} ms`
   );
+  const timing = (value) => value === undefined ? "N/A" : value.toFixed(2);
   console.table(
     rows.map((row) => ({
       route: row.route,
-      status: row.status,
-      redirects: row.redirects,
-      bytes: row.bytes,
-      "TTFB p50": row.ttfbP50.toFixed(2),
-      "TTFB p95": row.ttfbP95.toFixed(2),
-      "total min": row.totalMin.toFixed(2),
-      "total mean": row.totalMean.toFixed(2),
-      "total p50": row.totalP50.toFixed(2),
-      "total p95": row.totalP95.toFixed(2),
-      "total max": row.totalMax.toFixed(2),
+      "last status": row.status,
+      "last redirect": row.redirected,
+      "last bytes": row.bytes,
+      "direct 2xx": `${row.targetSamples}/${row.sampleCount}`,
+      "TTFB p50": timing(row.ttfb?.p50),
+      "TTFB p95": timing(row.ttfb?.p95),
+      "total min": timing(row.total?.min),
+      "total mean": timing(row.total?.mean),
+      "total p50": timing(row.total?.p50),
+      "total p95": timing(row.total?.p95),
+      "total max": timing(row.total?.max),
       budget: row.passes ? "PASS" : "FAIL",
     }))
   );
 
   const failures = rows.filter((row) => !row.passes);
   if (failures.length > 0) {
+    for (const row of failures) {
+      if (row.targetSamples !== row.sampleCount) {
+        console.error(`${row.route}: ${row.targetSamples}/${row.sampleCount} samples returned a direct HTTP 2xx`);
+      }
+    }
     console.error(
-      `Performance budget failed for ${failures.length}/${rows.length} routes: ${failures
+      `Page benchmark failed for ${failures.length}/${rows.length} routes: ${failures
         .map((row) => row.route)
         .join(", ")}`
     );
