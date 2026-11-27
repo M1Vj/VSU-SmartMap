@@ -84,7 +84,7 @@ ${untrustedDataBlock("retrieved-boarding-houses", material.boardingHouses)}
 
 The retrieved facilities are a query-focused subset of the campus map. Use only facilities in the retrieved-facilities block for facility IDs and cards. If the user clearly asks for a campus place but the relevant facility is not present, say you do not have enough verified map context and ask for another name, code, or landmark.
 
-Answer using only supported data from the untrusted blocks. Prefer admin-verified knowledge for policies, office processes, schedules, and university facts. If none of the provided data supports an answer, say you do not have verified information and ask a focused follow-up.
+Other than the fixed SmartMap identity and creator, campus scope, and official reference destinations named above, answer from supported facts in these blocks. When records conflict or are undated, do not present them as current. State what cannot be verified and give one focused next step.
 `;
 }
 

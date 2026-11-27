@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test, { mock, type TestContext } from "node:test";
 
 import { apiKeyManager } from "../api-key-manager.ts";
-import { CHAT_MODEL_IDS } from "../gemini.ts";
 import { LocationResponseSchema } from "../schemas/location.ts";
 
 let facilityReads = 0;
@@ -24,7 +23,23 @@ mock.module("@/lib/actions/events", {
   namedExports: { getEventsCached: async () => { eventReads += 1; return { data: [] }; } },
 });
 
-const flowModule = import("./find-location.ts");
+// Exercise the six-call budget against four legitimate IDs using mock fetches only.
+// These are test overrides, not the lower-cost runtime defaults.
+const CHAT_MODEL_IDS = [
+  "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash",
+];
+const flowModule = (async () => {
+  const previous = process.env.GEMINI_MODEL_IDS;
+  process.env.GEMINI_MODEL_IDS = CHAT_MODEL_IDS.join(",");
+  try {
+    const configured = await import("../gemini.ts");
+    assert.deepEqual(configured.CHAT_MODEL_IDS, CHAT_MODEL_IDS);
+    return await import("./find-location.ts");
+  } finally {
+    if (previous === undefined) delete process.env.GEMINI_MODEL_IDS;
+    else process.env.GEMINI_MODEL_IDS = previous;
+  }
+})();
 
 test("renderGroundedChatPrompt marks every dynamic section as untrusted JSON data", async () => {
   const { renderGroundedChatPrompt } = await flowModule;
@@ -170,7 +185,9 @@ test("actual Gemini adapter sends a structured request; synthetic mode reads no 
     const body = JSON.parse(String(init.body));
     assert.match(body.contents[0].parts[0].text, /retrieved-facilities[^>]*>\[\]/);
     assert.match(body.contents[0].parts[0].text, /Synthetic health check/);
-    assert.equal(body.generationConfig.temperature, 0.3);
+    for (const removed of ["temperature", "topP", "topK", "candidateCount"]) {
+      assert.equal(removed in body.generationConfig, false, `unexpected sampling control: ${removed}`);
+    }
     assert.equal(body.generationConfig.maxOutputTokens, 1024);
     assert.equal(body.generationConfig.responseMimeType, "application/json");
     const sentSchema = body.generationConfig.responseJsonSchema;
