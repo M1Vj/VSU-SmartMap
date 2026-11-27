@@ -46,7 +46,7 @@ test("chat route gates caching and validates the completed generation before car
 test("SSE uses one completed generation and caches the same validated live payload", () => {
   assert.doesNotMatch(routeSource, /streamFindLocation|stream\.stream|stream\.response/);
   assert.doesNotMatch(routeSource, /generated_fallback/);
-  assert.match(routeSource, /if \(streaming\) \{[\s\S]{0,500}buildFinalChatPayload\(message, context, request\.signal\)/);
+  assert.match(routeSource, /if \(streaming\) \{[\s\S]{0,500}buildFinalChatPayload\(message, context, requestTime, request\.signal\)/);
   assert.match(routeSource, /enqueueSse\(controller, \{ type: "chunk", content: payload\.content \}\)/);
   assert.match(routeSource, /finalizeTurn\(session, payload, "live", \{ cacheState: "miss" \}\)/);
   assert.match(routeSource, /cacheSuccessfulFinalPayload\(questionHash, message, payload\)/);

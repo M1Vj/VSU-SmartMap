@@ -1,4 +1,4 @@
-import { z } from "genkit";
+import { z } from "zod";
 
 export const LocationQuerySchema = z.object({
   query: z.string().describe("The user's natural language query about a location"),
