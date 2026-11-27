@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CHAT_OPS_MODEL_FILTER_IDS } from "@/lib/ai/model-policy";
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const ALLOWED_OUTCOMES = new Set(["live", "cached", "recovered", "generated_fallback", "static_fallback", "disabled_fallback", "rate_limited", "validation_failed", "error", "synthetic"]);
-const ALLOWED_MODELS = new Set(["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash"]);
+const ALLOWED_MODELS = new Set<string>(CHAT_OPS_MODEL_FILTER_IDS);
 const ALLOWED_VALIDATION = new Set(["pass", "warn", "fail"]);
 export const CHAT_OPS_REVIEW_STATUSES = ["unreviewed", "reviewing", "resolved", "dismissed"] as const;
 const ALLOWED_REVIEW = new Set<string>(CHAT_OPS_REVIEW_STATUSES);
