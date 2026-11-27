@@ -17,7 +17,7 @@ export function getAiModelLadder(env: ModelEnvironment = process.env): string[] 
 }
 
 export const AI_RELEASE_BINDINGS: Readonly<AiReleaseBindings> = Object.freeze({
-  promptVersion: "chat-prompt-v4",
+  promptVersion: "chat-prompt-v5",
   schemaVersion: "chat-schema-v1",
   retrievalVersion: "chat-retrieval-v2",
   cacheVersion: "chat-cache-v3",
