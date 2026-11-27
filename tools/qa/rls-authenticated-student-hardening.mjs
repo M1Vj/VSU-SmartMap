@@ -81,6 +81,11 @@ async function main() {
   const service = client(url, serviceKey);
   const suffix = randomUUID();
   let seededSuggestionId = null;
+  let cleanupEventSuggestions = false;
+  const eventSuggestionFixtures = ["student", "owner", "unowned"].map((role) => ({
+    id: randomUUID(),
+    title: `Local event suggestion ${role} ${suffix}`,
+  }));
   let triggerListingId = null;
   let triggerReviewId = null;
   let triggerOwnerProfileId = null;
@@ -382,6 +387,48 @@ async function main() {
       payload: { name: "Forbidden" },
     })),
   );
+  const [fixtureStudentIdentity, fixtureOwnerIdentity] = await Promise.all([
+    student.auth.getUser(),
+    owner.auth.getUser(),
+  ]);
+  const fixtureStudentId = fixtureStudentIdentity.data.user?.id;
+  const fixtureOwnerId = fixtureOwnerIdentity.data.user?.id;
+  if (fixtureStudentIdentity.error || fixtureOwnerIdentity.error || !fixtureStudentId || !fixtureOwnerId || fixtureStudentId === fixtureOwnerId) {
+    throw new Error("Expected two distinct local event suggestion participants.");
+  }
+
+  const submitters = [fixtureStudentId, fixtureOwnerId, null];
+  cleanupEventSuggestions = true;
+  const seededEvents = await service.from("event_suggestions").insert(
+    eventSuggestionFixtures.map((fixture, index) => ({
+      ...fixture,
+      submitted_by: submitters[index],
+      start_time: "2035-01-01T01:00:00.000Z",
+      end_time: "2035-01-01T02:00:00.000Z",
+    })),
+  );
+  if (seededEvents.error) {
+    throw new Error("Unable to seed the local event suggestion visibility fixtures.");
+  }
+
+  const eventFixtureIds = eventSuggestionFixtures.map((fixture) => fixture.id);
+  const actorExpectations = [
+    ["anonymous", anon, []],
+    ["student submitter", student, [eventFixtureIds[0]]],
+    ["owner submitter", owner, [eventFixtureIds[1]]],
+    ["admin reviewer", admin, eventFixtureIds],
+  ];
+  for (const [label, actor, expectedIds] of actorExpectations) {
+    const result = await actor.from("event_suggestions").select("id").in("id", eventFixtureIds);
+    const actualIds = Array.isArray(result.data) ? result.data.map((row) => row.id).sort() : null;
+    check(
+      `${label} sees exactly the allowed event suggestion fixtures`,
+      !result.error
+        && actualIds !== null
+        && JSON.stringify(actualIds) === JSON.stringify([...expectedIds].sort()),
+    );
+  }
+
   check(
     "student cannot call cleanup RPC",
     denied(await student.rpc("delete_expired_verification_documents")),
@@ -810,6 +857,19 @@ async function main() {
         .update({ display_name: originalOwnerDisplayName })
         .eq("id", triggerOwnerProfileId);
       check("cleanup restores the owner display name", !cleanup.error, cleanup.error?.message);
+    }
+    if (cleanupEventSuggestions) {
+      const eventIds = eventSuggestionFixtures.map((fixture) => fixture.id);
+      const eventTitles = eventSuggestionFixtures.map((fixture) => fixture.title);
+      const eventCleanup = await service.from("event_suggestions").delete()
+        .in("id", eventIds).in("title", eventTitles);
+      const remainingEventFixtures = await service.from("event_suggestions").select("id")
+        .in("id", eventIds);
+      check(
+        "cleanup removes only the generated event suggestion fixtures",
+        !eventCleanup.error && !remainingEventFixtures.error
+          && Array.isArray(remainingEventFixtures.data) && remainingEventFixtures.data.length === 0,
+      );
     }
     if (seededSuggestionId) {
       const cleanup = await service.from("suggestions").delete().eq("id", seededSuggestionId);
