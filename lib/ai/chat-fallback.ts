@@ -30,21 +30,21 @@ export function shouldUseChatFallback(errorMessage: string): boolean {
 const OTHER_CAMPUS_NAMES = String.raw`alang(?:[\s–—-]*)alang|isabel|tolosa|villaba`;
 const CAMPUS_NAMES = `${OTHER_CAMPUS_NAMES}|baybay|main|visca`;
 const UNIVERSITY = String.raw`(?:vsu|visayas\s+state\s+university)`;
-const CAMPUS_LABEL = String.raw`(${CAMPUS_NAMES})(?:\s+campus)?`;
+const CAMPUS_LABEL = String.raw`(${CAMPUS_NAMES})(?:\s+(?:campus|branch(?:\s+campus)?))?`;
 const CAMPUS_REFERENCE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}_])(?:${UNIVERSITY}(?:(?:[\s–—-]+|\s*[:,]\s*)${CAMPUS_LABEL}|(?:\s*[:,])?\s*\(\s*${CAMPUS_LABEL}\s*\))|(${CAMPUS_NAMES})\s+(?:campus|branch\s+of\s+${UNIVERSITY}))(?![\p{L}\p{N}_])`,
+  String.raw`(?<![\p{L}\p{N}_])(?:${UNIVERSITY}(?:(?:[\s–—-]+|\s*[:,]\s*|[’\x27]s\s+(?=(?:${CAMPUS_NAMES})\s+(?:campus|branch)\b))${CAMPUS_LABEL}|(?:\s*[:,])?\s*\(\s*${CAMPUS_LABEL}\s*\))|(${CAMPUS_NAMES})\s+(?:campus|branch(?:\s+campus)?\s+of\s+${UNIVERSITY}))(?![\p{L}\p{N}_])`,
   "giu",
 );
 const MAIN_CAMPUS_NAMES = new Set(["baybay", "main", "visca"]);
-const FROM = /\b(?:from|(?:gikan|mula)\s+sa)\s*$/i;
-const DESTINATION_FOLLOWS = /^\s*(?:,?\s*(?:to|(?:padulong|paingon|adto|papunta)\s+sa)\b|,\s*(?:where|asa)\b)/i;
-const EXPLICIT_ORIGIN = /\b(?:coming|starting)\s+from\s*$/i;
+const FROM = /\b(?:from|(?:gikan|mula)\s+sa)\s+(?:the\s+)?$/i;
+const DESTINATION_FOLLOWS = /^\s*(?:,?\s*(?:to|(?:padulong|paingon|adto|papunta)\s+sa)\b|,\s*(?:where|asa)\b|,\s*how\s+(?:do|can)\s+i\s+(?:get|go)\s+to\b)/i;
+const EXPLICIT_ORIGIN = /\b(?:coming|starting)\s+from\s+(?:the\s+)?$/i;
 const ALTERNATIVE_PREFIX = String.raw`^(?:\s+|\s*,\s*)(?:or|o)\b`;
 const ALTERNATIVE_BEGIN = new RegExp(ALTERNATIVE_PREFIX, "i");
 const REQUEST_TAIL = String.raw`(?:please|if\s+you\s+know)`;
 const BARE_LABEL_END = String.raw`(?=\s*,(?:\s|$|${REQUEST_TAIL}\b)|(?:\s+${REQUEST_TAIL})?\s*[?!.]*\s*$)`;
 const BARE_CAMPUS_ALTERNATIVE = new RegExp(
-  String.raw`${ALTERNATIVE_PREFIX}\s+(?:(?:at|in|sa)\s+)?${CAMPUS_LABEL}${BARE_LABEL_END}`, "i",
+  String.raw`${ALTERNATIVE_PREFIX}\s+(?:(?:at|in|sa)\s+)?${CAMPUS_LABEL}(?:${BARE_LABEL_END}|(?=\s+(?:ba\s+)?ang\b|\s+ba${BARE_LABEL_END}))`, "i",
 );
 const NON_MAIN_TOWN_IN_DESTINATION = new RegExp(
   String.raw`(?<![\p{L}\p{N}_])(?:in|at|sa)\s+(?:${OTHER_CAMPUS_NAMES})${BARE_LABEL_END}`, "iu",
