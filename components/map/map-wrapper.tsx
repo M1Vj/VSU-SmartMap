@@ -23,7 +23,11 @@ import {
 } from "@/lib/map/leaflet-continuous-zoom";
 import { createMapViewportSyncScheduler } from "@/lib/map/map-viewport-sync";
 import { VSU_CAMPUS_LEAFLET_BOUNDS } from "@/lib/map/vsu-campus-boundary";
-import { createTileFallbackState, recordTileError } from "@/lib/map/tile-fallback";
+import {
+  createTileFallbackState,
+  isInitialVectorStyleError,
+  recordTileError,
+} from "@/lib/map/tile-fallback";
 import { GPUInitializationError, setWorkerUrl, type Map as MapLibreMap } from "maplibre-gl";
 
 const DEVELOPER_ATTRIBUTION =
@@ -210,18 +214,50 @@ function OpenFreeMapVectorLayer({
     }
     const mapLibreMap = layer.getMaplibreMap();
     mapLibreMapRef.current = mapLibreMap;
+
+    // A style document that fails on first fetch (provider outage, 5xx,
+    // network blip) leaves the MapLibre canvas permanently blank. Watch only
+    // the initial style load and hand the map back to the raster fallback;
+    // tile/source errors that arrive later are normal and stay on vector.
+    let disposed = false;
+    let initialStyleLoaded = Boolean(mapLibreMap.isStyleLoaded());
+    const handleStyleLoad = () => {
+      initialStyleLoaded = true;
+      mapLibreMap.off("error", handleMapError);
+    };
+    const handleMapError = (event: {
+      error?: { url?: unknown; message?: unknown };
+      sourceId?: string;
+    }) => {
+      if (disposed) return;
+
+      const hasStyle = Boolean(mapLibreMap.getStyle());
+      if (!isInitialVectorStyleError(event, styleUrl, { initialStyleLoaded, hasStyle })) return;
+
+      disposed = true;
+      mapLibreMap.off("error", handleMapError);
+      mapLibreMap.off("style.load", handleStyleLoad);
+      onRendererUnavailable();
+    };
     const customizeVectorLayer = () => {
+      initialStyleLoaded = true;
+      mapLibreMap.off("error", handleMapError);
       hideNonPlaceTextLabels(mapLibreMap);
       add3dBuildingsLayer(mapLibreMap);
     };
 
-    if (mapLibreMap.isStyleLoaded()) {
+    if (initialStyleLoaded) {
       customizeVectorLayer();
     } else {
+      mapLibreMap.once("style.load", handleStyleLoad);
+      mapLibreMap.on("error", handleMapError);
       mapLibreMap.once("load", customizeVectorLayer);
     }
 
     return () => {
+      disposed = true;
+      mapLibreMap.off("style.load", handleStyleLoad);
+      mapLibreMap.off("error", handleMapError);
       mapLibreMap.off("load", customizeVectorLayer);
       if (mapLibreMapRef.current === mapLibreMap) mapLibreMapRef.current = null;
       layer.remove();

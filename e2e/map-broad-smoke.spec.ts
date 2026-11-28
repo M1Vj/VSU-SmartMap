@@ -292,3 +292,168 @@ test.describe("MapLibre raster fallback smoke", () => {
     });
   }
 });
+
+
+test.describe("MapLibre initial style failure smoke", () => {
+  test.use({ serviceWorkers: "block", viewport: mobileViewport });
+
+  const cases = [
+    { theme: "light", stylePath: "/styles/liberty", attribution: "OpenStreetMap",
+      tiles: /^https:\/\/tile\.openstreetmap\.org\/\d+\/\d+\/\d+\.png$/ },
+    { theme: "dark", stylePath: "/styles/dark", attribution: "CARTO",
+      tiles: /^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/\d+\/\d+\/\d+(?:@2x)?\.png$/ },
+  ] as const;
+
+  for (const { theme, stylePath, attribution, tiles } of cases) {
+    test(`falls back to the ${theme} raster basemap when the initial vector style fails`, async ({ page, context }) => {
+      if (!baseUrl) throw new Error("MAP_E2E_BASE_URL must point to a running map build");
+      const appOrigin = new URL(baseUrl).origin;
+      await context.addInitScript(({ origin, theme }) => {
+        if (window.location.origin !== origin) return;
+        localStorage.setItem("vsu-map-style", "vector");
+        localStorage.setItem("theme", theme);
+      }, { origin: appOrigin, theme });
+
+      const tile = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGMUea3GQApgIkn1qIZRDUNKAwCzMQFF9XckQQAAAABJRU5ErkJggg==", "base64");
+      await context.route("**/*", (route) => {
+        const url = new URL(route.request().url());
+        if (url.origin === appOrigin) return route.continue();
+        if (url.origin === "https://tiles.openfreemap.org" && url.pathname === stylePath) {
+          // The provider is down for the style document itself, not for a tile.
+          return route.fulfill({
+            status: 503,
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: "style unavailable",
+          });
+        }
+        if (url.pathname.startsWith("/rest/v1/")) {
+          // Map rendering does not depend on seeded campus data. Answer the
+          // PostgREST reads so an unseeded deployment does not cover the map
+          // with its "Unable to load map data" notice.
+          if (route.request().method() === "OPTIONS") {
+            return route.fulfill({
+              status: 204,
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+              },
+            });
+          }
+          return route.fulfill({
+            json: [],
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        }
+        if (!tiles.test(url.toString())) return route.abort();
+        return route.fulfill({
+          contentType: "image/png",
+          headers: { "Access-Control-Allow-Origin": "*" },
+          body: tile,
+        });
+      });
+
+      await openMap(page);
+      await expect.poll(() => compositedPixels(page, [20, 235, 38]), {
+        timeout: 15_000,
+        message: "A failed initial vector style should hand the map to the raster basemap",
+      }).toBeGreaterThan(400);
+      const map = page.locator(".leaflet-container");
+      await expect(map.locator(".leaflet-gl-layer")).toHaveCount(0);
+      await expect(map.locator(".leaflet-control-attribution")
+        .getByRole("link", { name: attribution, exact: true })).toBeVisible();
+      await expect(map.getByRole("button", { name: "Zoom in", exact: true })).toBeEnabled();
+    });
+  }
+});
+
+test.describe("MapLibre late tile failure smoke", () => {
+  test.use({ serviceWorkers: "block", viewport: mobileViewport });
+
+  test("keeps the vector basemap when only a vector tile fails after the style loads", async ({ page, context }) => {
+    if (!baseUrl) throw new Error("MAP_E2E_BASE_URL must point to a running map build");
+    const appOrigin = new URL(baseUrl).origin;
+
+    const fixtureStyle = {
+      version: 8,
+      sources: {
+        openmaptiles: {
+          type: "vector",
+          tiles: ["https://tiles.openfreemap.org/fixture/{z}/{x}/{y}.pbf"],
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      },
+      layers: [
+        {
+          id: "smoke-campus-background",
+          type: "background",
+          paint: { "background-color": "#fd00f9" },
+        },
+      ],
+    };
+
+    await context.addInitScript((origin) => {
+      if (window.location.origin === origin) localStorage.setItem("vsu-map-style", "vector");
+    }, appOrigin);
+    const rasterRequests: string[] = [];
+    await context.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === appOrigin) return route.continue();
+      if (
+        url.origin === "https://tiles.openfreemap.org" &&
+        ["/styles/liberty", "/styles/dark"].includes(url.pathname)
+      ) {
+        return route.fulfill({
+          json: fixtureStyle,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      if (url.origin === "https://tiles.openfreemap.org") {
+        // Style JSON loads fine; every vector tile in it fails.
+        return route.fulfill({
+          status: 503,
+          headers: { "Access-Control-Allow-Origin": "*" },
+          body: "tile unavailable",
+        });
+      }
+        if (url.pathname.startsWith("/rest/v1/")) {
+          // Map rendering does not depend on seeded campus data. Answer the
+          // PostgREST reads so an unseeded deployment does not cover the map
+          // with its "Unable to load map data" notice.
+          if (route.request().method() === "OPTIONS") {
+            return route.fulfill({
+              status: 204,
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+              },
+            });
+          }
+          return route.fulfill({
+            json: [],
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        }
+      if (/(^|\.)(tile\.openstreetmap\.org|basemaps\.cartocdn\.com)$/.test(url.hostname)) {
+        rasterRequests.push(url.toString());
+      }
+      return route.abort();
+    });
+
+    await openMap(page);
+    await expect.poll(() => compositedPixels(page, [253, 0, 249]), {
+      timeout: 15_000,
+      message: "The vector style should render even while its tiles fail",
+    }).toBeGreaterThan(400);
+    const map = page.locator(".leaflet-container");
+    await expect(map.locator(".leaflet-gl-layer")).toHaveCount(1);
+    await expect(map.locator(".leaflet-control-attribution")
+      .getByRole("link", { name: "OpenFreeMap", exact: true })).toBeVisible();
+    // Let the failing tile requests surface before asserting the map stayed put.
+    await page.waitForTimeout(2_000);
+    await expect(map.locator(".leaflet-gl-layer")).toHaveCount(1);
+    expect(rasterRequests).toEqual([]);
+  });
+});
